@@ -75,11 +75,27 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.material.icons.rounded.Subtitles
+import androidx.compose.ui.platform.LocalContext
+import app.hushcast.automute.dsp.ReadinessBadge
+import app.hushcast.automute.storage.AutoMuteDatabase
+import app.hushcast.automute.storage.BlobCodec
+import app.hushcast.automute.storage.MuteRuleEntity
+import app.hushcast.automute.storage.WordIndexBlob
+import app.hushcast.automute.storage.toDomain
+import app.hushcast.automute.worker.EpisodeAnalysisWorker
 import app.podiumpodcasts.podium.R
+import app.podiumpodcasts.podium.background.HushCastEngineBridge
 import app.podiumpodcasts.podium.ui.component.common.SwitchableDynamicMaterialExpressiveTheme
+import app.podiumpodcasts.podium.ui.component.media.AnnotatedScrubberOverlay
+import app.podiumpodcasts.podium.ui.component.media.CastingBypassNoticeBanner
+import app.podiumpodcasts.podium.ui.component.media.EpisodeReadinessBadge
+import app.podiumpodcasts.podium.ui.component.media.OneTapUndoAdSkipBanner
+import app.podiumpodcasts.podium.ui.component.media.SyncedTranscriptCard
 import app.podiumpodcasts.podium.ui.custom.icons.Forward
 import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
 import app.podiumpodcasts.podium.ui.formatPlayerTime
+import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 import app.podiumpodcasts.podium.ui.theme.Typography
 import app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel
@@ -130,6 +146,33 @@ fun MediaPlayerBottomSheet(
     }
 
     val sleepTimerState = vm.getSleepTimerState()
+
+    val context = LocalContext.current
+    val appDb = LocalDatabase.current
+    val autoMuteDb = remember(context) { AutoMuteDatabase.getInstance(context) }
+    val episodeId = vm.metadataEpisodeId ?: ""
+
+    val analysisStatus by autoMuteDb.dao().observeStatus(episodeId).collectAsState(initial = null)
+    val muteEntities by autoMuteDb.dao().observeMuteSegmentsByEpisode(episodeId).collectAsState(initial = emptyList())
+    val adEntities by autoMuteDb.dao().observeAdSegmentsByEpisode(episodeId).collectAsState(initial = emptyList())
+    val pendingUndo by HushCastEngineBridge.pendingUndoEvent.collectAsState()
+    val isCastingExternal by HushCastEngineBridge.isCastingExternal.collectAsState()
+
+    var showTranscript by remember { mutableStateOf(false) }
+    var transcriptBlob by remember(episodeId) { mutableStateOf<WordIndexBlob?>(null) }
+
+    LaunchedEffect(episodeId, analysisStatus?.badge) {
+        if (episodeId.isBlank()) return@LaunchedEffect
+        val idx = autoMuteDb.dao().getWordIndexByEpisode(episodeId)
+        transcriptBlob = idx?.let { runCatching { BlobCodec.decompress(it.compressedBlob) }.getOrNull() }
+    }
+
+    LaunchedEffect(pendingUndo) {
+        if (pendingUndo != null) {
+            delay(6000L)
+            HushCastEngineBridge.clearPendingUndo()
+        }
+    }
 
     var showSleepTimerBottomSheet by remember { mutableStateOf(false) }
     var showSpeedBottomSheet by remember { mutableStateOf(false) }
@@ -284,6 +327,33 @@ fun MediaPlayerBottomSheet(
                                         overflow = TextOverflow.Ellipsis,
                                         style = Typography.bodyMedium
                                     )
+
+                                    Spacer(Modifier.height(6.dp))
+
+                                    val badge = runCatching {
+                                        analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) }
+                                    }.getOrNull() ?: ReadinessBadge.NOT_PROCESSED
+
+                                    EpisodeReadinessBadge(
+                                        badge = badge,
+                                        progressPercent = analysisStatus?.progressPercent ?: 0,
+                                        onAnalyzeNowClick = if (episodeId.isNotBlank()) {
+                                            {
+                                                scope.launch {
+                                                    val bundle = runCatching { appDb.podcastEpisodes().getSync(episodeId) }.getOrNull()
+                                                    val audioPath = bundle?.episode?.craftDownloadFile(context)?.absolutePath
+                                                    if (audioPath != null && java.io.File(audioPath).exists()) {
+                                                        EpisodeAnalysisWorker.enqueueAnalyzeNow(
+                                                            context = context,
+                                                            episodeId = episodeId,
+                                                            audioPath = audioPath,
+                                                            actionMode = HushCastEngineBridge.defaultActionMode
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        } else null
+                                    )
                                 }
                             }
                         }
@@ -293,6 +363,32 @@ fun MediaPlayerBottomSheet(
                         Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        if (isCastingExternal) {
+                            CastingBypassNoticeBanner()
+                            Spacer(Modifier.height(8.dp))
+                        }
+
+                        pendingUndo?.let { undoEvent ->
+                            OneTapUndoAdSkipBanner(
+                                event = undoEvent,
+                                onUndo = {
+                                    vm.seek(undoEvent.jumpedFromMs)
+                                    HushCastEngineBridge.clearPendingUndo()
+                                },
+                                onDismiss = { HushCastEngineBridge.clearPendingUndo() }
+                            )
+                            Spacer(Modifier.height(8.dp))
+                        }
+
+                        val muteWindows = remember(muteEntities) { muteEntities.map { it.toDomain() } }
+                        val adWindows = remember(adEntities) { adEntities.map { it.toDomain() } }
+
+                        AnnotatedScrubberOverlay(
+                            durationMs = vm.currentDuration,
+                            muteWindows = muteWindows,
+                            adWindows = adWindows
+                        )
+
                         Slider(
                             modifier = Modifier.fillMaxWidth(),
                             value = sliderState,
@@ -551,6 +647,62 @@ fun MediaPlayerBottomSheet(
                             )
                         }
                     }
+                    Button(
+                        modifier = Modifier
+                            .heightIn(size)
+                            .padding(4.dp),
+                        contentPadding = ButtonDefaults.contentPaddingFor(size),
+                        shapes = ButtonDefaults.shapesFor(size),
+                        colors = if (showTranscript) ButtonDefaults.buttonColors() else colors,
+                        onClick = { showTranscript = !showTranscript }
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Rounded.Subtitles,
+                                contentDescription = "Transcript",
+                                modifier = Modifier.size(ButtonDefaults.iconSizeFor(size))
+                            )
+                            Spacer(Modifier.size(ButtonDefaults.iconSpacingFor(size)))
+                            Text("Transcript", style = ButtonDefaults.textStyleFor(size))
+                        }
+                    }
+                }
+
+                if (showTranscript) {
+                    val muteWindows = remember(muteEntities) { muteEntities.map { it.toDomain() } }
+                    val adWindows = remember(adEntities) { adEntities.map { it.toDomain() } }
+                    SyncedTranscriptCard(
+                        segments = transcriptBlob?.segments ?: emptyList(),
+                        words = transcriptBlob?.words ?: emptyList(),
+                        muteWindows = muteWindows,
+                        adWindows = adWindows,
+                        currentPositionMs = vm.currentPosition,
+                        onSeekToMs = { ms -> vm.seek(ms) },
+                        onToggleWordMute = { word, mute ->
+                            val clean = word.text.trim().trim('.', ',', '!', '?', '"', '\'')
+                            if (clean.isNotEmpty() && episodeId.isNotBlank()) {
+                                scope.launch {
+                                    if (mute) {
+                                        autoMuteDb.dao().upsertRule(
+                                            MuteRuleEntity(
+                                                pattern = clean,
+                                                actionMode = HushCastEngineBridge.defaultActionMode.name,
+                                                category = "Transcript"
+                                            )
+                                        )
+                                    }
+                                    val sha = analysisStatus?.fileSha256?.takeIf { it.isNotBlank() }
+                                    if (sha != null) {
+                                        app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
+                                            .reevaluateMuteRules(sha, episodeId, defaultActionMode = HushCastEngineBridge.defaultActionMode)
+                                        val updated = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
+                                        HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
                 }
             }
         }

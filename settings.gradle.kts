@@ -19,5 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "podium"
+rootProject.name = "HushCast"
 include(":app")
+include(":core:automute-engine")

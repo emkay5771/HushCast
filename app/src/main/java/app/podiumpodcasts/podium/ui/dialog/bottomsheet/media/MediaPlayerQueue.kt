@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ListItemDefaults
@@ -29,6 +30,8 @@ import app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel
 import app.podiumpodcasts.podium.utils.getEpisodeId
 import app.podiumpodcasts.podium.utils.getOrigin
 import kotlinx.coroutines.launch
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -50,6 +53,16 @@ fun MediaPlayerQueueBottomSheet(
         skipPartiallyExpanded = true
     )
 
+    val lazyListState = rememberLazyListState()
+    val reorderableLazyListState = rememberReorderableLazyListState(
+        lazyListState = lazyListState
+    ) { from, to ->
+        val headerCount = 2
+        if(from.index >= headerCount && to.index >= headerCount) {
+            vm.moveQueueItem(from.index - headerCount, to.index - headerCount)
+        }
+    }
+
     LaunchedEffect(vm.queueIndex.toList()) {
         if(vm.queueIndex.isNotEmpty()) return@LaunchedEffect
 
@@ -66,6 +79,7 @@ fun MediaPlayerQueueBottomSheet(
             onDismissRequest = onDismiss
         ) {
             LazyColumn(
+                state = lazyListState,
                 verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
                 contentPadding = PaddingValues(16.dp)
             ) {
@@ -84,29 +98,38 @@ fun MediaPlayerQueueBottomSheet(
 
                 items(
                     count = vm.queueIndex.size,
-                    key = { index ->
-                        vm.queueIndex[index]
+                    key = { queueIndexIndex ->
+                        vm.queue.getOrNull(queueIndexIndex) ?: vm.queueIndex[queueIndexIndex]
                     }
                 ) { queueIndexIndex ->
                     val index = vm.queueIndex[queueIndexIndex]
+                    val itemKey = vm.queue.getOrNull(queueIndexIndex) ?: index
                     val mediaItem = vm.rememberMediaItemAt(index)
 
-                    mediaItem?.let {
-                        MediaItemListItem(
-                            mediaItem = mediaItem,
-                            index = queueIndexIndex,
-                            count = vm.queueIndex.size,
-                            onClick = {
-                                scope.launch {
-                                    sheetState.hide()
-                                    onDismiss()
-                                    onOpenEpisode(
-                                        mediaItem.getOrigin(),
-                                        mediaItem.getEpisodeId()
-                                    )
+                    ReorderableItem(
+                        state = reorderableLazyListState,
+                        key = itemKey
+                    ) {
+                        mediaItem?.let {
+                            MediaItemListItem(
+                                modifier = Modifier
+                                    .animateItem()
+                                    .longPressDraggableHandle(),
+                                mediaItem = mediaItem,
+                                index = queueIndexIndex,
+                                count = vm.queueIndex.size,
+                                onClick = {
+                                    scope.launch {
+                                        sheetState.hide()
+                                        onDismiss()
+                                        onOpenEpisode(
+                                            mediaItem.getOrigin(),
+                                            mediaItem.getEpisodeId()
+                                        )
+                                    }
                                 }
-                            }
-                        )
+                            )
+                        }
                     }
                 }
             }

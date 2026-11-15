@@ -76,7 +76,10 @@ class AppActivity : ComponentActivity() {
         controllerFuture.addListener(
             {
                 mediaController = controllerFuture.get()
-                mediaController?.let { mediaPlayerViewModel.registerMediaController(it) }
+                mediaController?.let {
+                    mediaPlayerViewModel.registerMediaController(it)
+                    mediaPlayerViewModel.restoreQueueIfNeeded(applicationContext)
+                }
             },
             MoreExecutors.directExecutor()
         )

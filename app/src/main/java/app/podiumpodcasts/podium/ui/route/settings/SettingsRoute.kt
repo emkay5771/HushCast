@@ -17,6 +17,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolunteerActivism
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.Work
@@ -60,6 +61,7 @@ import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsBackgroundActivi
 import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsDatabaseKey
 import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsDebugKey
 import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsDownloadsAndStorageKey
+import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsHushCastKey
 import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsPlaybackKey
 import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsPrivacyKey
 import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsSynchronizationKey
@@ -125,6 +127,30 @@ fun SettingsRoute(
 
             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
         ) {
+            item {
+                SettingsHeader(
+                    label = "HushCast AI"
+                )
+            }
+
+            item {
+                SettingsListItem(
+                    icon = {
+                        Icon(
+                            Icons.Rounded.VolumeOff,
+                            contentDescription = ""
+                        )
+                    },
+                    label = "Auto-Mute & Ad-Skip",
+                    description = "On-device AI models, muted words dictionary, ad blocker & diagnostics",
+                    index = 0,
+                    count = 1,
+                    onClick = {
+                        onPane(SettingsHushCastKey())
+                    }
+                )
+            }
+
             item {
                 SettingsHeader(
                     label = stringResource(R.string.route_settings_about)

@@ -7,7 +7,9 @@ import androidx.lifecycle.viewModelScope
 import app.podiumpodcasts.podium.api.apple.ApplePodcastClient
 import app.podiumpodcasts.podium.api.db.AppDatabase
 import app.podiumpodcasts.podium.api.model.PodcastPreviewModel
+import app.podiumpodcasts.podium.api.podcastindex.PodcastIndexClient
 import app.podiumpodcasts.podium.ui.dialog.bottomsheet.PodcastPreviewBottomSheetState
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
 interface DiscoverSearchState {
@@ -27,6 +29,7 @@ class DiscoverSearchViewModel(
 ) : ViewModel() {
 
     private val applePodcastClient = ApplePodcastClient()
+    private val podcastIndexClient = PodcastIndexClient()
 
     val state = mutableStateOf<DiscoverSearchState>(DiscoverSearchState.Idle())
     val gridState = LazyGridState(0, 0)
@@ -41,15 +44,27 @@ class DiscoverSearchViewModel(
         viewModelScope.launch {
             state.value = DiscoverSearchState.Loading()
             state.value = try {
-                val result = applePodcastClient.search.search(
-                    query = query,
-                    countryCode = countryCode
-                )
+                val piDeferred = async {
+                    if(podcastIndexClient.isConfigured()) {
+                        runCatching { podcastIndexClient.search(query) }.getOrDefault(emptyList())
+                    } else emptyList()
+                }
+                val appleDeferred = async {
+                    runCatching {
+                        applePodcastClient.search.search(
+                            query = query,
+                            countryCode = countryCode
+                        )
+                    }.getOrDefault(emptyList())
+                }
 
-                if(result.isEmpty())
+                val combined = (piDeferred.await() + appleDeferred.await())
+                    .distinctBy { it.fetchUrl.trimEnd('/') }
+
+                if(combined.isEmpty())
                     DiscoverSearchState.Empty()
                 else
-                    DiscoverSearchState.Done(result)
+                    DiscoverSearchState.Done(combined)
             } catch(e: Exception) {
                 e.printStackTrace()
                 DiscoverSearchState.Error(e.toString())

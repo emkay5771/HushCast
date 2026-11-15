@@ -29,6 +29,15 @@ android {
         versionName = "1.0.0-alpha09"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        val localProps = org.jetbrains.kotlin.konan.properties.Properties().apply {
+            val f = rootProject.file("local.properties")
+            if (f.exists()) f.inputStream().use { load(it) }
+        }
+        val piKey = localProps.getProperty("PODCAST_INDEX_API_KEY", "")
+        val piSecret = localProps.getProperty("PODCAST_INDEX_API_SECRET", "")
+        buildConfigField("String", "PODCAST_INDEX_API_KEY", "\"$piKey\"")
+        buildConfigField("String", "PODCAST_INDEX_API_SECRET", "\"$piSecret\"")
     }
 
     signingConfigs {
@@ -141,7 +150,10 @@ dependencies {
     // Chrome Custom Tabs for Nextcloud login flow
     implementation(libs.androidx.browser)
 
+    implementation(project(":core:automute-engine"))
+
     implementation(libs.androidx.media3.exoplayer)
+    implementation("androidx.media3:media3-extractor:${libs.versions.media3.get()}")
     implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.common)
     implementation(libs.androidx.media3.session)

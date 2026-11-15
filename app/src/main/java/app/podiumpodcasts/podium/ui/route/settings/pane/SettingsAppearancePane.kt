@@ -15,6 +15,9 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -24,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.podiumpodcasts.podium.AppThemeMode
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.ui.component.settings.SettingsSwitchListItem
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
@@ -70,6 +74,72 @@ fun SettingsAppearancePane(
             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
         ) {
             item {
+                val themeMode = vm.repository.appearance.themeMode.collectAsState(
+                    AppThemeMode.AUTO
+                )
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier.padding(bottom = 8.dp)
+                ) {
+                    Text(
+                        text = "Theme",
+                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    SingleChoiceSegmentedButtonRow(
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        val options = listOf(
+                            AppThemeMode.AUTO to "Automatic",
+                            AppThemeMode.LIGHT to "Light",
+                            AppThemeMode.DARK to "Dark"
+                        )
+                        options.forEachIndexed { idx, (mode, label) ->
+                            SegmentedButton(
+                                selected = themeMode.value == mode,
+                                onClick = {
+                                    scope.launch {
+                                        vm.repository.appearance.setThemeMode(mode)
+                                    }
+                                },
+                                shape = SegmentedButtonDefaults.itemShape(
+                                    index = idx,
+                                    count = options.size
+                                )
+                            ) {
+                                Text(label)
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                val enableDynamicColors =
+                    vm.repository.appearance.enableDynamicColors.collectAsState(true)
+
+                SettingsSwitchListItem(
+                    checked = enableDynamicColors.value,
+                    onCheckedChange = {
+                        scope.launch {
+                            vm.repository.appearance.setEnableDynamicColors(it)
+                        }
+                    },
+
+                    icon = {
+                        Icon(
+                            Icons.Rounded.Colorize,
+                            "Dynamic color"
+                        )
+                    },
+                    label = "Dynamic color (Material You)",
+                    description = "Adapt app colors to your device wallpaper on Android 12+",
+
+                    index = 0,
+                    count = 3
+                )
+            }
+
+            item {
                 val enableArtworkColors =
                     vm.repository.appearance.enableArtworkColors.collectAsState(true)
 
@@ -90,8 +160,8 @@ fun SettingsAppearancePane(
                     label = stringResource(R.string.route_settings_appearance_enable_artwork_colors),
                     description = stringResource(R.string.route_settings_appearance_enable_artwork_colors_description),
 
-                    index = 0,
-                    count = 2
+                    index = 1,
+                    count = 3
                 )
             }
 
@@ -116,8 +186,8 @@ fun SettingsAppearancePane(
                     label = stringResource(R.string.route_settings_appearance_use_alternative_branding),
                     description = stringResource(R.string.route_settings_appearance_use_alternative_branding_description),
 
-                    index = 1,
-                    count = 2
+                    index = 2,
+                    count = 3
                 )
             }
         }

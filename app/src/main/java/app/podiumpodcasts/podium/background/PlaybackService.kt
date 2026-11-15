@@ -11,12 +11,22 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.mp3.Mp3Extractor
 import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
+import app.hushcast.automute.dsp.AdPolicyMode
+import app.hushcast.automute.dsp.HushCastAudioProcessorChain
+import app.hushcast.automute.storage.AutoMuteDatabase
+import app.hushcast.automute.storage.toDomain
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.SettingsRepository
 import app.podiumpodcasts.podium.background.notification.NewPodcastEpisodeNotification
@@ -51,6 +61,10 @@ class PlaybackService : MediaLibraryService() {
         DatabaseManager.build(this)
     }
 
+    private val autoMuteDb by lazy {
+        AutoMuteDatabase.getInstance(this)
+    }
+
     private val settingsRepository = SettingsRepository(this)
 
     private val job = SupervisorJob()
@@ -74,11 +88,40 @@ class PlaybackService : MediaLibraryService() {
         checkSkipEnding()
     }
 
+    private val adSkipHandler: Handler = Handler(Looper.getMainLooper())
+    private val adSkipRunnable = object : Runnable {
+        override fun run() {
+            val player = mediaSession?.player ?: return
+            if(!player.isPlaying) return
+            HushCastEngineBridge.adSkipObserver.checkPosition(player)
+            adSkipHandler.postDelayed(this, 300L)
+        }
+    }
+
     private var sleepTimerHandler: Handler = Handler(Looper.getMainLooper())
     var sleepTimerTrigger: Long? = null
+    private val sleepTimerFadeDurationMs = 10_000L
     private var sleepTimerRunnable = Runnable {
         sleepTimerTrigger = null
-        mediaSession?.player?.pause()
+        mediaSession?.player?.let { p ->
+            p.pause()
+            p.volume = 1.0f
+        }
+    }
+    private val sleepTimerFadeRunnable = object : Runnable {
+        override fun run() {
+            val trigger = sleepTimerTrigger ?: return
+            val player = mediaSession?.player ?: return
+            val remaining = trigger - System.currentTimeMillis()
+            if(remaining <= 0L) return
+            if(remaining <= sleepTimerFadeDurationMs) {
+                player.volume = (remaining.toFloat() / sleepTimerFadeDurationMs.toFloat()).coerceIn(0.05f, 1.0f)
+                sleepTimerHandler.postDelayed(this, 250L)
+            } else {
+                player.volume = 1.0f
+                sleepTimerHandler.postDelayed(this, (remaining - sleepTimerFadeDurationMs).coerceAtLeast(250L))
+            }
+        }
     }
 
     @OptIn(UnstableApi::class)
@@ -106,7 +149,27 @@ class PlaybackService : MediaLibraryService() {
             settingsRepository.behavior.playerPlaybackSpeed.first()
         }
 
-        val player = ExoPlayer.Builder(this)
+        val renderersFactory = object : DefaultRenderersFactory(this) {
+            override fun buildAudioSink(
+                context: android.content.Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean
+            ): AudioSink {
+                return DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                    .setAudioProcessorChain(
+                        HushCastAudioProcessorChain(HushCastEngineBridge.autoMuteProcessor)
+                    )
+                    .build()
+            }
+        }
+
+        val extractorsFactory = DefaultExtractorsFactory()
+            .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)
+
+        val player = ExoPlayer.Builder(this, renderersFactory)
+            .setMediaSourceFactory(DefaultMediaSourceFactory(this, extractorsFactory))
             .setSeekBackIncrementMs(seekBackIncrement)
             .setSeekForwardIncrementMs(seekForwardIncrement)
             .setAudioAttributes(
@@ -128,6 +191,12 @@ class PlaybackService : MediaLibraryService() {
                     .asPendingIntent(this, 42)!!
             )
             .build()
+
+        scope.launch {
+            HushCastEngineBridge.adSkipEvents.collect { event ->
+                HushCastEngineBridge.notifyAdSkipped(event)
+            }
+        }
 
         registerPlayStateListener()
     }
@@ -313,9 +382,12 @@ class PlaybackService : MediaLibraryService() {
                 if(isPlaying) {
                     enqueueUpdatePlayState()
                     enqueueSkipEnding()
+                    adSkipHandler.removeCallbacks(adSkipRunnable)
+                    adSkipHandler.post(adSkipRunnable)
                 } else {
                     updatePlayStateHandler.removeCallbacks(updatePlayStateRunnable)
                     skipEndingHandler.removeCallbacks(skipEndingRunnable)
+                    adSkipHandler.removeCallbacks(adSkipRunnable)
 
                     syncIfEnabled()
                 }
@@ -332,6 +404,23 @@ class PlaybackService : MediaLibraryService() {
                             .cancel(this@PlaybackService.applicationContext, episodeId)
 
                         scope.launch {
+                            // Load HushCast mute windows and ad spans for this episode
+                            val status = autoMuteDb.dao().getStatus(episodeId)
+                            val sha = status?.fileSha256?.takeIf { it.isNotBlank() }
+                            if(sha != null) {
+                                val mutes = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
+                                val ads = autoMuteDb.dao().getAdSegments(sha).map { it.toDomain() }
+                                val policyStr = autoMuteDb.dao().getPodcastAdPolicy(origin)?.policyMode
+                                val policy = policyStr?.let {
+                                    runCatching { AdPolicyMode.valueOf(it) }.getOrNull()
+                                } ?: HushCastEngineBridge.defaultAdPolicy
+                                HushCastEngineBridge.autoMuteProcessor.updateWindows(mutes)
+                                HushCastEngineBridge.adSkipObserver.setEpisodeAds(ads, policy)
+                            } else {
+                                HushCastEngineBridge.autoMuteProcessor.updateWindows(emptyList())
+                                HushCastEngineBridge.adSkipObserver.clear()
+                            }
+
                             val podcast = db.podcasts().getSync(origin)
                             currentSkipEndingValue = (podcast?.skipEnding) ?: 0
 
@@ -381,16 +470,20 @@ class PlaybackService : MediaLibraryService() {
 
     fun stopSleepTimer() {
         sleepTimerTrigger = null
-        sleepTimerRunnable.let { sleepTimerHandler.removeCallbacks(it) }
+        sleepTimerHandler.removeCallbacks(sleepTimerRunnable)
+        sleepTimerHandler.removeCallbacks(sleepTimerFadeRunnable)
+        mediaSession?.player?.volume = 1.0f
     }
 
     fun startSleepTimer(trigger: Long) {
         sleepTimerTrigger = trigger
 
-        val delay = trigger - System.currentTimeMillis()
+        val delay = (trigger - System.currentTimeMillis()).coerceAtLeast(0L)
 
-        sleepTimerRunnable.let { sleepTimerHandler.removeCallbacks(it) }
+        sleepTimerHandler.removeCallbacks(sleepTimerRunnable)
+        sleepTimerHandler.removeCallbacks(sleepTimerFadeRunnable)
         sleepTimerHandler.postDelayed(sleepTimerRunnable, delay)
+        sleepTimerHandler.post(sleepTimerFadeRunnable)
     }
 
     fun syncIfEnabled() {
@@ -408,6 +501,7 @@ class PlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         updatePlayStateHandler.removeCallbacks(updatePlayStateRunnable)
         skipEndingHandler.removeCallbacks(skipEndingRunnable)
+        adSkipHandler.removeCallbacks(adSkipRunnable)
         sleepTimerHandler.removeCallbacksAndMessages(null)
 
         stopSleepTimer()

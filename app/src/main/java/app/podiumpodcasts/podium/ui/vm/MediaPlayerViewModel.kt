@@ -33,8 +33,10 @@ import app.podiumpodcasts.podium.utils.getEpisodeId
 import app.podiumpodcasts.podium.utils.getImageSeedColor
 import app.podiumpodcasts.podium.utils.getOrigin
 import app.podiumpodcasts.podium.utils.isDownload
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 interface SourceTypeState {
@@ -77,6 +79,7 @@ class MediaPlayerViewModel : ViewModel() {
 
     val queue = mutableStateListOf<String>()
     val queueIndex = mutableStateListOf<Int>()
+    private var hasRestoredQueue = false
 
     val canResumeCurrentEpisode: Boolean
         get() {
@@ -109,14 +112,27 @@ class MediaPlayerViewModel : ViewModel() {
         val mediaItem = bundle.createMediaItem(context)
 
         mediaController?.addMediaItem(mediaItem)
-        syncQueue()
+        syncQueue(persist = true)
+    }
+
+    fun playNext(
+        context: Context,
+        bundle: PodcastEpisodeBundle
+    ) {
+        val controller = mediaController ?: return
+        val mediaItem = bundle.createMediaItem(context)
+        val insertIndex = if(controller.mediaItemCount == 0) 0
+        else (controller.currentMediaItemIndex + 1).coerceIn(0, controller.mediaItemCount)
+
+        controller.addMediaItem(insertIndex, mediaItem)
+        syncQueue(persist = true)
     }
 
     fun dequeue(
         episodeId: String
     ) {
         mediaController?.let { mediaController ->
-            for(index in 0..mediaController.mediaItemCount) {
+            for(index in 0 until mediaController.mediaItemCount) {
                 if(index == mediaController.currentMediaItemIndex) continue
 
                 val mediaItem = mediaController.getMediaItemAt(index)
@@ -130,7 +146,28 @@ class MediaPlayerViewModel : ViewModel() {
             }
         }
 
-        syncQueue()
+        syncQueue(persist = true)
+    }
+
+    fun removeFromQueue(queuePos: Int) {
+        val controller = mediaController ?: return
+        if(queuePos !in queueIndex.indices) return
+        val playerIndex = queueIndex[queuePos]
+        if(playerIndex in 0 until controller.mediaItemCount && playerIndex != controller.currentMediaItemIndex) {
+            controller.removeMediaItem(playerIndex)
+            syncQueue(persist = true)
+        }
+    }
+
+    fun moveQueueItem(fromQueuePos: Int, toQueuePos: Int) {
+        val controller = mediaController ?: return
+        if(fromQueuePos == toQueuePos) return
+        if(fromQueuePos !in queueIndex.indices || toQueuePos !in queueIndex.indices) return
+
+        val fromPlayerIndex = queueIndex[fromQueuePos]
+        val toPlayerIndex = queueIndex[toQueuePos]
+        controller.moveMediaItem(fromPlayerIndex, toPlayerIndex)
+        syncQueue(persist = true)
     }
 
     fun play() {
@@ -244,7 +281,7 @@ class MediaPlayerViewModel : ViewModel() {
         return sleepTimerState
     }
 
-    fun syncQueue() {
+    fun syncQueue(persist: Boolean = hasRestoredQueue) {
         mediaController?.let { mediaController ->
             queue.clear()
             queueIndex.clear()
@@ -259,14 +296,58 @@ class MediaPlayerViewModel : ViewModel() {
                         queueIndex.add(index)
                     }
             }
+
+            if(persist && ::db.isInitialized) {
+                val snapshot = queue.toList()
+                viewModelScope.launch(Dispatchers.IO) {
+                    db.playbackQueue().replaceQueue(snapshot)
+                }
+            }
+        }
+    }
+
+    fun restoreQueueIfNeeded(context: Context) {
+        if(hasRestoredQueue || !::db.isInitialized) return
+        val controller = mediaController ?: return
+        hasRestoredQueue = true
+
+        if(controller.mediaItemCount > 1) {
+            syncQueue(persist = true)
+            return
+        }
+
+        val currentEpisodeId = controller.currentMediaItem
+            ?.mediaMetadata?.extras?.getString(MediaMetadataExtra.EPISODE_ID.name)
+
+        viewModelScope.launch {
+            val saved = withContext(Dispatchers.IO) {
+                db.playbackQueue().getQueueSync()
+            }
+            if(saved.isEmpty()) return@launch
+
+            val appCtx = context.applicationContext
+            for(item in saved) {
+                if(item.episodeId == currentEpisodeId) continue
+                val bundle = withContext(Dispatchers.IO) {
+                    runCatching { db.podcastEpisodes().getSync(item.episodeId) }.getOrNull()
+                } ?: continue
+                controller.addMediaItem(bundle.createMediaItem(appCtx))
+            }
+
+            syncQueue(persist = false)
         }
     }
 
     @Composable
     fun rememberMediaItemAt(index: Int): MediaItem? {
-        var mediaItem by remember { mutableStateOf<MediaItem?>(null) }
-        LaunchedEffect(queueIndex.toList()) {
-            mediaItem = mediaController?.getMediaItemAt(index)
+        var mediaItem by remember(index) { mutableStateOf<MediaItem?>(null) }
+        LaunchedEffect(index, queue.toList()) {
+            val controller = mediaController
+            mediaItem = if(controller != null && index in 0 until controller.mediaItemCount) {
+                controller.getMediaItemAt(index)
+            } else {
+                null
+            }
         }
 
         return mediaItem

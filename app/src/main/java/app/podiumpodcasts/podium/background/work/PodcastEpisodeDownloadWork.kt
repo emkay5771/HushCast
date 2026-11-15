@@ -59,6 +59,17 @@ class PodcastEpisodeDownloadWork(
             is HttpDownloadClientResult.Success -> {
                 db.podcastEpisodeDownloads()
                     .registerDownload(episodeId, file.absolutePath)
+
+                // Compute SHA-256 and enqueue background charging analysis (DAI-resilient)
+                val sha256 = withContext(Dispatchers.IO) {
+                    app.hushcast.automute.hash.StreamingSha256.hashFile(file)
+                }
+                app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueBackgroundCharging(
+                    context = context,
+                    episodeId = episodeId,
+                    audioPath = file.absolutePath,
+                    knownSha256 = sha256
+                )
                 return true
             }
 

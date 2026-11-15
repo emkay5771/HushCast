@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer podcast broadcast waves (soft lavender) -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M34.5,38.5 A25,25 0 0,0 34.5,69.5"
+        android:strokeColor="#FFDCD2FF"
+        android:strokeLineCap="round"
+        android:strokeWidth="3.2" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M73.5,38.5 A25,25 0 0,1 73.5,69.5"
+        android:strokeColor="#FFDCD2FF"
+        android:strokeLineCap="round"
+        android:strokeWidth="3.2" />
+
+    <!-- Microphone capsule (crisp white) -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,32 C58.4,32 62,35.6 62,40 L62,53 C62,57.4 58.4,61 54,61 C49.6,61 46,57.4 46,53 L46,40 C46,35.6 49.6,32 54,32 Z" />
+
+    <!-- Microphone cradle & stand (crisp white) -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M40,52 A14,14 0 0,0 68,52"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="3.8" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,66 L54,75 M46,75 L62,75"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="3.8" />
+
+    <!-- Subtle mute/hush slash with background halo -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M37,70 L71,36"
+        android:strokeColor="#FF3D197A"
+        android:strokeLineCap="round"
+        android:strokeWidth="7.5" />
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M37,70 L71,36"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeLineCap="round"
+        android:strokeWidth="3.8" />
+</vector>

@@ -22,7 +22,7 @@ xmlutil = "1.0.0-rc2"
 # Navigation 3
 material = "1.13.0"
 materialKolor = "5.0.0-alpha06"
-media3 = "1.9.2"
+media3 = "1.11.1"
 nav3Core = "1.0.1"
 lifecycleViewmodelNav3 = "2.10.0"
 kotlinSerialization = "2.2.21"
@@ -111,6 +111,7 @@ xmlutil-serialization = { module = "io.github.pdvrieze.xmlutil:serialization", v
 [plugins]
 aboutLibraries = { id = "com.mikepenz.aboutlibraries.plugin", version.ref = "aboutLibraries" }
 android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 jetbrains-kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlinSerialization" }

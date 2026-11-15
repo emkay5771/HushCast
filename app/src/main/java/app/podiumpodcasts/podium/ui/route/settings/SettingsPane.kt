@@ -19,6 +19,8 @@ import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsDebugKey
 import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsDebugPane
 import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsDownloadsAndStorageKey
 import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsDownloadsAndStoragePane
+import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsHushCastKey
+import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsHushCastPane
 import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsPlaybackKey
 import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsPlaybackPane
 import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsPrivacyKey
@@ -71,6 +73,14 @@ fun SettingsPane(
 
         is SettingsAppearanceKey -> {
             SettingsAppearancePane(
+                navigationIcon = {
+                    NavigationIcon()
+                }
+            )
+        }
+
+        is SettingsHushCastKey -> {
+            SettingsHushCastPane(
                 navigationIcon = {
                     NavigationIcon()
                 }
