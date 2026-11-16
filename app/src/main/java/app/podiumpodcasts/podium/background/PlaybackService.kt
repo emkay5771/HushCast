@@ -207,31 +207,87 @@ class PlaybackService : MediaLibraryService() {
                 val localItem = bundle.createMediaItem(this@PlaybackService)
 
                 withContext(Dispatchers.Main) {
-                    val p = mediaSession?.player ?: return@withContext
-                    val currentIdx = p.currentMediaItemIndex
-                    for(i in 0 until p.mediaItemCount) {
-                        val item = p.getMediaItemAt(i)
-                        val extras = item.mediaMetadata.extras
-                        val epId = extras?.getString(MediaMetadataExtra.EPISODE_ID.name)
-                        val isAlreadyDownload = extras?.getBoolean(MediaMetadataExtra.IS_DOWNLOAD.name) ?: false
-                        if(epId == downloadedId && !isAlreadyDownload) {
-                            if(i == currentIdx) {
-                                val posMs = p.currentPosition.coerceAtLeast(0L)
-                                val wasPlaying = p.playWhenReady
-                                p.replaceMediaItem(i, localItem)
-                                p.seekTo(i, posMs)
-                                p.prepare()
-                                p.playWhenReady = wasPlaying
-                            } else {
-                                p.replaceMediaItem(i, localItem)
+                    val p = mediaSession?.player
+                    if (p != null) {
+                        val currentIdx = p.currentMediaItemIndex
+                        for(i in 0 until p.mediaItemCount) {
+                            val item = p.getMediaItemAt(i)
+                            val extras = item.mediaMetadata.extras
+                            val epId = extras?.getString(MediaMetadataExtra.EPISODE_ID.name)
+                            val isAlreadyDownload = extras?.getBoolean(MediaMetadataExtra.IS_DOWNLOAD.name) ?: false
+                            if(epId == downloadedId && !isAlreadyDownload) {
+                                if(i == currentIdx) {
+                                    val posMs = p.currentPosition.coerceAtLeast(0L)
+                                    val wasPlaying = p.playWhenReady
+                                    p.replaceMediaItem(i, localItem)
+                                    p.seekTo(i, posMs)
+                                    p.prepare()
+                                    p.playWhenReady = wasPlaying
+                                } else {
+                                    p.replaceMediaItem(i, localItem)
+                                }
                             }
                         }
+                    }
+                    val activeEpId = p?.currentMediaItem?.getEpisodeId() ?: HushCastEngineBridge.currentEpisodeId
+                    val activeOrigin = p?.currentMediaItem?.getOrigin() ?: bundle.episode.origin
+                    if (activeEpId == downloadedId) {
+                        loadHushCastForEpisode(downloadedId, activeOrigin)
+                    }
+                }
+            }
+        }
+
+        scope.launch {
+            app.hushcast.automute.worker.EpisodeAnalysisWorker.analysisCompletedEvents.collect { analyzedId ->
+                withContext(Dispatchers.Main) {
+                    val p = mediaSession?.player
+                    val activeEpId = p?.currentMediaItem?.getEpisodeId() ?: HushCastEngineBridge.currentEpisodeId
+                    if (activeEpId == analyzedId) {
+                        val activeOrigin = p?.currentMediaItem?.getOrigin()
+                            ?: withContext(Dispatchers.IO) {
+                                runCatching { db.podcastEpisodes().getSync(analyzedId)?.episode?.origin }.getOrNull()
+                            }
+                            ?: return@withContext
+                        loadHushCastForEpisode(analyzedId, activeOrigin)
                     }
                 }
             }
         }
 
         registerPlayStateListener()
+    }
+
+    private var loadHushCastJob: kotlinx.coroutines.Job? = null
+
+    private fun loadHushCastForEpisode(episodeId: String, origin: String) {
+        HushCastEngineBridge.currentEpisodeId = episodeId
+        loadHushCastJob?.cancel()
+        loadHushCastJob = scope.launch(Dispatchers.IO) {
+            val status = autoMuteDb.dao().getStatus(episodeId)
+            val sha = status?.fileSha256?.takeIf { it.isNotBlank() }
+            if (sha != null) {
+                val mutes = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
+                val ads = autoMuteDb.dao().getAdSegments(sha).map { it.toDomain() }
+                val policyStr = autoMuteDb.dao().getPodcastAdPolicy(origin)?.policyMode
+                val policy = policyStr?.let {
+                    runCatching { AdPolicyMode.valueOf(it) }.getOrNull()
+                } ?: HushCastEngineBridge.defaultAdPolicy
+                HushCastEngineBridge.autoMuteProcessor.updateWindows(mutes)
+                HushCastEngineBridge.adSkipObserver.setEpisodeAds(ads, policy)
+                android.util.Log.i(
+                    "HushCastPerf",
+                    "Loaded playback windows: ep=$episodeId sha=${sha.take(8)} mutes=${mutes.count { it.enabled }}/${mutes.size} ads=${ads.size} (highConf=${ads.count { it.isHighConfidence }}) policy=$policy wordMuteEnabled=${HushCastEngineBridge.wordMutingEnabled}"
+                )
+            } else {
+                HushCastEngineBridge.autoMuteProcessor.updateWindows(emptyList())
+                HushCastEngineBridge.adSkipObserver.clear()
+                android.util.Log.i(
+                    "HushCastPerf",
+                    "Cleared playback windows (no sha): ep=$episodeId badge=${status?.badge}"
+                )
+            }
+        }
     }
 
     companion object {
@@ -377,6 +433,11 @@ class PlaybackService : MediaLibraryService() {
                 mediaItem?.getResumeAt()?.let { resumeAt ->
                     mediaSession?.player?.seekTo(resumeAt)
                 }
+                mediaItem?.getEpisodeId()?.let { episodeId ->
+                    mediaItem.getOrigin()?.let { origin ->
+                        loadHushCastForEpisode(episodeId, origin)
+                    }
+                }
                 mediaSession?.let { session ->
                     onUpdateNotification(session, session.player.playWhenReady)
                 }
@@ -449,25 +510,9 @@ class PlaybackService : MediaLibraryService() {
                         NewPodcastEpisodeNotification
                             .cancel(this@PlaybackService.applicationContext, episodeId)
 
-                        scope.launch {
-                            HushCastEngineBridge.currentEpisodeId = episodeId
-                            // Load HushCast mute windows and ad spans for this episode
-                            val status = autoMuteDb.dao().getStatus(episodeId)
-                            val sha = status?.fileSha256?.takeIf { it.isNotBlank() }
-                            if(sha != null) {
-                                val mutes = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
-                                val ads = autoMuteDb.dao().getAdSegments(sha).map { it.toDomain() }
-                                val policyStr = autoMuteDb.dao().getPodcastAdPolicy(origin)?.policyMode
-                                val policy = policyStr?.let {
-                                    runCatching { AdPolicyMode.valueOf(it) }.getOrNull()
-                                } ?: HushCastEngineBridge.defaultAdPolicy
-                                HushCastEngineBridge.autoMuteProcessor.updateWindows(mutes)
-                                HushCastEngineBridge.adSkipObserver.setEpisodeAds(ads, policy)
-                            } else {
-                                HushCastEngineBridge.autoMuteProcessor.updateWindows(emptyList())
-                                HushCastEngineBridge.adSkipObserver.clear()
-                            }
+                        loadHushCastForEpisode(episodeId, origin)
 
+                        scope.launch {
                             val podcast = db.podcasts().getSync(origin)
                             currentSkipEndingValue = (podcast?.skipEnding) ?: 0
 

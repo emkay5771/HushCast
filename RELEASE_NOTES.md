@@ -1,3 +1,12 @@
+# HushCast v0.1.29-hushcast
+
+## What's New
+- **Word Muting & Ad-Skip Playback Loading Fix**:
+  - Fixed [`PlaybackService`](app/src/main/java/app/podiumpodcasts/podium/background/PlaybackService.kt) so mute windows and ad-skip spans are always loaded on `onMediaItemTransition`, `onMediaMetadataChanged`, download/desktop offload completion, and on-device [`EpisodeAnalysisWorker`](core/automute-engine/src/main/java/app/hushcast/automute/worker/EpisodeAnalysisWorker.kt) completion (previously they were only loaded in `onMediaMetadataChanged`, causing already-queued/playing episodes to miss mute & ad windows).
+  - Added `HushCastPerf` diagnostics logging when playback windows are loaded or cleared.
+
+---
+
 # HushCast v0.1.28-hushcast
 
 ## What's New

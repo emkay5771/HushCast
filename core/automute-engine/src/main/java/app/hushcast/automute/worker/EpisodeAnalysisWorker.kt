@@ -85,6 +85,7 @@ class EpisodeAnalysisWorker(
                 }
             )
             android.util.Log.i("HushCastPerf", "Worker success ($currentIndex/$totalCount): ep=$episodeId")
+            analysisCompletedEvents.tryEmit(episodeId)
             Result.success()
         } catch (c: kotlinx.coroutines.CancellationException) {
             android.util.Log.w("HushCastPerf", "Worker cancelled ($currentIndex/$totalCount): ep=$episodeId")
@@ -372,5 +373,9 @@ class EpisodeAnalysisWorker(
         }
 
         const val ANALYSIS_QUEUE_NAME = "hushcast_analysis_queue"
+
+        val analysisCompletedEvents = kotlinx.coroutines.flow.MutableSharedFlow<String>(
+            extraBufferCapacity = 16
+        )
     }
 }
