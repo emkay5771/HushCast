@@ -113,30 +113,7 @@ class LocalMlBackend:
         whisper = WhisperModel(str(self.whisper_model), print_progress=False)
         raw_segments = whisper.transcribe(pcm_16k, token_timestamps=True)
 
-        words: list[WordDto] = []
-        segments: list[SegmentDto] = []
-        for seg in raw_segments:
-            text = (seg.text or "").strip()
-            if not text:
-                continue
-            start_s = round(seg.t0 / 100.0, 3)
-            end_s = round(seg.t1 / 100.0, 3)
-            seg_words = text.split()
-            segments.append(
-                SegmentDto(
-                    start=start_s,
-                    end=end_s,
-                    text=text,
-                    nWords=len(seg_words),
-                )
-            )
-            # Distribute timestamps across words if token-level timings aren't exposed
-            if seg_words:
-                step = max(0.01, (end_s - start_s) / len(seg_words))
-                for idx, w in enumerate(seg_words):
-                    ws = round(start_s + idx * step, 3)
-                    we = round(min(end_s, ws + step), 3)
-                    words.append(WordDto(start=ws, end=we, text=w))
+        words, segments = _extract_whisper_words_and_segments(whisper, raw_segments)
 
         on_progress(JobState.EMBEDDING, 65, "Embedding sentences (Qwen3 Metal)")
         try:
@@ -192,6 +169,105 @@ class LocalMlBackend:
         )
 
 
+def _extract_whisper_words_and_segments(
+    whisper, raw_segments
+) -> tuple[list[WordDto], list[SegmentDto]]:
+    words: list[WordDto] = []
+    segments: list[SegmentDto] = []
+
+    # Try extracting exact token-level timestamps from pywhispercpp C++ context
+    pw = None
+    ctx = getattr(whisper, "_ctx", None)
+    if ctx is not None:
+        try:
+            import _pywhispercpp as pw_mod
+
+            if hasattr(pw_mod, "whisper_full_n_segments") and hasattr(
+                pw_mod, "whisper_full_get_token_data"
+            ):
+                pw = pw_mod
+        except Exception:
+            pw = None
+
+    if pw is not None and ctx is not None:
+        n_segs = pw.whisper_full_n_segments(ctx)
+        for s_idx in range(n_segs):
+            seg_text = (pw.whisper_full_get_segment_text(ctx, s_idx) or "").strip()
+            if not seg_text:
+                continue
+            s_t0 = round(pw.whisper_full_get_segment_t0(ctx, s_idx) / 100.0, 3)
+            s_t1 = round(pw.whisper_full_get_segment_t1(ctx, s_idx) / 100.0, 3)
+            segments.append(
+                SegmentDto(
+                    start=s_t0,
+                    end=s_t1,
+                    text=seg_text,
+                    nWords=len(seg_text.split()),
+                )
+            )
+            n_toks = pw.whisper_full_n_tokens(ctx, s_idx)
+            cur_text = ""
+            cur_t0: Optional[float] = None
+            cur_t1: Optional[float] = None
+            for t_idx in range(n_toks):
+                tok_text = pw.whisper_full_get_token_text(ctx, s_idx, t_idx) or ""
+                if not tok_text or tok_text.startswith("[_"):
+                    continue
+                tdata = pw.whisper_full_get_token_data(ctx, s_idx, t_idx)
+                t0 = round(tdata.t0 / 100.0, 3)
+                t1 = round(max(tdata.t1, tdata.t0 + 1) / 100.0, 3)
+                if tok_text[0].isspace() and cur_text.strip():
+                    words.append(
+                        WordDto(
+                            start=cur_t0 if cur_t0 is not None else s_t0,
+                            end=cur_t1 if cur_t1 is not None else s_t1,
+                            text=cur_text.strip(),
+                        )
+                    )
+                    cur_text = tok_text.lstrip()
+                    cur_t0 = t0
+                    cur_t1 = t1
+                else:
+                    if cur_t0 is None:
+                        cur_t0 = t0
+                    cur_text += tok_text
+                    cur_t1 = t1
+            if cur_text.strip():
+                words.append(
+                    WordDto(
+                        start=cur_t0 if cur_t0 is not None else s_t0,
+                        end=cur_t1 if cur_t1 is not None else s_t1,
+                        text=cur_text.strip(),
+                    )
+                )
+        if segments:
+            return words, segments
+
+    # Fallback: use raw_segments (with seg.tokens if exposed, else segment bounds)
+    for seg in raw_segments:
+        text = (seg.text or "").strip()
+        if not text:
+            continue
+        start_s = round(seg.t0 / 100.0, 3)
+        end_s = round(seg.t1 / 100.0, 3)
+        seg_words = text.split()
+        segments.append(
+            SegmentDto(
+                start=start_s,
+                end=end_s,
+                text=text,
+                nWords=len(seg_words),
+            )
+        )
+        if seg_words:
+            step = max(0.01, (end_s - start_s) / len(seg_words))
+            for idx, w in enumerate(seg_words):
+                ws = round(start_s + idx * step, 3)
+                we = round(min(end_s, ws + step), 3)
+                words.append(WordDto(start=ws, end=we, text=w))
+    return words, segments
+
+
 def _decode_audio_16k_mono(audio_path: Path):
     import av
     import numpy as np
@@ -201,8 +277,9 @@ def _decode_audio_16k_mono(audio_path: Path):
     chunks = []
     for frame in container.decode(audio=0):
         for resampled in resampler.resample(frame):
-            arr = resampled.to_ndarray().reshape(-1)
-            chunks.append(arr)
+            chunks.append(resampled.to_ndarray().reshape(-1))
+    for resampled in resampler.resample(None):
+        chunks.append(resampled.to_ndarray().reshape(-1))
     container.close()
     pcm = np.concatenate(chunks).astype(np.float32) if chunks else np.zeros(0, dtype=np.float32)
     return pcm, float(len(pcm) / 16000.0)
