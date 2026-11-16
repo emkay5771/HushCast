@@ -81,6 +81,13 @@ object AudioDecoder {
             }
         }
 
+        val decodeStartMs = System.currentTimeMillis()
+        var lastLogMs = decodeStartMs
+        android.util.Log.i(
+            "HushCastPerf",
+            "Decode start: rate=$rate ch=$channels durSec=${duration / 1_000_000L} native=${app.hushcast.automute.nativebridge.WhisperJni.isAvailable}"
+        )
+
         try {
             while (!outputDone) {
                 if (!inputDone) {
@@ -109,6 +116,7 @@ object AudioDecoder {
                         toWhisper = if (pcm16k != null) {
                             Resampler(if (frames != null) FrameExtractor.SR else rate, 16000)
                         } else null
+                        android.util.Log.i("HushCastPerf", "Decode format: rate=$rate ch=$channels enc=$encoding")
                     }
                 } else if (o >= 0) {
                     val buf = codec.getOutputBuffer(o)!!.order(ByteOrder.nativeOrder())
@@ -170,6 +178,15 @@ object AudioDecoder {
                                 lastReportedFraction = fraction
                                 onProgress(fraction)
                             }
+                        }
+                        val nowMs = System.currentTimeMillis()
+                        if (nowMs - lastLogMs >= 5000L) {
+                            lastLogMs = nowMs
+                            val elapsedSec = ((nowMs - decodeStartMs).coerceAtLeast(1L)) / 1000.0
+                            val audioSec = info.presentationTimeUs / 1_000_000.0
+                            val speed = String.format(java.util.Locale.US, "%.1f", audioSec / elapsedSec)
+                            val pct = if (duration > 0L) (info.presentationTimeUs * 100L / duration).toInt() else 0
+                            android.util.Log.i("HushCastPerf", "Decode $pct%: ${audioSec.toInt()}s in ${elapsedSec.toInt()}s (${speed}x RT) q=${frameQueue?.size ?: 0}")
                         }
                     }
                     codec.releaseOutputBuffer(o, false)

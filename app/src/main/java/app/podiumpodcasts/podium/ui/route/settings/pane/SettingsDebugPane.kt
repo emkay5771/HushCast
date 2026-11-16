@@ -200,7 +200,8 @@ fun SettingsDebugPane(
                             podcasts.forEach {
                                 val episodes = db.podcastEpisodes().all(it.origin).first()
 
-                                db.podcastEpisodes().delete(episodes.first().episode.id)
+                                val latest = episodes.firstOrNull() ?: return@forEach
+                                db.podcastEpisodes().delete(latest.episode.id)
                                 db.podcastSubscriptions()
                                     .storeCacheValues(it.origin, "", "", "")
                             }

@@ -118,6 +118,7 @@ class AutoMuteAnalyzer(
             segments = blob.segments
         } else {
             report(5, "Decoding audio")
+            val decodeStart = System.currentTimeMillis()
             val extractor = if (!quickWordMuteOnly) FrameExtractor() else null
             val pcm = PcmBuffer()
             try {
@@ -144,6 +145,8 @@ class AutoMuteAnalyzer(
                     }
                 }
                 frames = extractor?.finish()
+                val decodeMs = System.currentTimeMillis() - decodeStart
+                android.util.Log.i("HushCastPerf", "Stage Decode+Frames done in ${decodeMs}ms (frames=${frames?.n ?: 0})")
                 peakRssMb = maxOf(peakRssMb, currentRssMb())
 
                 val parsedFeed = feedTranscriptRaw?.let {
@@ -151,6 +154,7 @@ class AutoMuteAnalyzer(
                 }
 
                 report(25, "Transcribing speech (Whisper DTW)")
+                val whisperStart = System.currentTimeMillis()
                 val transcriber = Transcriber(paths.whisperBaseEn.absolutePath, useDtw = true)
                 try {
                     val output = transcribeWithFeedFallback(
@@ -165,6 +169,8 @@ class AutoMuteAnalyzer(
                     // Strictly unload whisper.cpp before loading Qwen3
                     transcriber.close()
                 }
+                val whisperMs = System.currentTimeMillis() - whisperStart
+                android.util.Log.i("HushCastPerf", "Stage Whisper done in ${whisperMs}ms (words=${words.size}, segs=${segments.size})")
                 peakRssMb = maxOf(peakRssMb, currentRssMb())
             } finally {
                 pcm.close()

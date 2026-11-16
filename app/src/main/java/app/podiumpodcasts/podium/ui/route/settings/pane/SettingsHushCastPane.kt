@@ -542,19 +542,29 @@ fun SettingsHushCastPane(
                             OutlinedButton(onClick = {
                                 scope.launch {
                                     val logText = withContext(Dispatchers.IO) {
+                                        val pkgInfo = runCatching {
+                                            context.packageManager.getPackageInfo(context.packageName, 0)
+                                        }.getOrNull()
+                                        val verName = pkgInfo?.versionName ?: "unknown"
+                                        val verCode = if (pkgInfo != null) androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(pkgInfo) else 0L
                                         val header = buildString {
                                             appendLine("HushCast Diagnostics")
+                                            appendLine("App: $verName ($verCode)")
                                             appendLine("Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE}, API ${android.os.Build.VERSION.SDK_INT})")
                                             appendLine("Perf Cores: ${app.hushcast.automute.engine.CpuTopology.performanceCoreCount()} • Thermal: ${app.hushcast.automute.engine.CpuTopology.thermalStatusLabel(context)}")
                                             appendLine("PSS: $currentPssMb MB • Models: $downloadedMb MB")
                                             appendLine("Fast Model: ${app.hushcast.automute.engine.HushCastPrefs.isFastModelEnabled(context)} • Flash Attn: ${app.hushcast.automute.engine.HushCastPrefs.isFastAttentionEnabled(context)} • Charging Only: ${app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context)}")
-                                            appendLine("--- Recent Logcat ---")
+                                            appendLine("--- HushCastPerf & Crashes ---")
                                         }
-                                        val logcat = runCatching {
-                                            val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "800"))
+                                        val perfLogs = runCatching {
+                                            val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-s", "HushCastPerf:I", "AndroidRuntime:E"))
                                             proc.inputStream.bufferedReader().use { it.readText() }
-                                        }.getOrElse { "logcat failed: ${it.message}" }
-                                        (header + logcat).takeLast(90_000)
+                                        }.getOrElse { "perf logcat failed: ${it.message}" }
+                                        val tailLogs = runCatching {
+                                            val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "250"))
+                                            proc.inputStream.bufferedReader().use { it.readText() }
+                                        }.getOrElse { "tail logcat failed: ${it.message}" }
+                                        (header + perfLogs + "\n--- Recent System Tail ---\n" + tailLogs).takeLast(90_000)
                                     }
                                     val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                                         type = "text/plain"
