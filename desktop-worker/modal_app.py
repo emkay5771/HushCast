@@ -36,7 +36,18 @@ QWEN_URL = (
 app = modal.App("hushcast-worker")
 volume = modal.Volume.from_name("hushcast-data", create_if_missing=True)
 
-image = (
+_AD_TAGGER_URL = (
+    "https://raw.githubusercontent.com/emkay5771/HushCast/main/"
+    "core/automute-engine/src/main/assets/ad_tagger.onnx"
+)
+_LOCAL_AD_TAGGER_CANDIDATES = [
+    Path(__file__).resolve().parent.parent / "core/automute-engine/src/main/assets/ad_tagger.onnx",
+    Path(__file__).resolve().parent / "ad_tagger.onnx",
+    Path.home() / ".hushcast-worker/models/ad_tagger.onnx",
+]
+_LOCAL_AD_TAGGER = next((p for p in _LOCAL_AD_TAGGER_CANDIDATES if p.exists()), None)
+
+_base_image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11"
     )
@@ -57,12 +68,14 @@ image = (
         "llama-cpp-python>=0.3.0",
         extra_options="--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124",
     )
-    .add_local_file(
-        str(Path(__file__).resolve().parent.parent / "core/automute-engine/src/main/assets/ad_tagger.onnx"),
+)
+if _LOCAL_AD_TAGGER is not None:
+    _base_image = _base_image.add_local_file(
+        str(_LOCAL_AD_TAGGER),
         remote_path=str(BUNDLED_AD_TAGGER),
     )
-    .add_local_python_source("hushcast_worker")
-)
+
+image = _base_image.add_local_python_source("hushcast_worker")
 
 
 def _ensure_models() -> None:
@@ -79,6 +92,8 @@ def _ensure_models() -> None:
         (MODELS_DIR / "ggml-large-v3-turbo.bin", WHISPER_URL),
         (MODELS_DIR / "Qwen3-Embedding-0.6B-Q8_0.gguf", QWEN_URL),
     ]
+    if not ad_dest.exists():
+        downloads.append((ad_dest, _AD_TAGGER_URL))
     for dest, url in downloads:
         if dest.exists() and dest.stat().st_size > 0:
             continue
