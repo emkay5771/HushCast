@@ -2,7 +2,13 @@
 #include <jni.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "whisper.h"
@@ -75,16 +81,41 @@ struct WhisperProgressCtx {
     JNIEnv * env;
     jobject cb;
     jmethodID method;
+    jmethodID abort_method;
     int last_pct;
+    std::atomic<bool> aborted;
+    std::thread::id owner;
+    std::chrono::steady_clock::time_point last_check;
 };
 
 static void whisper_jni_progress(struct whisper_context *, struct whisper_state *, int progress, void * user_data) {
     auto * c = reinterpret_cast<WhisperProgressCtx *>(user_data);
     if (!c || !c->cb || !c->method) return;
+    if (std::this_thread::get_id() != c->owner) return;
     if (progress > c->last_pct) {
         c->last_pct = progress;
         c->env->CallVoidMethod(c->cb, c->method, (jint) progress);
+        if (c->env->ExceptionCheck()) c->env->ExceptionClear();
     }
+}
+
+// ggml may call this per graph node and potentially from worker threads: only touch JNI from the
+// thread that owns the JNIEnv, and at most every 250 ms.
+static bool whisper_jni_abort(void * user_data) {
+    auto * c = reinterpret_cast<WhisperProgressCtx *>(user_data);
+    if (!c || !c->cb || !c->abort_method) return false;
+    if (c->aborted.load()) return true;
+    if (std::this_thread::get_id() != c->owner) return false;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - c->last_check < std::chrono::milliseconds(250)) return false;
+    c->last_check = now;
+    const jboolean r = c->env->CallBooleanMethod(c->cb, c->abort_method);
+    if (c->env->ExceptionCheck()) {
+        c->env->ExceptionClear();
+        return false;
+    }
+    if (r) c->aborted.store(true);
+    return c->aborted.load();
 }
 
 // Transcribes [startSample, endSample) (or full buffer if endSample < 0).
@@ -95,6 +126,10 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_transcribeRange(
         jint threads, jstring jlang, jint beam_size, jstring jvadPath, jobject jcb) {
     auto * ctx = reinterpret_cast<whisper_context *>(h);
     auto * audio = reinterpret_cast<std::vector<float> *>(pcm);
+    if (!ctx || !audio) {
+        fail(env, "whisper not initialized");
+        return nullptr;
+    }
     const int total = (int) audio->size();
     const int s0 = std::max(0, std::min(startSample, total));
     const int s1 = (endSample < 0) ? total : std::max(s0, std::min(endSample, total));
@@ -107,7 +142,7 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_transcribeRange(
     whisper_full_params p = whisper_full_default_params(
         beam_size > 1 ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY);
     p.beam_search.beam_size = beam_size;
-    p.n_threads = threads;
+    p.n_threads = std::max(1, (int) threads);
     p.language = lang;
     p.translate = false;
     p.no_context = true;
@@ -127,22 +162,41 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_transcribeRange(
         p.vad_params.min_silence_duration_ms = 1000;
     }
 
-    WhisperProgressCtx pctx { env, jcb, nullptr, -1 };
+    WhisperProgressCtx pctx;
+    pctx.env = env;
+    pctx.cb = jcb;
+    pctx.method = nullptr;
+    pctx.abort_method = nullptr;
+    pctx.last_pct = -1;
+    pctx.aborted.store(false);
+    pctx.owner = std::this_thread::get_id();
+    pctx.last_check = std::chrono::steady_clock::time_point{};
     if (jcb) {
         jclass cls = env->GetObjectClass(jcb);
         pctx.method = env->GetMethodID(cls, "onProgress", "(I)V");
+        if (env->ExceptionCheck()) { env->ExceptionClear(); pctx.method = nullptr; }
+        pctx.abort_method = env->GetMethodID(cls, "shouldAbort", "()Z");
+        if (env->ExceptionCheck()) { env->ExceptionClear(); pctx.abort_method = nullptr; }
         env->DeleteLocalRef(cls);
         if (pctx.method) {
             p.progress_callback = whisper_jni_progress;
             p.progress_callback_user_data = &pctx;
+        }
+        if (pctx.abort_method) {
+            p.abort_callback = whisper_jni_abort;
+            p.abort_callback_user_data = &pctx;
         }
     }
 
     const int rc = whisper_full(ctx, p, samples, n_samples);
     env->ReleaseStringUTFChars(jlang, lang);
     if (vadPath) env->ReleaseStringUTFChars(jvadPath, vadPath);
+    if (pctx.aborted) {
+        env->ThrowNew(env->FindClass("java/util/concurrent/CancellationException"), "whisper aborted");
+        return nullptr;
+    }
     if (rc != 0) {
-        fail(env, "whisper_full failed");
+        fail(env, "whisper_full failed (rc=" + std::to_string(rc) + ")");
         return nullptr;
     }
 

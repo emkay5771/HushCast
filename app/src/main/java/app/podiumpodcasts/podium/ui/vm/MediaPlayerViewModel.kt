@@ -83,6 +83,21 @@ class MediaPlayerViewModel : ViewModel() {
     val queue = mutableStateListOf<String>()
     val queueIndex = mutableStateListOf<Int>()
     private var hasRestoredQueue = false
+    private var appContext: Context? = null
+
+    private fun saveLastPlayingEpisodeId(episodeId: String?) {
+        val ctx = appContext ?: return
+        if (episodeId.isNullOrBlank()) return
+        ctx.getSharedPreferences("hushcast_playback_state", Context.MODE_PRIVATE)
+            .edit()
+            .putString("last_playing_episode_id", episodeId)
+            .apply()
+    }
+
+    private fun loadLastPlayingEpisodeId(context: Context): String? {
+        return context.getSharedPreferences("hushcast_playback_state", Context.MODE_PRIVATE)
+            .getString("last_playing_episode_id", null)
+    }
 
     val canResumeCurrentEpisode: Boolean
         get() {
@@ -94,6 +109,9 @@ class MediaPlayerViewModel : ViewModel() {
         context: Context,
         bundle: PodcastEpisodeBundle
     ) {
+        appContext = context.applicationContext
+        saveLastPlayingEpisodeId(bundle.episode.id)
+
         if(bundle.episode.new) viewModelScope.launch {
             db.podcastEpisodes().unnewAndUpdateNewEpisodesCount(
                 origin = bundle.episode.origin,
@@ -367,31 +385,50 @@ class MediaPlayerViewModel : ViewModel() {
     }
 
     fun restoreQueueIfNeeded(context: Context) {
+        appContext = context.applicationContext
         if(hasRestoredQueue || !::db.isInitialized) return
         val controller = mediaController ?: return
         hasRestoredQueue = true
+
+        val currentEpisodeId = controller.currentMediaItem
+            ?.mediaMetadata?.extras?.getString(MediaMetadataExtra.EPISODE_ID.name)
+        if (currentEpisodeId != null) {
+            saveLastPlayingEpisodeId(currentEpisodeId)
+        }
 
         if(controller.mediaItemCount > 1) {
             syncQueue(persist = true)
             return
         }
 
-        val currentEpisodeId = controller.currentMediaItem
-            ?.mediaMetadata?.extras?.getString(MediaMetadataExtra.EPISODE_ID.name)
+        val appCtx = context.applicationContext
+        val lastEpisodeId = currentEpisodeId ?: loadLastPlayingEpisodeId(appCtx)
 
         viewModelScope.launch {
             val saved = withContext(Dispatchers.IO) {
                 db.playbackQueue().getQueueSync()
             }
-            if(saved.isEmpty()) return@launch
 
-            val appCtx = context.applicationContext
+            if (controller.mediaItemCount == 0 && lastEpisodeId != null) {
+                val lastBundle = withContext(Dispatchers.IO) {
+                    runCatching { db.podcastEpisodes().getSync(lastEpisodeId) }.getOrNull()
+                }
+                if (lastBundle != null) {
+                    val resumeMs = ((lastBundle.playState?.state ?: 0) * 1000L).coerceAtLeast(0L)
+                    controller.setMediaItem(lastBundle.createMediaItem(appCtx), resumeMs)
+                }
+            }
+
             for(item in saved) {
-                if(item.episodeId == currentEpisodeId) continue
+                if(item.episodeId == lastEpisodeId) continue
                 val bundle = withContext(Dispatchers.IO) {
                     runCatching { db.podcastEpisodes().getSync(item.episodeId) }.getOrNull()
                 } ?: continue
                 controller.addMediaItem(bundle.createMediaItem(appCtx))
+            }
+
+            if (controller.mediaItemCount > 0 && controller.playbackState == Player.STATE_IDLE) {
+                controller.prepare()
             }
 
             syncQueue(persist = false)
@@ -452,6 +489,7 @@ class MediaPlayerViewModel : ViewModel() {
             this@MediaPlayerViewModel.metadataOrigin = mediaMetadata.getOrigin()
             this@MediaPlayerViewModel.metadataEpisodeId = mediaMetadata.getEpisodeId()
             this@MediaPlayerViewModel.metadataImageSeedColor = mediaMetadata.getImageSeedColor()
+            saveLastPlayingEpisodeId(this@MediaPlayerViewModel.metadataEpisodeId)
 
             this@MediaPlayerViewModel.mediaSourceType = when(mediaMetadata.isDownload()) {
                 true -> SourceTypeState.Downloaded

@@ -86,15 +86,36 @@ class EpisodeAnalysisWorker(
             )
             android.util.Log.i("HushCastPerf", "Worker success ($currentIndex/$totalCount): ep=$episodeId")
             Result.success()
+        } catch (c: kotlinx.coroutines.CancellationException) {
+            android.util.Log.w("HushCastPerf", "Worker cancelled ($currentIndex/$totalCount): ep=$episodeId")
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                val existing = runCatching { db.dao().getStatus(episodeId) }.getOrNull()
+                val preservedWordMute = existing?.badge == ReadinessBadge.WORD_MUTE_READY.name
+                db.dao().upsertStatus(
+                    EpisodeAnalysisStatusEntity(
+                        episodeId = episodeId,
+                        fileSha256 = existing?.fileSha256?.ifBlank { knownSha256 ?: "" } ?: (knownSha256 ?: ""),
+                        badge = if (preservedWordMute) ReadinessBadge.WORD_MUTE_READY.name else ReadinessBadge.NOT_PROCESSED.name,
+                        progressPercent = if (preservedWordMute) 100 else 0,
+                        stageLabel = if (preservedWordMute) "Cancelled (Word-Mute Ready)" else "Cancelled",
+                        peakRssMb = existing?.peakRssMb ?: 0,
+                        errorMessage = null
+                    )
+                )
+            }
+            throw c
         } catch (t: Throwable) {
             android.util.Log.e("HushCastPerf", "Worker failed ($currentIndex/$totalCount): ep=$episodeId ${t.javaClass.simpleName}: ${t.message}", t)
+            val existing = runCatching { db.dao().getStatus(episodeId) }.getOrNull()
+            val preservedWordMute = existing?.badge == ReadinessBadge.WORD_MUTE_READY.name
             db.dao().upsertStatus(
                 EpisodeAnalysisStatusEntity(
                     episodeId = episodeId,
-                    fileSha256 = knownSha256 ?: "",
-                    badge = ReadinessBadge.NOT_PROCESSED.name,
-                    progressPercent = 0,
-                    stageLabel = "Analysis failed",
+                    fileSha256 = existing?.fileSha256?.ifBlank { knownSha256 ?: "" } ?: (knownSha256 ?: ""),
+                    badge = if (preservedWordMute) ReadinessBadge.WORD_MUTE_READY.name else ReadinessBadge.NOT_PROCESSED.name,
+                    progressPercent = if (preservedWordMute) 100 else 0,
+                    stageLabel = if (preservedWordMute) "Ad detection failed (Word-Mute Ready)" else "Analysis failed",
+                    peakRssMb = existing?.peakRssMb ?: 0,
                     errorMessage = t.message ?: t.javaClass.simpleName
                 )
             )

@@ -1,7 +1,18 @@
 package app.hushcast.automute.nativebridge
 
-internal fun interface WhisperProgressCallback {
-    fun onProgress(percent: Int)
+/**
+ * Called from native whisper_full(): onProgress() on progress ticks and shouldAbort() from
+ * whisper's abort_callback so a cancelled WorkManager job stops native work promptly.
+ */
+internal class WhisperCallbacks(
+    private val progressFn: ((Int) -> Unit)?,
+    private val abortFn: () -> Boolean
+) {
+    fun onProgress(percent: Int) {
+        progressFn?.invoke(percent)
+    }
+
+    fun shouldAbort(): Boolean = abortFn()
 }
 
 internal object WhisperJni {
@@ -25,7 +36,7 @@ internal object WhisperJni {
         language: String,
         beamSize: Int,
         vadModelPath: String?,
-        progressCallback: WhisperProgressCallback?
+        callbacks: WhisperCallbacks?
     ): Array<Any>
 
     @JvmStatic

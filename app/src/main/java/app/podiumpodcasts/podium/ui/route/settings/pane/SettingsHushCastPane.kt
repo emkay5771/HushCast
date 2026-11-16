@@ -20,6 +20,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
@@ -41,6 +43,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,7 +52,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import app.hushcast.automute.dsp.AdPolicyMode
 import app.hushcast.automute.dsp.MuteActionMode
@@ -489,40 +495,59 @@ fun SettingsHushCastPane(
                                 Text(if (explicitAdded) "Explicit Added" else "+ Explicit Preset")
                             }
                         }
+                        if (rules.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = { wordListExpanded = !wordListExpanded },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    if (wordListExpanded) "Hide Word List (${rules.size})"
+                                    else "Show Word List (${rules.size})"
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Icon(
+                                    if (wordListExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                    contentDescription = null
+                                )
+                            }
+                        }
                     }
                 }
             }
 
-            items(rules, key = { it.id }) { rule ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+            if (wordListExpanded) {
+                items(rules, key = { it.id }) { rule ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(rule.pattern, style = MaterialTheme.typography.bodyMedium)
-                            Text(
-                                "${rule.category} • ${rule.actionMode}${if (rule.isRegex) " • Regex" else ""}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                        Switch(
-                            checked = rule.enabled,
-                            onCheckedChange = { enabled ->
-                                scope.launch { autoMuteDb.dao().setRuleEnabled(rule.id, enabled) }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(rule.pattern, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "${rule.category} • ${rule.actionMode}${if (rule.isRegex) " • Regex" else ""}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                        )
-                        IconButton(onClick = {
-                            scope.launch { autoMuteDb.dao().deleteRule(rule.id) }
-                        }) {
-                            Icon(Icons.Rounded.Delete, contentDescription = "Delete rule")
+                            Switch(
+                                checked = rule.enabled,
+                                onCheckedChange = { enabled ->
+                                    scope.launch { autoMuteDb.dao().setRuleEnabled(rule.id, enabled) }
+                                }
+                            )
+                            IconButton(onClick = {
+                                scope.launch { autoMuteDb.dao().deleteRule(rule.id) }
+                            }) {
+                                Icon(Icons.Rounded.Delete, contentDescription = "Delete rule")
+                            }
                         }
                     }
                 }

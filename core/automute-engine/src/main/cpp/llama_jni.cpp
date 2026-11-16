@@ -16,6 +16,7 @@ struct Embedder {
     llama_context * ctx = nullptr;
     int dim = 0;
     int n_batch = 0;
+    int n_ubatch = 0;
     int n_seq = 0;
 };
 
@@ -51,11 +52,12 @@ Java_app_hushcast_automute_nativebridge_LlamaJni_load(JNIEnv * env, jclass, jstr
     cp.pooling_type = LLAMA_POOLING_TYPE_LAST;
     cp.n_ctx = 2048;
     cp.n_batch = 2048;
-    cp.n_ubatch = 2048;
+    // 512 keeps the attention/compute buffer ~4x smaller than 2048 with little speed cost on CPU
+    cp.n_ubatch = 512;
     cp.n_seq_max = 64;
     cp.kv_unified = true;
-    cp.n_threads = threads;
-    cp.n_threads_batch = threads;
+    cp.n_threads = std::max(1, (int) threads);
+    cp.n_threads_batch = cp.n_threads;
     llama_context * ctx = llama_init_from_model(model, cp);
     if (!ctx) {
         llama_model_free(model);
@@ -67,19 +69,28 @@ Java_app_hushcast_automute_nativebridge_LlamaJni_load(JNIEnv * env, jclass, jstr
     e->ctx = ctx;
     e->dim = llama_model_n_embd(model);
     e->n_batch = (int) cp.n_batch;
+    e->n_ubatch = (int) cp.n_ubatch;
     e->n_seq = (int) cp.n_seq_max;
     return reinterpret_cast<jlong>(e);
 }
 
 extern "C" JNIEXPORT jint JNICALL
 Java_app_hushcast_automute_nativebridge_LlamaJni_dim(JNIEnv *, jclass, jlong h) {
-    return reinterpret_cast<Embedder *>(h)->dim;
+    auto * e = reinterpret_cast<Embedder *>(h);
+    return e ? e->dim : 0;
 }
 
 extern "C" JNIEXPORT jfloatArray JNICALL
 Java_app_hushcast_automute_nativebridge_LlamaJni_embed(JNIEnv * env, jclass, jlong h, jobjectArray texts) {
     auto * e = reinterpret_cast<Embedder *>(h);
+    if (!e || !e->ctx || !e->model || e->dim <= 0) {
+        fail(env, "embedder not initialized");
+        return nullptr;
+    }
     const int n = env->GetArrayLength(texts);
+    if (n <= 0) {
+        return env->NewFloatArray(0);
+    }
     const llama_vocab * vocab = llama_model_get_vocab(e->model);
 
     std::vector<std::vector<llama_token>> toks(n);
@@ -95,7 +106,8 @@ Java_app_hushcast_automute_nativebridge_LlamaJni_embed(JNIEnv * env, jclass, jlo
             t.resize(-k);
             k = llama_tokenize(vocab, s.c_str(), len, t.data(), (int) t.size(), true, false);
         }
-        t.resize(k > 0 ? std::min(k, e->n_batch) : 0);
+        // Keep each sentence within one ubatch so last-token pooling never straddles ubatches
+        t.resize(k > 0 ? std::min(k, e->n_ubatch) : 0);
         toks[i] = std::move(t);
     }
 
@@ -121,6 +133,9 @@ Java_app_hushcast_automute_nativebridge_LlamaJni_embed(JNIEnv * env, jclass, jlo
         }
         if (seq == 0) {
             i++;
+            continue;
+        }
+        if (batch.n_tokens == 0) {
             continue;
         }
         if (llama_decode(e->ctx, batch) != 0) {

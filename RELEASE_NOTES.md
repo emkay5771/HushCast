@@ -1,3 +1,23 @@
+# HushCast v0.1.14-hushcast
+
+## What's New
+- **Chunked Whisper Transcription & Native Abort Support**:
+  - Long episodes (>3 min) now transcribe in 180-second chunks with per-chunk `HushCastPerf` speed telemetry and `whisper_full_params.abort_callback` wired to WorkManager cancellation.
+- **Phase 3 (Qwen3 + ONNX Ad Tagger) Hardening & Cached-Transcript Retry**:
+  - Reduced `llama_jni.cpp` `n_ubatch` to 512 (~4× smaller attention buffer), added empty-batch/null-handle guards, 64-sentence chunking for smoother progress & cancellation, ONNX performance-core thread config, and stage-tagged error diagnostics.
+  - Retrying a failed Phase 3 job now reuses the cached `WordIndexBlob` and extracts only the 24 kHz acoustic frames instead of re-running Whisper.
+  - Preserves `WORD_MUTE_READY` status if Phase 3 fails or is cancelled.
+- **Model Download Concurrency Fix**:
+  - Synchronized `Downloads.fetch` per destination path to eliminate `.part` rename races between Settings and `EpisodeAnalysisWorker`, plus HTTP status and 0-byte/truncated download checks.
+- **ProGuard JNI Keep Rules Fix**:
+  - Updated `consumer-rules.pro` from `podcast.adtagger.*` to `app.hushcast.automute.nativebridge.*` (`LlamaJni`, `WhisperJni`, `WhisperCallbacks`).
+- **Playback Persistence, Navbar Spacing & Settings UX**:
+  - Persists the currently playing episode and restores it alongside the queue on app restart (`MediaPlayerViewModel`).
+  - Removed leftover bottom navbar space in `HomeRoute` and `Main`.
+  - Collapsed the Muted Words Dictionary list by default in `SettingsHushCastPane` and prevented the keyboard from auto-opening on entry.
+
+---
+
 # HushCast v0.1.13-hushcast
 
 ## What's New

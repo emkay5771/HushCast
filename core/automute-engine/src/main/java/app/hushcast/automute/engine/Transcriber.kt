@@ -58,9 +58,10 @@ class Transcriber(
     fun transcribe(
         pcm: PcmBuffer,
         vadModelPath: String? = null,
+        shouldAbort: () -> Boolean = { false },
         onProgress: ((Int) -> Unit)? = null
     ): TranscriptionOutput {
-        return transcribeRange(pcm, 0.0, null, vadModelPath, onProgress)
+        return transcribeRange(pcm, 0.0, null, vadModelPath, shouldAbort, onProgress)
     }
 
     @Synchronized
@@ -69,6 +70,7 @@ class Transcriber(
         startSec: Double = 0.0,
         endSec: Double? = null,
         vadModelPath: String? = null,
+        shouldAbort: () -> Boolean = { false },
         onProgress: ((Int) -> Unit)? = null
     ): TranscriptionOutput {
         check(handle != 0L) { "Transcriber closed" }
@@ -77,7 +79,7 @@ class Transcriber(
         val startSample = (startSec * 16000.0).roundToInt().coerceIn(0, pcm.size)
         val endSample = endSec?.let { (it * 16000.0).roundToInt().coerceIn(startSample, pcm.size) } ?: -1
 
-        val cb = onProgress?.let { app.hushcast.automute.nativebridge.WhisperProgressCallback { pct -> it(pct) } }
+        val cb = app.hushcast.automute.nativebridge.WhisperCallbacks(onProgress, shouldAbort)
         val r = WhisperJni.transcribeRange(
             handle, pcm.handle, startSample, endSample, threads, language, beamSize, vadModelPath, cb
         )

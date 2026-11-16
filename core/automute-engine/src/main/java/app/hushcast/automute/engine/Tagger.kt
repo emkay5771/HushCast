@@ -15,7 +15,10 @@ class Tagger(modelBytes: ByteArray) : AutoCloseable {
     constructor(modelFile: File) : this(modelFile.readBytes())
 
     private val env = OrtEnvironment.getEnvironment()
-    private val session = env.createSession(modelBytes, OrtSession.SessionOptions())
+    private val session = OrtSession.SessionOptions().use { opts ->
+        opts.setIntraOpNumThreads(CpuTopology.performanceCoreCount())
+        env.createSession(modelBytes, opts)
+    }
 
     fun probs(emb: FloatArray, feats: FloatArray): FloatArray {
         val n = feats.size / SegmentFeatures.COUNT

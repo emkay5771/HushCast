@@ -12,16 +12,24 @@ class Embedder(modelPath: String, threads: Int = defaultThreads()) : AutoCloseab
     val dim = LlamaJni.dim(handle)
 
     @Synchronized
-    fun embed(texts: List<String>, onProgress: ((Float) -> Unit)? = null): FloatArray {
+    fun embed(
+        texts: List<String>,
+        shouldCancel: () -> Boolean = { false },
+        onProgress: ((Float) -> Unit)? = null
+    ): FloatArray {
         check(handle != 0L) { "Embedder closed" }
+        if (texts.isEmpty()) return FloatArray(0)
         val out = FloatArray(texts.size * dim)
         var i = 0
         while (i < texts.size) {
-            val chunk = texts.subList(i, min(i + 256, texts.size))
+            if (shouldCancel()) {
+                throw java.util.concurrent.CancellationException("Embedding cancelled")
+            }
+            val chunk = texts.subList(i, min(i + 64, texts.size))
             val v = LlamaJni.embed(handle, Array(chunk.size) { input(chunk[it]).toByteArray(Charsets.UTF_8) })
             System.arraycopy(v, 0, out, i * dim, v.size)
             i += chunk.size
-            if (onProgress != null && texts.isNotEmpty()) {
+            if (onProgress != null) {
                 onProgress(i.toFloat() / texts.size.toFloat())
             }
         }

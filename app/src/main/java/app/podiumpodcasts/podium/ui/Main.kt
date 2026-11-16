@@ -283,10 +283,11 @@ fun Main(
                 )
             }
 
+            val isNavHidden = navigationScaffoldState.currentValue == NavigationSuiteScaffoldValue.Hidden
             androidx.compose.foundation.layout.Box(
                 modifier = Modifier
                     .align(androidx.compose.ui.Alignment.BottomEnd)
-                    .navigationBarsPadding()
+                    .then(if (isNavHidden) Modifier.navigationBarsPadding() else Modifier)
                     .padding(bottom = 8.dp, end = 16.dp)
             ) {
                 FloatingMediaPlayer(
