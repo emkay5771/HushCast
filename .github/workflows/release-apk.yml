@@ -68,6 +68,13 @@ jobs:
           EOF
             sed -i "s|\${{ env.APK_FILE }}|${{ env.APK_FILE }}|g" /tmp/release_notes.md
           fi
-          gh release create "${GITHUB_REF_NAME}" "${{ env.APK_FILE }}" \
-            --title "HushCast ${GITHUB_REF_NAME}" \
-            --notes-file /tmp/release_notes.md
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "${{ env.APK_FILE }}" --clobber
+            gh release edit "${GITHUB_REF_NAME}" \
+              --title "HushCast ${GITHUB_REF_NAME}" \
+              --notes-file /tmp/release_notes.md
+          else
+            gh release create "${GITHUB_REF_NAME}" "${{ env.APK_FILE }}" \
+              --title "HushCast ${GITHUB_REF_NAME}" \
+              --notes-file /tmp/release_notes.md
+          fi

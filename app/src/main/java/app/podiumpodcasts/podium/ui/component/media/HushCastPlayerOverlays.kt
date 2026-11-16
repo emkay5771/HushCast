@@ -517,6 +517,12 @@ fun SyncedTranscriptCard(
             val displayRows = remember(filteredSegments, adWindows) {
                 buildTranscriptDisplayRows(filteredSegments, adWindows)
             }
+            val wordsBySegment = remember(filteredSegments, words) {
+                groupWordsBySegment(filteredSegments, words)
+            }
+            val activeMuteWindows = remember(muteWindows) {
+                muteWindows.filter { it.enabled }.sortedBy { it.startMs }
+            }
             val activeRowIndex = remember(displayRows, currentPositionMs) {
                 displayRows.indexOfFirst { row ->
                     when (row) {
@@ -561,7 +567,15 @@ fun SyncedTranscriptCard(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    itemsIndexed(displayRows) { _, row ->
+                    itemsIndexed(
+                        items = displayRows,
+                        key = { idx, row ->
+                            when (row) {
+                                is TranscriptDisplayRow.SponsorGroup -> "ad_${row.startMs}_${idx}"
+                                is TranscriptDisplayRow.SpeechLine -> "seg_${(row.segment.start * 1000.0).toLong()}_${idx}"
+                            }
+                        }
+                    ) { _, row ->
                         when (row) {
                             is TranscriptDisplayRow.SponsorGroup -> {
                                 var expanded by remember(row.startMs) { mutableStateOf(false) }
@@ -628,104 +642,90 @@ fun SyncedTranscriptCard(
                                 val segStartMs = (seg.start * 1000.0).toLong()
                                 val segEndMs = (seg.end * 1000.0).toLong()
                                 val isActive = currentPositionMs in segStartMs..segEndMs
-                        val segWords = words.filter { w ->
-                            val ws = (w.start * 1000.0).toLong()
-                            ws in segStartMs..segEndMs
-                        }
+                                val segWords = wordsBySegment[seg].orEmpty()
 
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isActive) {
-                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                            } else {
-                                MaterialTheme.colorScheme.surfaceContainerLow
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onSeekToMs(segStartMs) }
-                        ) {
-                            Column(modifier = Modifier.padding(10.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isActive) {
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceContainerLow
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onSeekToMs(segStartMs) }
                                 ) {
-                                    Text(
-                                        text = formatTranscriptTimestamp(segStartMs),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                    seg.speaker?.let { spk ->
-                                        val speakerColors = listOf(
-                                            Color(0xFF1E88E5),
-                                            Color(0xFF8E24AA),
-                                            Color(0xFF00897B),
-                                            Color(0xFFF4511E),
-                                            Color(0xFF3949AB),
-                                            Color(0xFF6D4C41)
-                                        )
-                                        val spkColor = speakerColors[spk.coerceAtLeast(0) % speakerColors.size]
-                                        Surface(
-                                            shape = RoundedCornerShape(6.dp),
-                                            color = spkColor.copy(alpha = 0.14f)
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             Text(
-                                                text = "Speaker ${spk + 1}",
+                                                text = formatTranscriptTimestamp(segStartMs),
                                                 style = MaterialTheme.typography.labelSmall,
-                                                color = spkColor,
-                                                fontWeight = FontWeight.Medium,
-                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                            seg.speaker?.let { spk ->
+                                                val spkColor = transcriptSpeakerColors[spk.coerceAtLeast(0) % transcriptSpeakerColors.size]
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = spkColor.copy(alpha = 0.14f)
+                                                ) {
+                                                    Text(
+                                                        text = "Speaker ${spk + 1}",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = spkColor,
+                                                        fontWeight = FontWeight.Medium,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        Spacer(Modifier.height(4.dp))
+                                        if (segWords.isNotEmpty()) {
+                                            FlowRow(
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                segWords.forEach { w ->
+                                                    val ws = (w.start * 1000.0).toLong()
+                                                    val we = (w.end * 1000.0).toLong()
+                                                    val isMuted = isWordInMuteWindows(ws, we, activeMuteWindows)
+                                                    Surface(
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        color = if (isMuted) {
+                                                            MaterialTheme.colorScheme.errorContainer
+                                                        } else {
+                                                            Color.Transparent
+                                                        },
+                                                        modifier = Modifier.combinedClickable(
+                                                            onClick = { onSeekToMs(ws) },
+                                                            onLongClick = { onToggleWordMute(w, !isMuted) }
+                                                        )
+                                                    ) {
+                                                        Text(
+                                                            text = w.text.trim(),
+                                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                                textDecoration = if (isMuted) TextDecoration.LineThrough else TextDecoration.None
+                                                            ),
+                                                            color = if (isMuted) {
+                                                                MaterialTheme.colorScheme.onErrorContainer
+                                                            } else {
+                                                                MaterialTheme.colorScheme.onSurface
+                                                            },
+                                                            modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            Text(
+                                                text = seg.text,
+                                                style = MaterialTheme.typography.bodyMedium
                                             )
                                         }
                                     }
                                 }
-                                Spacer(Modifier.height(4.dp))
-                                if (segWords.isNotEmpty()) {
-                                    FlowRow(
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                                    ) {
-                                        segWords.forEach { w ->
-                                            val ws = (w.start * 1000.0).toLong()
-                                            val we = (w.end * 1000.0).toLong()
-                                            val matchedMute = muteWindows.firstOrNull { m ->
-                                                ws < m.endMs && we > m.startMs
-                                            }
-                                            val isMuted = matchedMute?.enabled == true
-                                            Surface(
-                                                shape = RoundedCornerShape(6.dp),
-                                                color = if (isMuted) {
-                                                    MaterialTheme.colorScheme.errorContainer
-                                                } else {
-                                                    Color.Transparent
-                                                },
-                                                modifier = Modifier.combinedClickable(
-                                                    onClick = { onSeekToMs(ws) },
-                                                    onLongClick = { onToggleWordMute(w, !isMuted) }
-                                                )
-                                            ) {
-                                                Text(
-                                                    text = w.text.trim(),
-                                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                                        textDecoration = if (isMuted) TextDecoration.LineThrough else TextDecoration.None
-                                                    ),
-                                                    color = if (isMuted) {
-                                                        MaterialTheme.colorScheme.onErrorContainer
-                                                    } else {
-                                                        MaterialTheme.colorScheme.onSurface
-                                                    },
-                                                    modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    Text(
-                                        text = seg.text,
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                }
-                            }
-                        }
                             }
                         }
                     }
@@ -850,6 +850,65 @@ private fun buildTranscriptDisplayRows(
     }
     flushPending()
     return rows
+}
+
+private val transcriptSpeakerColors = listOf(
+    Color(0xFF1E88E5),
+    Color(0xFF8E24AA),
+    Color(0xFF00897B),
+    Color(0xFFF4511E),
+    Color(0xFF3949AB),
+    Color(0xFF6D4C41)
+)
+
+private fun groupWordsBySegment(
+    segments: List<Segment>,
+    words: List<Word>
+): Map<Segment, List<Word>> {
+    val map = java.util.IdentityHashMap<Segment, List<Word>>(segments.size)
+    if (segments.isEmpty() || words.isEmpty()) return map
+
+    var wordIdx = 0
+    val wordCount = words.size
+    for (seg in segments) {
+        val segStartMs = (seg.start * 1000.0).toLong()
+        val segEndMs = (seg.end * 1000.0).toLong()
+        while (wordIdx < wordCount && (words[wordIdx].start * 1000.0).toLong() < segStartMs) {
+            wordIdx++
+        }
+        var probe = wordIdx
+        val bucket = ArrayList<Word>()
+        while (probe < wordCount) {
+            val ws = (words[probe].start * 1000.0).toLong()
+            if (ws > segEndMs) break
+            bucket.add(words[probe])
+            probe++
+        }
+        if (bucket.isNotEmpty()) {
+            map[seg] = bucket
+        }
+    }
+    return map
+}
+
+private fun isWordInMuteWindows(
+    wordStartMs: Long,
+    wordEndMs: Long,
+    sortedActiveMutes: List<MuteWindow>
+): Boolean {
+    if (sortedActiveMutes.isEmpty()) return false
+    var lo = 0
+    var hi = sortedActiveMutes.lastIndex
+    while (lo <= hi) {
+        val mid = (lo + hi) ushr 1
+        val m = sortedActiveMutes[mid]
+        when {
+            wordEndMs <= m.startMs -> hi = mid - 1
+            wordStartMs >= m.endMs -> lo = mid + 1
+            else -> return true
+        }
+    }
+    return false
 }
 
 private fun formatTranscriptTimestamp(ms: Long): String {
