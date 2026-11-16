@@ -37,6 +37,9 @@ class DesktopChapterDto(BaseModel):
     title: str
 
 
+PIPELINE_VERSION = 2
+
+
 class DesktopAnalysisBundle(BaseModel):
     fileSha256: str
     episodeId: str
@@ -48,6 +51,7 @@ class DesktopAnalysisBundle(BaseModel):
     whisperModel: str = ""
     analysisDurationMs: int = 0
     workerAccelerator: str = "cpu"
+    pipelineVersion: int = PIPELINE_VERSION
 
 
 class JobState(str, Enum):

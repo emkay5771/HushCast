@@ -49,6 +49,7 @@ class PodcastEpisodeDownloadWorker(
                 setForeground(createDownloadForegroundInfo("Downloading episode…", "Preparing download…", 0))
             }
 
+            var lastTitle = ""
             val worker = PodcastEpisodeDownloadWork(applicationContext, db)
             val result = worker.doWork(
                 episodeId = episodeId,
@@ -56,12 +57,19 @@ class PodcastEpisodeDownloadWorker(
                 isAuto = isAuto,
                 forceReprocess = forceReprocess
             ) { title, sourceLabel, pct ->
+                if (title.isNotBlank()) lastTitle = title
                 runCatching {
                     setForegroundAsync(createDownloadForegroundInfo(title, sourceLabel, pct))
                 }
             }
 
             if(result) {
+                runCatching {
+                    val resolvedTitle = lastTitle.ifBlank {
+                        db.podcastEpisodes().getSync(episodeId).episode.title
+                    }
+                    postDownloadCompleteNotification(episodeId, resolvedTitle, method)
+                }
                 Result.success()
             } else {
                 Result.failure()
@@ -125,8 +133,68 @@ class PodcastEpisodeDownloadWorker(
         }
     }
 
+    private fun postDownloadCompleteNotification(
+        episodeId: String,
+        title: String,
+        method: app.hushcast.automute.engine.DownloadAnalysisMethod
+    ) {
+        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val channel = android.app.NotificationChannel(
+                DOWNLOAD_COMPLETE_CHANNEL_ID,
+                "Completed Episode Downloads",
+                android.app.NotificationManager.IMPORTANCE_DEFAULT
+            )
+            manager.createNotificationChannel(channel)
+        }
+
+        val statusText = when (method) {
+            app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS -> "Download complete"
+            else -> {
+                val stage = kotlinx.coroutines.runBlocking {
+                    runCatching {
+                        app.hushcast.automute.storage.AutoMuteDatabase.getInstance(applicationContext)
+                            .dao()
+                            .getStatus(episodeId)
+                            ?.stageLabel
+                    }.getOrNull()
+                }
+                if (!stage.isNullOrBlank() && stage.startsWith("Ready", ignoreCase = true)) {
+                    "Download & AI analysis complete • $stage"
+                } else {
+                    "Download complete"
+                }
+            }
+        }
+
+        val launchIntent = applicationContext.packageManager
+            .getLaunchIntentForPackage(applicationContext.packageName)
+        val pendingIntent = launchIntent?.let {
+            android.app.PendingIntent.getActivity(
+                applicationContext,
+                episodeId.hashCode(),
+                it,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            )
+        }
+
+        val builder = androidx.core.app.NotificationCompat.Builder(applicationContext, DOWNLOAD_COMPLETE_CHANNEL_ID)
+            .setContentTitle(title.ifBlank { "Episode ready" })
+            .setContentText(statusText)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setAutoCancel(true)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_DEFAULT)
+        if (pendingIntent != null) {
+            builder.setContentIntent(pendingIntent)
+        }
+
+        val notifId = 41100 + (episodeId.hashCode() and 0x7FFF)
+        manager.notify(notifId, builder.build())
+    }
+
     companion object {
         private const val DOWNLOAD_CHANNEL_ID = "episode_downloads"
+        private const val DOWNLOAD_COMPLETE_CHANNEL_ID = "episode_downloads_complete"
         fun generateUniqueWorkName(episodeId: String): String {
             return "app.podiumpodcasts.podium.background.worker.PodcastEpisodeDownloadWorker:$episodeId"
         }

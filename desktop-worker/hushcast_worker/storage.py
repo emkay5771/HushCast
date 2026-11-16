@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from .models import DesktopAnalysisBundle, DesktopReadyEpisode
+from .models import PIPELINE_VERSION, DesktopAnalysisBundle, DesktopReadyEpisode
 
 
 class WorkerCache:
@@ -45,12 +45,18 @@ class WorkerCache:
     def embeddings_path(self, sha256: str) -> Path:
         return self.episodes_dir / f"{sha256}.emb.npy"
 
-    def has_complete(self, sha256: str) -> bool:
-        return self.audio_path(sha256).exists() and self.bundle_path(sha256).exists()
+    def has_complete(self, sha256: str, *, require_current_pipeline: bool = False) -> bool:
+        if not (self.audio_path(sha256).exists() and self.bundle_path(sha256).exists()):
+            return False
+        if require_current_pipeline:
+            meta = self._index["by_sha"].get(sha256, {})
+            if int(meta.get("pipelineVersion", 1)) < PIPELINE_VERSION:
+                return False
+        return True
 
     def lookup_by_url(self, audio_url: str) -> Optional[str]:
         sha = self._index["by_url"].get(audio_url)
-        if sha and self.has_complete(sha):
+        if sha and self.has_complete(sha, require_current_pipeline=True):
             return sha
         return None
 
@@ -96,6 +102,7 @@ class WorkerCache:
             "audioBytes": dest_audio.stat().st_size,
             "wordCount": len(bundle.wordIndexBlob.words),
             "adCount": len(bundle.adSegments),
+            "pipelineVersion": bundle.pipelineVersion,
             "createdAtMs": int(time.time() * 1000),
         }
         self._save_index()

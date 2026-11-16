@@ -377,6 +377,9 @@ class PlaybackService : MediaLibraryService() {
                 mediaItem?.getResumeAt()?.let { resumeAt ->
                     mediaSession?.player?.seekTo(resumeAt)
                 }
+                mediaSession?.let { session ->
+                    onUpdateNotification(session, session.player.playWhenReady)
+                }
 
                 super.onMediaItemTransition(mediaItem, reason)
             }

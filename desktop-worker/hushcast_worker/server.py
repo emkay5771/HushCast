@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import socket
+import sys
+import time
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
@@ -30,6 +33,62 @@ from .storage import WorkerCache
 AudioDownloader = Callable[
     [str, Path, Optional[Callable[[int, int], None]]], Awaitable[tuple[str, str]]
 ]
+
+
+class _JobConsoleLogger:
+    """User-friendly CLI progress bar & detailed stage logger."""
+
+    def __init__(self, job_id: str, title: str) -> None:
+        self.short_id = job_id[:8]
+        self.label = (title or "Episode").strip()
+        if len(self.label) > 36:
+            self.label = self.label[:33] + "..."
+        self.is_tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
+        self.last_state: Optional[JobState] = None
+        self.last_stage_msg: str = ""
+        self.t_start = time.monotonic()
+
+    @staticmethod
+    def _ts() -> str:
+        return datetime.now().strftime("%H:%M:%S")
+
+    @staticmethod
+    def _bar(pct: int, width: int = 22) -> str:
+        clamped = max(0, min(100, pct))
+        filled = int(round(width * clamped / 100.0))
+        return "█" * filled + "░" * (width - filled)
+
+    def update(self, state: JobState, pct: int, stage: str) -> None:
+        bar = self._bar(pct)
+        state_changed = state != self.last_state
+        # Print a permanent log line when entering a new major stage or milestone
+        milestone = state_changed or any(
+            kw in stage
+            for kw in ("Transcribed ", "Detected ", "Embedded ", "Found ", "Generated ")
+        )
+        if milestone and stage != self.last_stage_msg:
+            if self.is_tty:
+                sys.stdout.write("\r\033[K")
+            print(f"[{self._ts()}] [{self.short_id}] {self.label} • {state.value:<12} [{bar}] {pct:3d}% | {stage}", flush=True)
+            self.last_state = state
+            self.last_stage_msg = stage
+        elif self.is_tty:
+            sys.stdout.write(
+                f"\r\033[K[{self._ts()}] [{self.short_id}] {self.label} • {state.value:<12} [{bar}] {pct:3d}% | {stage}"
+            )
+            sys.stdout.flush()
+
+    def finish(self, summary_line: str) -> None:
+        elapsed = time.monotonic() - self.t_start
+        if self.is_tty:
+            sys.stdout.write("\r\033[K")
+        print(f"[{self._ts()}] [{self.short_id}] ✅ {self.label} • Done in {elapsed:.1f}s | {summary_line}", flush=True)
+
+    def fail(self, error: str) -> None:
+        elapsed = time.monotonic() - self.t_start
+        if self.is_tty:
+            sys.stdout.write("\r\033[K")
+        print(f"[{self._ts()}] [{self.short_id}] ❌ {self.label} • Failed after {elapsed:.1f}s | {error}", flush=True)
 
 
 def create_app(
@@ -81,7 +140,7 @@ def create_app(
     )
     async def submit_job(req: DesktopJobRequest) -> DesktopJobResponse:
         if not req.force:
-            # 1. Fast-path: already analyzed & cached for this audioUrl
+            # 1. Fast-path: already analyzed & cached for this audioUrl (with current pipeline version)
             existing_sha = cache.lookup_by_url(req.audioUrl)
             if existing_sha:
                 job_id = str(uuid.uuid4())
@@ -94,6 +153,10 @@ def create_app(
                     fileSha256=existing_sha,
                 )
                 jobs[job_id] = resp
+                print(
+                    f"[{_JobConsoleLogger._ts()}] [{job_id[:8]}] ⚡ Cache hit for '{req.title or req.episodeId}' (sha={existing_sha[:12]})",
+                    flush=True,
+                )
                 return resp
 
             # 2. Reuse in-flight job for same URL if still running
@@ -119,7 +182,9 @@ def create_app(
 
     async def _run_job(job_id: str, req: DesktopJobRequest) -> None:
         tmp_audio = cache.tmp_dir / f"{job_id}.part"
+        cli_log = _JobConsoleLogger(job_id, req.title or req.episodeId)
         try:
+            cli_log.update(JobState.DOWNLOADING, 5, "Downloading episode audio…")
             jobs[job_id] = jobs[job_id].model_copy(
                 update={
                     "state": JobState.DOWNLOADING,
@@ -131,19 +196,24 @@ def create_app(
             def on_dl_bytes(received: int, total: int) -> None:
                 if total > 0:
                     pct = min(24, 5 + int((received * 19) / total))
+                    dl_pct = int(received * 100 / total)
+                    mb_rec = received / (1024 * 1024)
+                    mb_tot = total / (1024 * 1024)
+                    cli_log.update(JobState.DOWNLOADING, pct, f"Downloading {mb_rec:.1f}/{mb_tot:.1f} MB ({dl_pct}%)")
                     jobs[job_id] = jobs[job_id].model_copy(
                         update={
                             "state": JobState.DOWNLOADING,
                             "progressPercent": pct,
-                            "stageLabel": f"Downloading ({int(received * 100 / total)}%)",
+                            "stageLabel": f"Downloading ({dl_pct}%)",
                         }
                     )
 
             sha256, content_type = await downloader(req.audioUrl, tmp_audio, on_dl_bytes)
 
-            # Check if another URL already produced this exact SHA-256
-            if not req.force and cache.has_complete(sha256):
+            # Check if another URL already produced this exact SHA-256 with current pipeline
+            if not req.force and cache.has_complete(sha256, require_current_pipeline=True):
                 tmp_audio.unlink(missing_ok=True)
+                cli_log.finish(f"Matched cached SHA-256 ({sha256[:12]})")
                 jobs[job_id] = jobs[job_id].model_copy(
                     update={
                         "state": JobState.READY,
@@ -155,6 +225,7 @@ def create_app(
                 return
 
             def on_ml_progress(state: JobState, pct: int, stage: str) -> None:
+                cli_log.update(state, pct, stage)
                 jobs[job_id] = jobs[job_id].model_copy(
                     update={
                         "state": state,
@@ -196,6 +267,12 @@ def create_app(
                 embeddings=embeddings,
             )
 
+            dur_m = int(bundle.durationSec // 60)
+            dur_s = int(bundle.durationSec % 60)
+            cli_log.finish(
+                f"{dur_m}m{dur_s:02d}s audio • {len(bundle.wordIndexBlob.segments)} segments • "
+                f"{len(bundle.adSegments)} ads • {len(bundle.chapters)} chapters"
+            )
             jobs[job_id] = jobs[job_id].model_copy(
                 update={
                     "state": JobState.READY,
@@ -206,6 +283,7 @@ def create_app(
             )
         except Exception as exc:
             tmp_audio.unlink(missing_ok=True)
+            cli_log.fail(f"{type(exc).__name__}: {exc}")
             jobs[job_id] = jobs[job_id].model_copy(
                 update={
                     "state": JobState.FAILED,

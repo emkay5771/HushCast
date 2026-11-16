@@ -1,3 +1,17 @@
+# HushCast v0.1.24-hushcast
+
+## What's New
+- **Desktop Worker CLI Progress Bars & Detailed Logs**:
+  - [`server.py`](desktop-worker/hushcast_worker/server.py) and [`pipeline.py`](desktop-worker/hushcast_worker/pipeline.py) now display live terminal progress bars (`[████████████░░░░░░░░] 60%`) and timestamped stage logs (download MB, audio duration, Whisper realtime speed, speaker count, per-segment embedding progress, ad spans, and chapter/summary mode).
+- **Automatic Pipeline Cache Upgrade (`PIPELINE_VERSION = 2`)**:
+  - [`models.py`](desktop-worker/hushcast_worker/models.py) and [`storage.py`](desktop-worker/hushcast_worker/storage.py) now track `pipelineVersion` so cached v1 bundles automatically re-run and upgrade without manual cache clearing.
+- **Completed Download & Analysis Notification**:
+  - [`PodcastEpisodeDownloadWorker`](app/src/main/java/app/podiumpodcasts/podium/background/worker/PodcastEpisodeDownloadWorker.kt) now posts a persistent, tappable completion notification when an episode finishes downloading/analyzing instead of silently disappearing.
+- **Media Notification Shade Sync on Episode Switch**:
+  - [`MediaPlayerViewModel`](app/src/main/java/app/podiumpodcasts/podium/ui/vm/MediaPlayerViewModel.kt) now calls `prepare()` before `play()`, and [`PlaybackService`](app/src/main/java/app/podiumpodcasts/podium/background/PlaybackService.kt) triggers `onUpdateNotification` on `onMediaItemTransition` so the notification shade updates immediately when switching episodes.
+
+---
+
 # HushCast v0.1.23-hushcast
 
 ## What's New

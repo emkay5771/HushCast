@@ -218,20 +218,37 @@ class LocalMlBackend:
             ) from exc
 
         t0 = time.monotonic()
-        on_progress(JobState.TRANSCRIBING, 25, f"Transcribing ({self.whisper_model.name})")
+        on_progress(JobState.TRANSCRIBING, 25, f"Decoding audio for {self.whisper_model.name}")
 
         # 1. Decode to 16 kHz mono for Whisper & acoustic speaker diarization
+        t_dec = time.monotonic()
         pcm_16k, duration_sec = _decode_audio_16k_mono(audio_path)
+        on_progress(
+            JobState.TRANSCRIBING,
+            30,
+            f"Transcribing {int(duration_sec // 60)}m{int(duration_sec % 60):02d}s audio ({self.whisper_model.name}, {time.monotonic() - t_dec:.1f}s decode)",
+        )
+
+        t_tr = time.monotonic()
         whisper = WhisperModel(str(self.whisper_model), print_progress=False)
         raw_segments = whisper.transcribe(pcm_16k, token_timestamps=True)
-
         words, segments = _extract_whisper_words_and_segments(whisper, raw_segments)
+        tr_sec = max(0.01, time.monotonic() - t_tr)
+        rt_speed = duration_sec / tr_sec if duration_sec > 0 else 0.0
+        on_progress(
+            JobState.TRANSCRIBING,
+            60,
+            f"Transcribed {len(segments)} segments / {len(words)} words in {tr_sec:.1f}s ({rt_speed:.1f}x realtime)",
+        )
 
         # 2. Acoustic speaker diarization
         if segments and len(pcm_16k) > 0:
+            on_progress(JobState.TRANSCRIBING, 63, f"Identifying speakers across {len(segments)} segments")
             _assign_speakers(pcm_16k, segments)
+            n_speakers = len({s.speaker for s in segments if s.speaker is not None})
+            on_progress(JobState.TRANSCRIBING, 65, f"Detected {max(1, n_speakers)} speaker(s)")
 
-        on_progress(JobState.EMBEDDING, 65, "Embedding sentences (Qwen3 Metal)")
+        on_progress(JobState.EMBEDDING, 66, f"Loading embedding model ({self.qwen_model.name})")
         llm = self._load_embedding_llm()
         texts = [s.text for s in segments]
         ad_segments: list[AdSegmentDto] = []
@@ -242,8 +259,11 @@ class LocalMlBackend:
         if texts:
             import numpy as np
 
+            t_emb = time.monotonic()
             emb_list = []
-            for t in texts:
+            total_segs = len(texts)
+            last_emit = 0.0
+            for idx_t, t in enumerate(texts):
                 vec = np.asarray(llm.embed(t), dtype=np.float32)
                 if vec.ndim == 2:
                     vec = vec[-1]
@@ -253,21 +273,46 @@ class LocalMlBackend:
                 if norm > 1e-12:
                     vec = vec / norm
                 emb_list.append(vec)
+                now = time.monotonic()
+                if (idx_t + 1) == total_segs or (now - last_emit) >= 0.2:
+                    last_emit = now
+                    pct = 66 + int(19 * (idx_t + 1) / total_segs)
+                    on_progress(
+                        JobState.EMBEDDING,
+                        pct,
+                        f"Embedding segments ({idx_t + 1}/{total_segs})",
+                    )
             emb_2d = np.stack(emb_list, axis=0)  # (N, 1024)
             emb = emb_2d[None, :, :]  # (1, N, 1024)
 
-            on_progress(JobState.TAGGING, 85, "Tagging ads & generating chapters")
+            on_progress(
+                JobState.TAGGING,
+                86,
+                f"Embedded {total_segs} segments in {time.monotonic() - t_emb:.1f}s • Detecting ads",
+            )
             feats = _basic_segment_features(segments, duration_sec)[None, :, :]  # (1, N, 28)
 
             sess = ort.InferenceSession(str(self.ad_tagger_onnx))
             probs = sess.run(None, {"emb": emb, "feats": feats})[0][0]  # (N, 5)
             ad_segments = _decode_ad_segments(probs, segments)
 
+            chat_path = self.chat_model_path()
+            sum_mode = f"LLM ({chat_path.name})" if (chat_path and chat_path.exists()) else "Extractive summary"
+            on_progress(
+                JobState.TAGGING,
+                92,
+                f"Found {len(ad_segments)} ad span(s) • Generating chapters & {sum_mode}",
+            )
             summary, chapters = _generate_chapters_and_summary(
                 segments=segments,
                 embeddings=emb_2d,
                 ad_segments=ad_segments,
-                chat_model_path=self.chat_model_path(),
+                chat_model_path=chat_path,
+            )
+            on_progress(
+                JobState.TAGGING,
+                98,
+                f"Generated {len(chapters)} chapters ({sum_mode})",
             )
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
