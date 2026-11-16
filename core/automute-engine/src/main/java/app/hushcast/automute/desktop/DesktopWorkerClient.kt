@@ -33,7 +33,9 @@ object DesktopWorkerClient {
 
     suspend fun healthCheck(baseUrl: String, token: String = ""): DesktopHealthResponse =
         withContext(Dispatchers.IO) {
-            val body = getText("${normalizeUrl(baseUrl)}/v1/health", token, timeoutMs = 4000)
+            val normalized = normalizeUrl(baseUrl)
+            val timeout = if (normalized.startsWith("https://", ignoreCase = true)) 35_000 else 4_000
+            val body = getText("$normalized/v1/health", token, timeoutMs = timeout)
             json.decodeFromString<DesktopHealthResponse>(body)
         }
 
