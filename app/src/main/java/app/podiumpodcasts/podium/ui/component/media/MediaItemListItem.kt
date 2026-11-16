@@ -195,7 +195,7 @@ fun MediaItemListItem(
                                             context = context,
                                             db = appDb,
                                             episodeId = episodeId,
-                                            downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.AUDIO_ONLY
+                                            downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS
                                         )
                                     }
                                 }

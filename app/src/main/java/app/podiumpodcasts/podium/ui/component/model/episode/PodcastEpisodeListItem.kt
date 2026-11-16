@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
@@ -332,7 +333,7 @@ fun PodcastEpisodeListItem(
                                     }
                                     IconButton(onClick = { showRefreshDialog = true }) {
                                         Icon(
-                                            imageVector = androidx.compose.material.icons.Icons.Rounded.Refresh,
+                                            imageVector = Icons.Rounded.Refresh,
                                             contentDescription = "Refresh on Desktop / Cloud"
                                         )
                                     }
@@ -404,7 +405,7 @@ fun PodcastEpisodeListItem(
                                                     context = context,
                                                     db = appDb,
                                                     episodeId = bundle.episode.id,
-                                                    downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.AUDIO_ONLY
+                                                    downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS
                                                 )
                                             }
                                         }

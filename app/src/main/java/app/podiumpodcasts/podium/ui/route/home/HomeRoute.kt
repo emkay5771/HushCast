@@ -645,4 +645,3 @@ fun HomeRoute(
         }
     }
 }
-}
