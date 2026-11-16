@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AppRegistration
 import androidx.compose.material.icons.rounded.Colorize
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -23,7 +22,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -47,7 +45,6 @@ fun SettingsAppearancePane(
     navigationIcon: @Composable () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
 
     val db = LocalDatabase.current
     val settingsRepository = LocalSettingsRepository.current
@@ -135,7 +132,7 @@ fun SettingsAppearancePane(
                     description = "Adapt app colors to your device wallpaper on Android 12+",
 
                     index = 0,
-                    count = 3
+                    count = 2
                 )
             }
 
@@ -161,33 +158,7 @@ fun SettingsAppearancePane(
                     description = stringResource(R.string.route_settings_appearance_enable_artwork_colors_description),
 
                     index = 1,
-                    count = 3
-                )
-            }
-
-            item {
-                val useAlternativeBranding =
-                    vm.repository.appearance.useAlternativeBranding.collectAsState(true)
-
-                SettingsSwitchListItem(
-                    checked = useAlternativeBranding.value,
-                    onCheckedChange = {
-                        scope.launch {
-                            vm.repository.appearance.setUseAlternativeBranding(context, it)
-                        }
-                    },
-
-                    icon = {
-                        Icon(
-                            Icons.Rounded.AppRegistration,
-                            stringResource(R.string.route_settings_appearance_use_alternative_branding)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_appearance_use_alternative_branding),
-                    description = stringResource(R.string.route_settings_appearance_use_alternative_branding_description),
-
-                    index = 2,
-                    count = 3
+                    count = 2
                 )
             }
         }

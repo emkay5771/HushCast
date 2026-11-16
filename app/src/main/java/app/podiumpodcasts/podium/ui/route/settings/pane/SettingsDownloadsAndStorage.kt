@@ -102,7 +102,7 @@ fun SettingsDownloadsAndStoragePane(
                     description = stringResource(R.string.route_settings_downloads_and_storage_allow_mobile_downloads_description),
 
                     index = 0,
-                    count = 3
+                    count = 4
                 )
             }
 
@@ -135,7 +135,7 @@ fun SettingsDownloadsAndStoragePane(
                     label = stringResource(R.string.route_settings_downloads_and_storage_allow_while_roaming),
                     description = stringResource(R.string.route_settings_downloads_and_storage_allow_while_roaming_description),
                     index = 1,
-                    count = 3
+                    count = 4
                 )
             }
 

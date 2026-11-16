@@ -143,7 +143,7 @@ fun SettingsDebugPane(
                     description = "Fetch all podcast feeds for updates",
 
                     index = 0,
-                    count = 3,
+                    count = 6,
 
                     onClick = {
                         WorkManager.getInstance(context)

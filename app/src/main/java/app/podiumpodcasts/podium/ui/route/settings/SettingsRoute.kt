@@ -173,7 +173,7 @@ fun SettingsRoute(
                         )
                     },
                     label = stringResource(R.string.app_name),
-                    description = "v${version.first} (${version.second})",
+                    description = "v${version.first} (${version.second}) • View on GitHub",
 
                     index = 0,
                     count = 3,
@@ -213,8 +213,8 @@ fun SettingsRoute(
                             contentDescription = ""
                         )
                     },
-                    label = "Support the development on Ko-Fi",
-                    description = "You could buy me a coffee over there :)",
+                    label = "Support upstream podium on Ko-Fi",
+                    description = "HushCast is forked from podium by aimok04 — buy them a coffee :)",
 
                     index = 2,
                     count = 3,
