@@ -131,6 +131,7 @@ def setup_models() -> None:
     gpu="T4",
     volumes={str(DATA_DIR): volume},
     secrets=[modal.Secret.from_name("hushcast-token")],
+    max_containers=1,
     scaledown_window=120,
     timeout=900,
 )
