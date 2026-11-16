@@ -88,13 +88,27 @@ class EpisodeAnalysisWorker(
             manager.createNotificationChannel(channel)
         }
 
-        val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
+        val clamped = progress.coerceIn(0, 100)
+        val builder = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setContentTitle("HushCast Audio Analysis")
             .setContentText(stage)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
-            .setProgress(100, progress.coerceIn(0, 100), progress == 0)
-            .build()
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_PROGRESS)
+            .setRequestPromotedOngoing(true)
+            .setShortCriticalText(if (clamped > 0) "$clamped%" else "AI")
+            .setProgress(100, clamped, clamped == 0)
+
+        if (Build.VERSION.SDK_INT >= 36) {
+            builder.setStyle(
+                NotificationCompat.ProgressStyle()
+                    .setProgress(clamped)
+                    .setProgressIndeterminate(clamped == 0)
+            )
+        }
+
+        val notification = builder.build()
 
         val notificationId = 41001
         return when {
@@ -160,12 +174,9 @@ class EpisodeAnalysisWorker(
             quickMode: Boolean = false,
             actionMode: MuteActionMode = MuteActionMode.HARD_SILENCE
         ) {
-            val constraints = Constraints.Builder()
-                .setRequiresBatteryNotLow(true)
-                .build()
-
+            // Expedited jobs on Android only allow network and storage constraints
+            // (setting battery-not-low throws IllegalArgumentException in WorkRequest.Builder.build).
             val request = OneTimeWorkRequestBuilder<EpisodeAnalysisWorker>()
-                .setConstraints(constraints)
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .setInputData(
                     workDataOf(

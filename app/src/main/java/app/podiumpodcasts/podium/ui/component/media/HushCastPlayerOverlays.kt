@@ -20,6 +20,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Undo
+import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -27,8 +29,6 @@ import androidx.compose.material.icons.rounded.HourglassTop
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.Subtitles
-import androidx.compose.material.icons.rounded.Undo
-import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -76,7 +76,7 @@ fun EpisodeReadinessBadge(
             "Word-Mute Ready",
             MaterialTheme.colorScheme.secondaryContainer,
             MaterialTheme.colorScheme.onSecondaryContainer,
-            Icons.Rounded.VolumeOff
+            Icons.AutoMirrored.Rounded.VolumeOff
         )
         ReadinessBadge.ANALYZING -> Quad(
             "Analyzing $progressPercent%",
@@ -211,7 +211,7 @@ fun OneTapUndoAdSkipBanner(
                 )
             }
             TextButton(onClick = onUndo) {
-                Icon(Icons.Rounded.Undo, contentDescription = null, modifier = Modifier.size(16.dp))
+                Icon(Icons.AutoMirrored.Rounded.Undo, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("Undo", color = MaterialTheme.colorScheme.inversePrimary)
             }

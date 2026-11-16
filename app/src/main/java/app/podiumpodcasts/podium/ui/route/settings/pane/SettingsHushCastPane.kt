@@ -22,7 +22,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.VolumeOff
+import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -196,7 +196,7 @@ fun SettingsHushCastPane(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Rounded.VolumeOff, contentDescription = null)
+                                Icon(Icons.AutoMirrored.Rounded.VolumeOff, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
                                 Text("Word Auto-Muting", style = MaterialTheme.typography.titleMedium)
                             }

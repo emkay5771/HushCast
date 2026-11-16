@@ -244,14 +244,16 @@ fun OpmlImportingRoute(
                             ) { index ->
                                 val outline = state.file.body.outlines[index]
 
-                                val checked = vm.selectedOrigins.contains(outline.xmlUrl)
-                                val alreadyImported = vm.existingOrigins.contains(outline.xmlUrl)
+                                val xmlUrl = outline.xmlUrl?.takeIf { it.isNotBlank() }
+                                val checked = xmlUrl != null && vm.selectedOrigins.contains(xmlUrl)
+                                val alreadyImported = xmlUrl == null || vm.existingOrigins.contains(xmlUrl)
 
                                 fun toggle() {
+                                    if(xmlUrl == null) return
                                     if(checked) {
-                                        vm.selectedOrigins.remove(outline.xmlUrl)
+                                        vm.selectedOrigins.remove(xmlUrl)
                                     } else {
-                                        vm.selectedOrigins.add(outline.xmlUrl!!)
+                                        vm.selectedOrigins.add(xmlUrl)
                                     }
                                 }
 

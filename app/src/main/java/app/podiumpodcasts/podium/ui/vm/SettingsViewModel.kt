@@ -95,7 +95,7 @@ class SettingsViewModel(
     }
 
     fun calculateDatabaseSize(context: Context): String? {
-        val file = DatabaseManager.getDatabaseFile(context)!!.parentFile
+        val file = DatabaseManager.getDatabaseFile(context)?.parentFile ?: return null
         val sizeInBytes = file.walk()
             .filter { it.isFile }
             .sumOf { it.length() }

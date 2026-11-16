@@ -116,20 +116,22 @@ class SettingsRepository(val context: Context) {
             }
 
         suspend fun setUseAlternativeBranding(context: Context, enable: Boolean): Preferences {
-            val default = ComponentName(context.packageName, "${context.packageName}.Default")
-            val alias = ComponentName(context.packageName, "${context.packageName}.Alias")
+            val default = ComponentName(context.packageName, "app.podiumpodcasts.podium.Default")
+            val alias = ComponentName(context.packageName, "app.podiumpodcasts.podium.Alias")
 
-            context.packageManager.setComponentEnabledSetting(
-                if(enable) alias else default,
-                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                PackageManager.DONT_KILL_APP
-            )
+            runCatching {
+                context.packageManager.setComponentEnabledSetting(
+                    if(enable) alias else default,
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP
+                )
 
-            context.packageManager.setComponentEnabledSetting(
-                if(enable) default else alias,
-                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                PackageManager.DONT_KILL_APP
-            )
+                context.packageManager.setComponentEnabledSetting(
+                    if(enable) default else alias,
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.DONT_KILL_APP
+                )
+            }
 
             return dataStore.edit { preferences ->
                 preferences[SettingsKeys.APPEARANCE_USE_ALTERNATIVE_BRANDING] = enable

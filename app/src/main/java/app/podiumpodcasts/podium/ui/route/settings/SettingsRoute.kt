@@ -17,7 +17,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Visibility
-import androidx.compose.material.icons.rounded.VolumeOff
+import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolunteerActivism
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.Work
@@ -137,7 +137,7 @@ fun SettingsRoute(
                 SettingsListItem(
                     icon = {
                         Icon(
-                            Icons.Rounded.VolumeOff,
+                            Icons.AutoMirrored.Rounded.VolumeOff,
                             contentDescription = ""
                         )
                     },
