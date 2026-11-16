@@ -464,3 +464,95 @@ fun MoveToFolderDialog(
     )
 }
 
+@Composable
+fun OrganizeFoldersDialog(
+    folders: List<PodcastFolder>,
+    onDismiss: () -> Unit,
+    onCreateNewFolder: () -> Unit
+) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Organize Folders") },
+        text = {
+            Column(Modifier.fillMaxWidth()) {
+                if (folders.isEmpty()) {
+                    Text(
+                        text = "No folders yet. Create a folder to group your podcasts.",
+                        style = Typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Text(
+                        text = "Use arrows to reorder folders, or long-press and drag items in the grid.",
+                        style = Typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 280.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(folders.size, key = { folders[it].id }) { idx ->
+                            val folder = folders[idx]
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = folder.name,
+                                        style = Typography.bodyLarge,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = "${folder.origins.size} podcast${if (folder.origins.size == 1) "" else "s"}",
+                                        style = Typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                IconButton(
+                                    enabled = idx > 0,
+                                    onClick = { PodcastGridOrganization.moveFolder(context, folder.id, -1) }
+                                ) {
+                                    Text("▲")
+                                }
+                                IconButton(
+                                    enabled = idx < folders.lastIndex,
+                                    onClick = { PodcastGridOrganization.moveFolder(context, folder.id, 1) }
+                                ) {
+                                    Text("▼")
+                                }
+                                IconButton(
+                                    onClick = { PodcastGridOrganization.deleteFolder(context, folder.id) }
+                                ) {
+                                    Icon(Icons.Rounded.Delete, contentDescription = "Delete folder")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Done") }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    onDismiss()
+                    onCreateNewFolder()
+                }
+            ) {
+                Text("New Folder")
+            }
+        }
+    )
+}
+
+

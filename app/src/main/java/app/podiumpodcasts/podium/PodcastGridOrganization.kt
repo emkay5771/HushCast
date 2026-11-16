@@ -139,4 +139,51 @@ object PodcastGridOrganization {
         val remaining = cur.customOrder.filterNot { it in mutable }
         save(context, cur.copy(customOrder = mutable + remaining))
     }
+
+    fun moveFolderPodcast(context: Context, folderId: String, origin: String, delta: Int) {
+        init(context)
+        val cur = _state.value
+        val updatedFolders = cur.folders.map { f ->
+            if (f.id != folderId) f
+            else {
+                val idx = f.origins.indexOf(origin)
+                val target = (idx + delta).coerceIn(0, (f.origins.size - 1).coerceAtLeast(0))
+                if (idx < 0 || idx == target) f
+                else {
+                    val mutable = f.origins.toMutableList()
+                    val moved = mutable.removeAt(idx)
+                    mutable.add(target, moved)
+                    f.copy(origins = mutable)
+                }
+            }
+        }
+        save(context, cur.copy(folders = updatedFolders))
+    }
+
+    fun moveFolder(context: Context, folderId: String, delta: Int) {
+        init(context)
+        val cur = _state.value
+        val idx = cur.folders.indexOfFirst { it.id == folderId }
+        if (idx < 0) return
+        val target = (idx + delta).coerceIn(0, (cur.folders.size - 1).coerceAtLeast(0))
+        if (idx == target) return
+
+        val mutableFolders = cur.folders.toMutableList()
+        val movedFolder = mutableFolders.removeAt(idx)
+        mutableFolders.add(target, movedFolder)
+
+        val key = folderKey(folderId)
+        val targetKey = folderKey(mutableFolders[if (delta > 0) target - 1 else target + 1].id)
+        val order = cur.customOrder.toMutableList()
+        if (key !in order) order.add(key)
+        if (targetKey !in order) order.add(targetKey)
+        val orderFrom = order.indexOf(key)
+        val orderTo = order.indexOf(targetKey)
+        if (orderFrom >= 0 && orderTo >= 0 && orderFrom != orderTo) {
+            val movedKey = order.removeAt(orderFrom)
+            order.add(orderTo, movedKey)
+        }
+
+        save(context, cur.copy(folders = mutableFolders, customOrder = order))
+    }
 }

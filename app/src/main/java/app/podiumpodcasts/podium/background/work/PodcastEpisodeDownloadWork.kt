@@ -189,6 +189,8 @@ class PodcastEpisodeDownloadWork(
                     force = forceReprocess
                 )
             )
+            var lastPollNotifyMs = 0L
+            var lastPollNotifyPct = -1
             val ready = app.hushcast.automute.desktop.DesktopWorkerClient.pollJobUntilReady(
                 baseUrl = workerUrl,
                 token = token,
@@ -196,7 +198,13 @@ class PodcastEpisodeDownloadWork(
             ) { status ->
                 val pct = 10 + ((status.progressPercent * 60) / 100)
                 val stageText = status.stageLabel.ifBlank { status.state }
-                onProgressUpdate?.invoke(title, "Desktop Companion • $stageText", (status.progressPercent / 2).coerceIn(1, 50))
+                val fgPct = (status.progressPercent / 2).coerceIn(1, 50)
+                val now = System.currentTimeMillis()
+                if (fgPct != lastPollNotifyPct && (now - lastPollNotifyMs >= 450L || fgPct >= 50)) {
+                    lastPollNotifyMs = now
+                    lastPollNotifyPct = fgPct
+                    onProgressUpdate?.invoke(title, "Desktop Companion • $stageText", fgPct)
+                }
                 kotlinx.coroutines.runBlocking {
                     reportDesktopStatus(pct, "Desktop: $stageText")
                 }
@@ -206,6 +214,8 @@ class PodcastEpisodeDownloadWork(
             reportDesktopStatus(72, "Desktop: Transferring audio…")
             onProgressUpdate?.invoke(title, "Desktop Companion • Transferring audio", 50)
             var lastStatusUpdateMs = 0L
+            var lastTransferNotifyMs = 0L
+            var lastTransferNotifyPct = 50
             app.hushcast.automute.desktop.DesktopWorkerClient.downloadAudioAndVerifySha256(
                 baseUrl = workerUrl,
                 token = token,
@@ -213,11 +223,15 @@ class PodcastEpisodeDownloadWork(
                 destFile = destFile
             ) { received, total ->
                 if (total > 0L) {
-                    db.podcastEpisodeDownloads().setProgress(episodeId, received, total)
-                    val pct = (50 + ((received * 50L) / total).toInt()).coerceIn(50, 100)
-                    onProgressUpdate?.invoke(title, "Desktop Companion • Transferring audio", pct)
                     val now = System.currentTimeMillis()
-                    if (now - lastStatusUpdateMs >= 400L) {
+                    val pct = (50 + ((received * 50L) / total).toInt()).coerceIn(50, 100)
+                    if (pct != lastTransferNotifyPct && (now - lastTransferNotifyMs >= 450L || pct >= 100)) {
+                        lastTransferNotifyMs = now
+                        lastTransferNotifyPct = pct
+                        db.podcastEpisodeDownloads().setProgress(episodeId, received, total)
+                        onProgressUpdate?.invoke(title, "Desktop Companion • Transferring audio", pct)
+                    }
+                    if (now - lastStatusUpdateMs >= 450L) {
                         lastStatusUpdateMs = now
                         val statusPct = (72 + ((received * 25L) / total).toInt()).coerceIn(72, 97)
                         kotlinx.coroutines.runBlocking {

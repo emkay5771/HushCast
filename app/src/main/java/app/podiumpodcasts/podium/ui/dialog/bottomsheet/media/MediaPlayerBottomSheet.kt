@@ -179,26 +179,7 @@ fun MediaPlayerBottomSheet(
 
     fun triggerAnalyzeNow() {
         if (episodeId.isBlank()) return
-        scope.launch {
-            val bundle = currentEpisodeBundle ?: runCatching { appDb.podcastEpisodes().getSync(episodeId) }.getOrNull()
-            val audioPath = bundle?.episode?.craftDownloadFile(context)?.absolutePath
-            if (audioPath != null && java.io.File(audioPath).exists()) {
-                EpisodeAnalysisWorker.enqueueAnalyzeNow(
-                    context = context,
-                    episodeId = episodeId,
-                    audioPath = audioPath,
-                    actionMode = HushCastEngineBridge.defaultActionMode,
-                    episodeTitle = bundle.episode.title
-                )
-                android.widget.Toast.makeText(
-                    context,
-                    "Starting HushCast AI analysis…",
-                    android.widget.Toast.LENGTH_SHORT
-                ).show()
-            } else {
-                showNotDownloadedDialog = true
-            }
-        }
+        showNotDownloadedDialog = true
     }
 
     var episodeSummary by remember { mutableStateOf<String?>(null) }
@@ -264,25 +245,26 @@ fun MediaPlayerBottomSheet(
                 Modifier
                     .fillMaxWidth()
                     .then(if (isFullScreen) Modifier.fillMaxHeight() else Modifier)
-                    .pointerInput(isFullScreen) {
-                        var totalDrag = 0f
-                        detectVerticalDragGestures(
-                            onDragStart = { totalDrag = 0f },
-                            onVerticalDrag = { _, dragAmount ->
-                                totalDrag += dragAmount
-                                if (totalDrag < -60f && !isFullScreen) {
-                                    totalDrag = 0f
-                                    isFullScreen = true
-                                } else if (totalDrag > 60f && isFullScreen) {
-                                    totalDrag = 0f
-                                    isFullScreen = false
-                                }
-                            }
-                        )
-                    }
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .pointerInput(isFullScreen) {
+                            var totalDrag = 0f
+                            detectVerticalDragGestures(
+                                onDragStart = { totalDrag = 0f },
+                                onVerticalDrag = { _, dragAmount ->
+                                    totalDrag += dragAmount
+                                    if (totalDrag < -60f && !isFullScreen) {
+                                        totalDrag = 0f
+                                        isFullScreen = true
+                                    } else if (totalDrag > 60f && isFullScreen) {
+                                        totalDrag = 0f
+                                        isFullScreen = false
+                                    }
+                                }
+                            )
+                        },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     PrimaryTabRow(
@@ -482,71 +464,10 @@ fun MediaPlayerBottomSheet(
                         Column(
                             Modifier
                                 .fillMaxWidth()
-                                .verticalScroll(
-                                    state = rememberScrollState(),
-                                    flingBehavior = null
-                                )
+                                .verticalScroll(rememberScrollState())
                                 .padding(horizontal = 16.dp, vertical = 8.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                    AnimatedContent(
-                        targetState = vm.mediaSourceType
-                    ) {
-                        when(it) {
-                            is SourceTypeState.Downloaded -> {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                ) {
-                                    Row(
-                                        Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            modifier = Modifier.size(12.dp),
-                                            imageVector = Icons.Rounded.Download,
-                                            contentDescription = stringResource(R.string.common_downloaded)
-                                        )
-
-                                        Spacer(Modifier.width(8.dp))
-
-                                        Text(
-                                            text = stringResource(R.string.common_downloaded),
-                                            style = Typography.labelMedium
-                                        )
-                                    }
-                                }
-                            }
-
-                            is SourceTypeState.Streaming -> {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.primaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                ) {
-                                    Row(
-                                        Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Icon(
-                                            modifier = Modifier.size(12.dp),
-                                            imageVector = Icons.Rounded.Podcasts,
-                                            contentDescription = stringResource(R.string.common_info)
-                                        )
-
-                                        Spacer(Modifier.width(8.dp))
-
-                                        Text(
-                                            text = stringResource(R.string.common_streaming),
-                                            style = Typography.labelMedium
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
                     Column(
                         Modifier
                             .clip(RoundedCornerShape(16.dp))
@@ -613,27 +534,84 @@ fun MediaPlayerBottomSheet(
                                         } else Modifier
                                     )
 
-                                    Spacer(Modifier.height(8.dp))
+                                    Spacer(Modifier.height(10.dp))
 
                                     val badge = runCatching {
                                         analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) }
                                     }.getOrNull() ?: ReadinessBadge.NOT_PROCESSED
 
-                                    EpisodeReadinessBadge(
-                                        badge = badge,
-                                        progressPercent = analysisStatus?.progressPercent ?: 0,
-                                        onAnalyzeNowClick = if (episodeId.isNotBlank()) {
-                                            { triggerAnalyzeNow() }
-                                        } else null
-                                    )
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(
+                                            8.dp,
+                                            if (compactLayout) Alignment.Start else Alignment.CenterHorizontally
+                                        ),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        when (vm.mediaSourceType) {
+                                            is SourceTypeState.Downloaded -> {
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                                ) {
+                                                    Row(
+                                                        Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                    ) {
+                                                        Icon(
+                                                            modifier = Modifier.size(14.dp),
+                                                            imageVector = Icons.Rounded.Download,
+                                                            contentDescription = stringResource(R.string.common_downloaded)
+                                                        )
+                                                        Text(
+                                                            text = stringResource(R.string.common_downloaded),
+                                                            style = MaterialTheme.typography.labelSmall
+                                                        )
+                                                    }
+                                                }
+                                            }
 
-                                    if (episodeChapters.isNotEmpty()) {
-                                        Spacer(Modifier.height(6.dp))
-                                        ActiveChapterPill(
-                                            vm = vm,
-                                            chapters = episodeChapters,
-                                            onClick = { selectedTab = MediaPlayerTab.TRANSCRIPT }
+                                            is SourceTypeState.Streaming -> {
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                                ) {
+                                                    Row(
+                                                        Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                    ) {
+                                                        Icon(
+                                                            modifier = Modifier.size(14.dp),
+                                                            imageVector = Icons.Rounded.Podcasts,
+                                                            contentDescription = stringResource(R.string.common_streaming)
+                                                        )
+                                                        Text(
+                                                            text = stringResource(R.string.common_streaming),
+                                                            style = MaterialTheme.typography.labelSmall
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        EpisodeReadinessBadge(
+                                            badge = badge,
+                                            progressPercent = analysisStatus?.progressPercent ?: 0,
+                                            onAnalyzeNowClick = if (episodeId.isNotBlank()) {
+                                                { triggerAnalyzeNow() }
+                                            } else null
                                         )
+
+                                        if (episodeChapters.isNotEmpty()) {
+                                            ActiveChapterPill(
+                                                vm = vm,
+                                                chapters = episodeChapters,
+                                                onClick = { selectedTab = MediaPlayerTab.TRANSCRIPT }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -1033,35 +1011,25 @@ private fun PlayerSeekBarSection(
 ) {
     val scope = rememberCoroutineScope()
     var blockSliderUpdate by remember { mutableStateOf(false) }
-    var sliderState by remember { mutableFloatStateOf(0f) }
-    val animateSliderState = remember { Animatable(0f) }
-
-    LaunchedEffect(animateSliderState.value) {
-        if (blockSliderUpdate) return@LaunchedEffect
-        sliderState = animateSliderState.value
-    }
+    var dragSliderState by remember { mutableFloatStateOf(0f) }
 
     val progressState = vm.getProgressState()
-    LaunchedEffect(progressState.value) {
-        if (blockSliderUpdate) return@LaunchedEffect
-        animateSliderState.snapTo(sliderState)
-        animateSliderState.animateTo(progressState.value, tween(100))
-    }
+    val displayValue = if (blockSliderUpdate) dragSliderState else progressState.value
 
     app.podiumpodcasts.podium.ui.component.media.AnnotatedPlaybackSlider(
-        value = sliderState,
+        value = displayValue,
         durationMs = vm.currentDuration,
         muteWindows = muteWindows,
         adWindows = adWindows,
         onValueChange = {
-            sliderState = it
+            dragSliderState = it
             blockSliderUpdate = true
         },
         onValueChangeFinished = {
             blockSliderUpdate = true
-            vm.seek((sliderState * vm.currentDuration).toLong())
+            vm.seek((dragSliderState * vm.currentDuration).toLong())
             scope.launch {
-                delay(500)
+                delay(400)
                 blockSliderUpdate = false
             }
         }
@@ -1073,7 +1041,7 @@ private fun PlayerSeekBarSection(
     ) {
         Text(
             text = formatPlayerTime(
-                time = (sliderState * vm.currentDuration).toLong(),
+                time = (displayValue * vm.currentDuration).toLong(),
                 duration = vm.currentDuration
             ),
             style = Typography.labelMediumEmphasized

@@ -1,3 +1,22 @@
+# HushCast v0.1.25-hushcast
+
+## What's New
+- **Smooth Player & Throttled Download Notifications**:
+  - Removed the 60fps seekbar `Animatable` feedback loop, restored natural scroll fling, and isolated header fullscreen drag gestures in [`MediaPlayerBottomSheet`](app/src/main/java/app/podiumpodcasts/podium/ui/dialog/bottomsheet/media/MediaPlayerBottomSheet.kt).
+  - Throttled `onProgressUpdate` in [`PodcastEpisodeDownloadWork`](app/src/main/java/app/podiumpodcasts/podium/background/work/PodcastEpisodeDownloadWork.kt) to eliminate 242/s `NotificationManager` rate-limit shedding and main-thread frame drops.
+  - Fixed Android 16/17 Live Activity doubled status lines in [`PodcastEpisodeDownloadWorker`](app/src/main/java/app/podiumpodcasts/podium/background/worker/PodcastEpisodeDownloadWorker.kt).
+- **Cleaner Player Chips & Unified "Analyze w/ HushCast AI"**:
+  - Consolidated source (`Downloaded`/`Streaming`), readiness badge, and active chapter pill into a single compact `FlowRow` in [`MediaPlayerBottomSheet`](app/src/main/java/app/podiumpodcasts/podium/ui/dialog/bottomsheet/media/MediaPlayerBottomSheet.kt) and [`EpisodeReadinessBadge`](app/src/main/java/app/podiumpodcasts/podium/ui/component/media/HushCastPlayerOverlays.kt).
+  - Unified `triggerAnalyzeNow()` to open [`HushCastAnalyzeDialog`](app/src/main/java/app/podiumpodcasts/podium/ui/component/media/HushCastPlayerOverlays.kt) so Desktop/Cloud Worker refresh and On-Device analysis work consistently for both downloaded and streaming episodes.
+- **Synced Transcript "Catch Up" & Word Highlighting**:
+  - Fixed `followLive` in [`SyncedTranscriptCard`](app/src/main/java/app/podiumpodcasts/podium/ui/component/media/HushCastPlayerOverlays.kt) using `DragInteraction.Start` so tapping **Catch up to live** reliably resumes following active lines, with active spoken word highlighting.
+- **Folder Reordering**:
+  - Added left/right item reordering inside [`FolderBottomSheet`](app/src/main/java/app/podiumpodcasts/podium/ui/route/home/FolderDialogs.kt) edit mode and an **Organize Folders** dialog in [`HomeRoute`](app/src/main/java/app/podiumpodcasts/podium/ui/route/home/HomeRoute.kt).
+- **Customizable Bottom Bar & Startup Screen / Playlist**:
+  - Added **Startup screen** (Podcasts, Discover, Library, New Releases, In Progress, Downloads, History, or any Playlist) and **Bottom navigation bar** customization (choose 2–5 tabs and reorder) in [`SettingsAppearancePane`](app/src/main/java/app/podiumpodcasts/podium/ui/route/settings/pane/SettingsAppearancePane.kt), plus one-tap startup pinning in [`ListRoute`](app/src/main/java/app/podiumpodcasts/podium/ui/route/list/ListRoute.kt).
+
+---
+
 # HushCast v0.1.24-hushcast
 
 ## What's New

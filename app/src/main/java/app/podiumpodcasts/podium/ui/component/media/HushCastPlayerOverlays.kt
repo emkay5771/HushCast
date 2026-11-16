@@ -76,26 +76,33 @@ fun EpisodeReadinessBadge(
     progressPercent: Int = 0,
     onAnalyzeNowClick: (() -> Unit)? = null
 ) {
-    val (label, containerColor, contentColor, icon) = when (badge) {
-        ReadinessBadge.READY -> Quad(
+    val isActionableNotProcessed = badge == ReadinessBadge.NOT_PROCESSED && onAnalyzeNowClick != null
+    val (label, containerColor, contentColor, icon) = when {
+        isActionableNotProcessed -> Quad(
+            "Analyze w/ HushCast AI",
+            MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer,
+            Icons.Rounded.AutoAwesome
+        )
+        badge == ReadinessBadge.READY -> Quad(
             "HushCast Ready",
             MaterialTheme.colorScheme.primaryContainer,
             MaterialTheme.colorScheme.onPrimaryContainer,
             Icons.Rounded.CheckCircle
         )
-        ReadinessBadge.WORD_MUTE_READY -> Quad(
+        badge == ReadinessBadge.WORD_MUTE_READY -> Quad(
             "Word-Mute Ready",
             MaterialTheme.colorScheme.secondaryContainer,
             MaterialTheme.colorScheme.onSecondaryContainer,
             Icons.AutoMirrored.Rounded.VolumeOff
         )
-        ReadinessBadge.ANALYZING -> Quad(
+        badge == ReadinessBadge.ANALYZING -> Quad(
             "Analyzing $progressPercent%",
             MaterialTheme.colorScheme.tertiaryContainer,
             MaterialTheme.colorScheme.onTertiaryContainer,
             Icons.Rounded.HourglassTop
         )
-        ReadinessBadge.NOT_PROCESSED -> Quad(
+        else -> Quad(
             "Not Processed",
             MaterialTheme.colorScheme.surfaceVariant,
             MaterialTheme.colorScheme.onSurfaceVariant,
@@ -103,36 +110,27 @@ fun EpisodeReadinessBadge(
         )
     }
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    val clickableModifier = if (onAnalyzeNowClick != null && badge != ReadinessBadge.ANALYZING) {
+        Modifier.clickable(onClick = onAnalyzeNowClick)
+    } else {
+        Modifier
+    }
+
+    Surface(
+        color = containerColor,
+        contentColor = contentColor,
+        shape = RoundedCornerShape(50),
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .then(clickableModifier)
     ) {
-        Surface(
-            color = containerColor,
-            contentColor = contentColor,
-            shape = RoundedCornerShape(50)
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp))
-                Text(label, style = MaterialTheme.typography.labelSmall)
-            }
-        }
-        if (badge == ReadinessBadge.NOT_PROCESSED && onAnalyzeNowClick != null) {
-            AssistChip(
-                onClick = onAnalyzeNowClick,
-                label = { Text("Analyze Now", style = MaterialTheme.typography.labelSmall) },
-                leadingIcon = {
-                    Icon(
-                        Icons.Rounded.AutoAwesome,
-                        contentDescription = null,
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
-            )
+            Icon(icon, contentDescription = null, modifier = Modifier.size(14.dp))
+            Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1)
         }
     }
 }
@@ -691,12 +689,13 @@ fun SyncedTranscriptCard(
                                                     val ws = (w.start * 1000.0).toLong()
                                                     val we = (w.end * 1000.0).toLong()
                                                     val isMuted = isWordInMuteWindows(ws, we, activeMuteWindows)
+                                                    val isSpokenNow = isActive && currentPositionMs in ws..we
                                                     Surface(
                                                         shape = RoundedCornerShape(6.dp),
-                                                        color = if (isMuted) {
-                                                            MaterialTheme.colorScheme.errorContainer
-                                                        } else {
-                                                            Color.Transparent
+                                                        color = when {
+                                                            isMuted -> MaterialTheme.colorScheme.errorContainer
+                                                            isSpokenNow -> MaterialTheme.colorScheme.primary
+                                                            else -> Color.Transparent
                                                         },
                                                         modifier = Modifier.combinedClickable(
                                                             onClick = { onSeekToMs(ws) },
@@ -706,12 +705,13 @@ fun SyncedTranscriptCard(
                                                         Text(
                                                             text = w.text.trim(),
                                                             style = MaterialTheme.typography.bodyMedium.copy(
+                                                                fontWeight = if (isSpokenNow) FontWeight.Bold else FontWeight.Normal,
                                                                 textDecoration = if (isMuted) TextDecoration.LineThrough else TextDecoration.None
                                                             ),
-                                                            color = if (isMuted) {
-                                                                MaterialTheme.colorScheme.onErrorContainer
-                                                            } else {
-                                                                MaterialTheme.colorScheme.onSurface
+                                                            color = when {
+                                                                isMuted -> MaterialTheme.colorScheme.onErrorContainer
+                                                                isSpokenNow -> MaterialTheme.colorScheme.onPrimary
+                                                                else -> MaterialTheme.colorScheme.onSurface
                                                             },
                                                             modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
                                                         )

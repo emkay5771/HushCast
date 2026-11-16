@@ -57,6 +57,8 @@ object SettingsKeys {
     val APPEARANCE_SUBSCRIPTIONS_SORT = stringPreferencesKey("appearance_subscriptions_sort")
     val APPEARANCE_SUBSCRIPTIONS_BADGE_MODE = stringPreferencesKey("appearance_subscriptions_badge_mode")
     val APPEARANCE_SHOW_GRID_TITLES = booleanPreferencesKey("appearance_show_grid_titles")
+    val APPEARANCE_BOTTOM_BAR_ITEMS = stringPreferencesKey("appearance_bottom_bar_items")
+    val APPEARANCE_STARTUP_DESTINATION = stringPreferencesKey("appearance_startup_destination")
 
     val BEHAVIOR_PLAYER_PLAYBACK_SPEED =
         floatPreferencesKey("behavior_player_playback_speed")
@@ -208,6 +210,24 @@ class SettingsRepository(val context: Context) {
 
         suspend fun setShowGridTitles(show: Boolean) = dataStore.edit { preferences ->
             preferences[SettingsKeys.APPEARANCE_SHOW_GRID_TITLES] = show
+        }
+
+        val bottomBarItemsRaw: Flow<String> = dataStore.data
+            .map { preferences ->
+                preferences[SettingsKeys.APPEARANCE_BOTTOM_BAR_ITEMS] ?: "HOME,DISCOVER,LIBRARY"
+            }
+
+        suspend fun setBottomBarItemsRaw(raw: String) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_BOTTOM_BAR_ITEMS] = raw
+        }
+
+        val startupDestination: Flow<String> = dataStore.data
+            .map { preferences ->
+                preferences[SettingsKeys.APPEARANCE_STARTUP_DESTINATION] ?: "HOME"
+            }
+
+        suspend fun setStartupDestination(destination: String) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_STARTUP_DESTINATION] = destination
         }
     }
 

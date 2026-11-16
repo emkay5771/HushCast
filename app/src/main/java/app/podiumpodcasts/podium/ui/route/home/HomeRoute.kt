@@ -142,6 +142,7 @@ fun HomeRoute(
 
     var showOptionsSheet by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var showOrganizeFoldersDialog by remember { mutableStateOf(false) }
     var openFolderId by remember { mutableStateOf<String?>(null) }
     var moveToFolderTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
 
@@ -326,6 +327,18 @@ fun HomeRoute(
                     Icon(androidx.compose.material.icons.Icons.Rounded.Add, contentDescription = null)
                     Spacer(Modifier.size(8.dp))
                     Text("New Folder")
+                }
+                if (gridOrgState.folders.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = {
+                            showOptionsSheet = false
+                            showOrganizeFoldersDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Organize Folders")
+                    }
                 }
                 Spacer(Modifier.height(24.dp))
             }

@@ -100,7 +100,6 @@ class PodcastEpisodeDownloadWorker(
         val chipText = if (clamped > 0) "$clamped%" else "…"
         val builder = androidx.core.app.NotificationCompat.Builder(applicationContext, DOWNLOAD_CHANNEL_ID)
             .setContentTitle(title.ifBlank { "Downloading episode" })
-            .setSubText(sourceLabel)
             .setContentText(if (clamped > 0) "$sourceLabel • $clamped%" else sourceLabel)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setOngoing(true)

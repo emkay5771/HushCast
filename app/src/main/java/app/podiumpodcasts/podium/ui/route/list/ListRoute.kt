@@ -11,8 +11,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,6 +54,7 @@ import app.podiumpodcasts.podium.ui.dialog.bottomsheet.ListEditBottomSheet
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.PagerScaffold
 import app.podiumpodcasts.podium.ui.vm.list.ListViewModel
+import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -105,9 +108,28 @@ fun ListRoute(
                     )
                 },
                 actions = {
+                    val settingsRepo = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
+                    val startupDest = settingsRepo.appearance.startupDestination.collectAsState("HOME")
+                    val isStartup = startupDest.value == "LIST:$listId"
+                    val context = androidx.compose.ui.platform.LocalContext.current
+
+                    BubbleButton(
+                        icon = if (isStartup) androidx.compose.material.icons.Icons.Rounded.Home else androidx.compose.material.icons.Icons.Outlined.Home,
+                        contentDescription = if (isStartup) "Pinned as startup screen" else "Set as startup screen"
+                    ) {
+                        scope.launch {
+                            val next = if (isStartup) "HOME" else "LIST:$listId"
+                            settingsRepo.appearance.setStartupDestination(next)
+                            android.widget.Toast.makeText(
+                                context,
+                                if (isStartup) "Startup screen reset to Podcasts" else "Playlist set as startup screen",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+
                     if(items.itemCount > 0) {
                         val playerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
-                        val context = androidx.compose.ui.platform.LocalContext.current
                         BubbleButton(
                             icon = androidx.compose.material.icons.Icons.Rounded.PlayArrow,
                             contentDescription = "Play all"

@@ -88,6 +88,15 @@ fun Navigation(
     onClickPodcast: (origin: String) -> Unit,
     onClickEpisode: (episode: PodcastEpisodeModel) -> Unit
 ) {
+    val popOrHome: () -> Unit = {
+        if (backStack.size > 1) {
+            backStack.removeLastOrNull()
+        } else if (backStack.lastOrNull() != Home) {
+            backStack.clear()
+            backStack.add(Home)
+        }
+    }
+
     NavDisplay(
         backStack = backStack,
         onBack = onBack,
@@ -152,7 +161,7 @@ fun Navigation(
                     HistoryRoute(
                         onClickEpisode = onClickEpisode
                     ) {
-                        backStack.removeLastOrNull()
+                        popOrHome()
                     }
                 }
 
@@ -160,7 +169,7 @@ fun Navigation(
                     DownloadsRoute(
                         onClickEpisode = onClickEpisode
                     ) {
-                        backStack.removeLastOrNull()
+                        popOrHome()
                     }
                 }
 
@@ -168,7 +177,7 @@ fun Navigation(
                     SubscriptionsRoute(
                         onClickPodcast = onClickPodcast
                     ) {
-                        backStack.removeLastOrNull()
+                        popOrHome()
                     }
                 }
 
@@ -176,7 +185,7 @@ fun Navigation(
                     ContinuePlayingRoute(
                         onClickEpisode = onClickEpisode
                     ) {
-                        backStack.removeLastOrNull()
+                        popOrHome()
                     }
                 }
 
@@ -184,7 +193,7 @@ fun Navigation(
                     NewEpisodesRoute(
                         onClickEpisode = onClickEpisode
                     ) {
-                        backStack.removeLastOrNull()
+                        popOrHome()
                     }
                 }
 
@@ -192,7 +201,7 @@ fun Navigation(
                     LocallyAvailableRoute(
                         onClickPodcast = onClickPodcast
                     ) {
-                        backStack.removeLastOrNull()
+                        popOrHome()
                     }
                 }
 
@@ -203,7 +212,7 @@ fun Navigation(
                         onClickPodcast = onClickPodcast,
                         onClickEpisode = onClickEpisode
                     ) {
-                        backStack.removeLastOrNull()
+                        popOrHome()
                     }
                 }
 

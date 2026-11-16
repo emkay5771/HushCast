@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.paging.compose.collectAsLazyPagingItems
 import app.podiumpodcasts.podium.AppThemeMode
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.ui.component.settings.SettingsSwitchListItem
@@ -160,6 +161,173 @@ fun SettingsAppearancePane(
                     index = 1,
                     count = 2
                 )
+            }
+
+            item {
+                val startupDest = vm.repository.appearance.startupDestination.collectAsState("HOME")
+                val libraryVm = viewModel { app.podiumpodcasts.podium.ui.vm.library.LibraryViewModel(db) }
+                val userLists = libraryVm.nonSystemLists.collectAsLazyPagingItems()
+                val systemLists = libraryVm.systemLists.collectAsLazyPagingItems()
+
+                val destinations = buildList {
+                    app.podiumpodcasts.podium.ui.navigation.NavBarItems.entries.forEach {
+                        add(it.name to it.displayTitle)
+                    }
+                    for (i in 0 until systemLists.itemCount) {
+                        systemLists[i]?.let { l -> add("LIST:${l.id}" to "Playlist: ${l.name}") }
+                    }
+                    for (i in 0 until userLists.itemCount) {
+                        userLists[i]?.let { l -> add("LIST:${l.id}" to "Playlist: ${l.name}") }
+                    }
+                }
+
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Startup screen",
+                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = "Choose which tab or playlist opens when launching the app",
+                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    destinations.forEach { (key, label) ->
+                        val selected = startupDest.value == key
+                        androidx.compose.material3.Surface(
+                            onClick = {
+                                scope.launch {
+                                    vm.repository.appearance.setStartupDestination(key)
+                                }
+                            },
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                            color = if (selected) {
+                                androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh
+                            }
+                        ) {
+                            androidx.compose.foundation.layout.Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                            ) {
+                                androidx.compose.material3.RadioButton(
+                                    selected = selected,
+                                    onClick = {
+                                        scope.launch {
+                                            vm.repository.appearance.setStartupDestination(key)
+                                        }
+                                    }
+                                )
+                                Text(
+                                    text = label,
+                                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                val bottomBarRaw = vm.repository.appearance.bottomBarItemsRaw
+                    .collectAsState("HOME,DISCOVER,LIBRARY")
+                val enabledItems = app.podiumpodcasts.podium.ui.navigation.NavBarItems.parseList(bottomBarRaw.value)
+                val disabledItems = app.podiumpodcasts.podium.ui.navigation.NavBarItems.entries
+                    .filter { it !in enabledItems }
+
+                androidx.compose.foundation.layout.Column(
+                    modifier = Modifier.padding(top = 12.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Bottom navigation bar",
+                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        text = "Show 2–5 tabs and reorder them with the arrows",
+                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    (enabledItems + disabledItems).forEach { navItem ->
+                        val enabledIdx = enabledItems.indexOf(navItem)
+                        val isEnabled = enabledIdx >= 0
+                        androidx.compose.material3.Surface(
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh
+                        ) {
+                            androidx.compose.foundation.layout.Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                            ) {
+                                androidx.compose.material3.Checkbox(
+                                    checked = isEnabled,
+                                    enabled = if (isEnabled) enabledItems.size > 2 else enabledItems.size < 5,
+                                    onCheckedChange = { checked ->
+                                        val next = if (checked) {
+                                            (enabledItems + navItem).take(5)
+                                        } else {
+                                            if (enabledItems.size > 2) enabledItems - navItem else enabledItems
+                                        }
+                                        scope.launch {
+                                            vm.repository.appearance.setBottomBarItemsRaw(
+                                                app.podiumpodcasts.podium.ui.navigation.NavBarItems.serializeList(next)
+                                            )
+                                        }
+                                    }
+                                )
+                                Icon(
+                                    imageVector = navItem.icon,
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(end = 10.dp)
+                                )
+                                Text(
+                                    text = navItem.displayTitle,
+                                    modifier = Modifier.weight(1f),
+                                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium
+                                )
+                                if (isEnabled) {
+                                    androidx.compose.material3.IconButton(
+                                        enabled = enabledIdx > 0,
+                                        onClick = {
+                                            val mutable = enabledItems.toMutableList()
+                                            val moved = mutable.removeAt(enabledIdx)
+                                            mutable.add(enabledIdx - 1, moved)
+                                            scope.launch {
+                                                vm.repository.appearance.setBottomBarItemsRaw(
+                                                    app.podiumpodcasts.podium.ui.navigation.NavBarItems.serializeList(mutable)
+                                                )
+                                            }
+                                        }
+                                    ) {
+                                        Text("▲")
+                                    }
+                                    androidx.compose.material3.IconButton(
+                                        enabled = enabledIdx < enabledItems.lastIndex,
+                                        onClick = {
+                                            val mutable = enabledItems.toMutableList()
+                                            val moved = mutable.removeAt(enabledIdx)
+                                            mutable.add(enabledIdx + 1, moved)
+                                            scope.launch {
+                                                vm.repository.appearance.setBottomBarItemsRaw(
+                                                    app.podiumpodcasts.podium.ui.navigation.NavBarItems.serializeList(mutable)
+                                                )
+                                            }
+                                        }
+                                    ) {
+                                        Text("▼")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

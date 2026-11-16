@@ -31,16 +31,18 @@ fun NavBarScaffold(
     val settingsRepository = LocalSettingsRepository.current
     val disableApplePodcastsApi = settingsRepository.privacy.disableApplePodcastsApi
         .collectAsState(false)
+    val bottomBarRaw = settingsRepository.appearance.bottomBarItemsRaw
+        .collectAsState("HOME,DISCOVER,LIBRARY")
+    val enabledItems = NavBarItems.parseList(bottomBarRaw.value).filter {
+        !(disableApplePodcastsApi.value && it == NavBarItems.DISCOVER)
+    }
 
     NavigationSuiteScaffold(
         layoutType = layoutType,
         state = state,
         containerColor = Color.Transparent,
         navigationSuiteItems = {
-            NavBarItems.entries.forEach {
-                if(disableApplePodcastsApi.value && it == NavBarItems.DISCOVER)
-                    return@forEach
-
+            enabledItems.forEach {
                 item(
                     icon = {
                         Icon(

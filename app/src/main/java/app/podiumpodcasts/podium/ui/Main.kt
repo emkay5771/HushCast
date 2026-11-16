@@ -67,6 +67,7 @@ import app.podiumpodcasts.podium.ui.view.model.PodcastDetailView
 import app.podiumpodcasts.podium.ui.view.model.PodcastEpisodeDetailView
 import app.podiumpodcasts.podium.ui.vm.MainViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.parcelize.Parcelize
 import kotlinx.serialization.Serializable
@@ -117,7 +118,37 @@ fun Main(
         )
     }
 
-    val backStack = rememberNavBackStack(deepLink?.route ?: Home)
+    val settingsRepository = LocalSettingsRepository.current
+    val bottomBarRaw = settingsRepository.appearance.bottomBarItemsRaw
+        .collectAsState("HOME,DISCOVER,LIBRARY")
+    val enabledBottomBarNavKeys = remember(bottomBarRaw.value) {
+        app.podiumpodcasts.podium.ui.navigation.NavBarItems.parseList(bottomBarRaw.value)
+            .map { it.navKey }
+            .toSet()
+    }
+
+    val initialRoute = remember(deepLink) {
+        if (deepLink?.route != null) {
+            deepLink.route
+        } else {
+            val dest = kotlinx.coroutines.runBlocking {
+                settingsRepository.appearance.startupDestination.first()
+            }
+            when {
+                dest.startsWith("LIST:") -> {
+                    val id = dest.removePrefix("LIST:").toIntOrNull()
+                    if (id != null) app.podiumpodcasts.podium.ui.navigation.List(id) else Home
+                }
+                else -> {
+                    runCatching {
+                        app.podiumpodcasts.podium.ui.navigation.NavBarItems.valueOf(dest).navKey
+                    }.getOrNull() ?: Home
+                }
+            }
+        }
+    }
+
+    val backStack = rememberNavBackStack(initialRoute)
 
     val listDetailNavigator = rememberListDetailPaneScaffoldNavigator<DetailPaneKey>()
 
@@ -150,7 +181,7 @@ fun Main(
         }
     }
 
-    LaunchedEffect(backStack.last(), listDetailNavigator.scaffoldValue.primary) {
+    LaunchedEffect(backStack.last(), enabledBottomBarNavKeys, listDetailNavigator.scaffoldValue.primary) {
         if(navigationScaffoldLayoutType != NavigationSuiteType.ShortNavigationBarCompact &&
             navigationScaffoldLayoutType != NavigationSuiteType.NavigationBar) return@LaunchedEffect
 
@@ -158,8 +189,11 @@ fun Main(
         if(entry is PodiumNavKey) {
             vm.hideFloatingMediaPlayer.value = !entry.showMediaPlayer
 
+            val showForCustomTab = entry in enabledBottomBarNavKeys ||
+                (backStack.size == 1 && entry is app.podiumpodcasts.podium.ui.navigation.List)
             val shouldNavBeVisible =
-                entry.showNavBar && listDetailNavigator.scaffoldValue.primary == PaneAdaptedValue.Hidden
+                (entry.showNavBar || showForCustomTab) &&
+                    listDetailNavigator.scaffoldValue.primary == PaneAdaptedValue.Hidden
 
             val isNavVisible =
                 navigationScaffoldState.currentValue == NavigationSuiteScaffoldValue.Visible
@@ -181,7 +215,10 @@ fun Main(
         layoutType = navigationScaffoldLayoutType,
         state = navigationScaffoldState,
         onClickItem = {
-            backStack.add(it.navKey)
+            if (backStack.lastOrNull() != it.navKey) {
+                backStack.clear()
+                backStack.add(it.navKey)
+            }
             listDetailBack()
         },
         currentNavKey = { backStack.last() }
@@ -224,8 +261,11 @@ fun Main(
                                 onBack = {
                                     if(listDetailNavigator.canNavigateBack(BackNavigationBehavior.PopUntilScaffoldValueChange)) {
                                         listDetailBack()
-                                    } else {
+                                    } else if (backStack.size > 1) {
                                         backStack.removeLastOrNull()
+                                    } else if (backStack.lastOrNull() != Home) {
+                                        backStack.clear()
+                                        backStack.add(Home)
                                     }
                                 },
 
