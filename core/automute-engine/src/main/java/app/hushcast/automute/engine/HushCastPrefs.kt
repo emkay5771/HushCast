@@ -35,4 +35,29 @@ object HushCastPrefs {
     fun setAnalyzeOnlyWhileCharging(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_CHARGING_ONLY, enabled).apply()
     }
+
+    private const val KEY_DESKTOP_ENABLED = "desktop_worker_enabled"
+    private const val KEY_DESKTOP_URL = "desktop_worker_url"
+    private const val KEY_DESKTOP_TOKEN = "desktop_worker_token"
+
+    fun isDesktopWorkerEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_DESKTOP_ENABLED, false)
+
+    fun setDesktopWorkerEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_DESKTOP_ENABLED, enabled).apply()
+    }
+
+    fun getDesktopWorkerUrl(context: Context): String =
+        prefs(context).getString(KEY_DESKTOP_URL, "").orEmpty()
+
+    fun setDesktopWorkerUrl(context: Context, url: String) {
+        prefs(context).edit().putString(KEY_DESKTOP_URL, url.trim().trimEnd('/')).apply()
+    }
+
+    fun getDesktopWorkerToken(context: Context): String =
+        prefs(context).getString(KEY_DESKTOP_TOKEN, "").orEmpty()
+
+    fun setDesktopWorkerToken(context: Context, token: String) {
+        prefs(context).edit().putString(KEY_DESKTOP_TOKEN, token.trim()).apply()
+    }
 }

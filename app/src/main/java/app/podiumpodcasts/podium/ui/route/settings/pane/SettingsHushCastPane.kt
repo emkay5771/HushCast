@@ -327,6 +327,127 @@ fun SettingsHushCastPane(
                 }
             }
 
+            // 1c. Desktop Companion (Mac / GPU) Card
+            item {
+                var desktopEnabled by remember {
+                    mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context))
+                }
+                var desktopUrl by remember {
+                    mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context))
+                }
+                var desktopToken by remember {
+                    mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerToken(context))
+                }
+                var desktopStatus by remember { mutableStateOf<String?>(null) }
+                var desktopBusy by remember { mutableStateOf(false) }
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text("Desktop Companion (Mac / GPU)", style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    "Have your Mac download & analyze episodes, then push exact audio + index over Wi-Fi.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = desktopEnabled,
+                                onCheckedChange = { enabled ->
+                                    desktopEnabled = enabled
+                                    app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerEnabled(context, enabled)
+                                }
+                            )
+                        }
+
+                        if (desktopEnabled) {
+                            Spacer(Modifier.height(10.dp))
+                            OutlinedTextField(
+                                value = desktopUrl,
+                                onValueChange = {
+                                    desktopUrl = it
+                                    app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerUrl(context, it)
+                                },
+                                label = { Text("Worker URL (e.g. http://192.168.1.50:8765)") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = desktopToken,
+                                onValueChange = {
+                                    desktopToken = it
+                                    app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerToken(context, it)
+                                },
+                                label = { Text("Pairing Token") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(
+                                    enabled = !desktopBusy,
+                                    onClick = {
+                                        desktopBusy = true
+                                        desktopStatus = "Searching Wi-Fi for _hushcast._tcp…"
+                                        scope.launch {
+                                            val found = app.hushcast.automute.desktop.DesktopWorkerDiscovery.discoverFirst(context)
+                                            if (found != null) {
+                                                desktopUrl = found.url
+                                                app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerUrl(context, found.url)
+                                                desktopStatus = "Found ${found.serviceName} at ${found.url}"
+                                            } else {
+                                                desktopStatus = "No HushCast worker found on local Wi-Fi."
+                                            }
+                                            desktopBusy = false
+                                        }
+                                    }
+                                ) {
+                                    Text("Discover Wi-Fi")
+                                }
+                                Button(
+                                    enabled = !desktopBusy && desktopUrl.isNotBlank(),
+                                    onClick = {
+                                        desktopBusy = true
+                                        desktopStatus = "Connecting…"
+                                        scope.launch {
+                                            try {
+                                                val health = app.hushcast.automute.desktop.DesktopWorkerClient.healthCheck(
+                                                    baseUrl = desktopUrl,
+                                                    token = desktopToken
+                                                )
+                                                desktopStatus = "Connected: ${health.hostname} (${health.accelerator.uppercase()}) • " +
+                                                    (if (health.modelsReady) "Models Ready" else "Models Missing") +
+                                                    " • ${health.cachedEpisodes} cached"
+                                            } catch (t: Throwable) {
+                                                desktopStatus = "Connection failed: ${t.message ?: t.javaClass.simpleName}"
+                                            } finally {
+                                                desktopBusy = false
+                                            }
+                                        }
+                                    }
+                                ) {
+                                    Text("Test Connection")
+                                }
+                            }
+                            if (desktopStatus != null) {
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    desktopStatus!!,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // 2. Feature A: Word Auto-Muting Controls
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {

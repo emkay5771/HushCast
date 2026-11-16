@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hushcast-worker"
+version = "0.1.0"
+description = "Headless LAN companion worker for HushCast (Mac/Desktop GPU transcription & ad-tagging)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.7.0",
+    "zeroconf>=0.132.0",
+    "numpy>=1.26.0",
+    "onnxruntime>=1.19.0",
+]
+
+[project.optional-dependencies]
+ml = [
+    "pywhispercpp>=1.2.0",
+    "llama-cpp-python>=0.3.0",
+    "av>=12.0.0",
+]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+hushcast-worker = "hushcast_worker.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["hushcast_worker*"]
