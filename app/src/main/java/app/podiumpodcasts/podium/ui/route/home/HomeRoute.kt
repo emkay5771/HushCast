@@ -425,28 +425,6 @@ fun HomeRoute(
                             contentPadding = PaddingValues(16.dp),
                             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
                         ) {
-                            if(continuePlayingPager.itemCount > 0) {
-                                continuePlayingPager[0]?.let { item ->
-                                    item(key = "CONTINUE_PLAYING", contentType = "continue") {
-                                        Column(Modifier.padding(bottom = 8.dp)) {
-                                            TextButton(onClick = onClickContinuePlaying) {
-                                                Text(stringResource(R.string.route_continue_playing))
-                                            }
-                                            PodcastEpisodeListItem(
-                                                bundle = item.toPodcastEpisodeBundle(),
-                                                descriptionText = item.episode.podcastTitle,
-                                                index = 0,
-                                                count = 1,
-                                                colors = ListItemDefaults.segmentedColors(
-                                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                                                ),
-                                                onClick = { onClickEpisode(item.episode) }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
                             itemsIndexed(
                                 items = sortedSubscriptions,
                                 key = { _, bundle -> bundle.podcast.origin },
