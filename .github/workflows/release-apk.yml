@@ -22,13 +22,35 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: 'gradle'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Cache Android SDK 36, NDK 27 & CMake
+        id: cache-android-sdk
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.ANDROID_HOME }}/platforms/android-36
+            ${{ env.ANDROID_HOME }}/build-tools/36.0.0
+            ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+            ${{ env.ANDROID_HOME }}/cmake/3.22.1
+          key: android-sdk-36-ndk-27.2.12479018-cmake-3.22.1
 
       - name: Install Android SDK 36, NDK 27 & CMake
+        if: steps.cache-android-sdk.outputs.cache-hit != 'true'
         run: |
           SDKMANAGER=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -n 1)
           yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
           "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Cache native CMake build (.cxx)
+        uses: actions/cache@v4
+        with:
+          path: core/automute-engine/.cxx
+          key: cxx-${{ runner.os }}-${{ hashFiles('core/automute-engine/CMakeLists.txt', 'core/automute-engine/src/main/cpp/**', 'core/automute-engine/third_party/**') }}
+          restore-keys: |
+            cxx-${{ runner.os }}-
 
       - name: Configure local.properties
         run: |
