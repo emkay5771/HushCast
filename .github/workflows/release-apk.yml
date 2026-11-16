@@ -1,0 +1,67 @@
+name: Build & Release HushCast APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Set up Android SDK & NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK 27 & CMake
+        run: |
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Configure local.properties
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          echo "PODCAST_INDEX_API_KEY=${{ secrets.PODCAST_INDEX_API_KEY }}" >> local.properties
+          echo "PODCAST_INDEX_API_SECRET=${{ secrets.PODCAST_INDEX_API_SECRET }}" >> local.properties
+
+      - name: Run unit tests and build Debug APK
+        run: ./gradlew :core:automute-engine:testDebugUnitTest :app:assembleDebug
+
+      - name: Rename APK artifact
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME:-main}"
+          cp app/build/outputs/apk/debug/app-debug.apk "HushCast-${TAG_NAME}-debug.apk"
+          echo "APK_FILE=HushCast-${TAG_NAME}-debug.apk" >> "$GITHUB_ENV"
+
+      - name: Upload APK as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK_FILE }}
+          path: ${{ env.APK_FILE }}
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" "${{ env.APK_FILE }}" \
+            --title "HushCast ${GITHUB_REF_NAME}" \
+            --notes "HushCast Android APK (`arm64-v8a`, Android 8.0+ / API 26+).
+
+          ### First-Time Setup
+          1. Download `${{ env.APK_FILE }}` on your Android phone and install it.
+          2. Open **Settings -> HushCast** to download the on-device AI models over Wi-Fi."
