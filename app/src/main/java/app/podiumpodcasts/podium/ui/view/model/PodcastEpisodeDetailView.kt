@@ -305,8 +305,8 @@ fun PodcastEpisodeDetailView(
                                 DropdownMenuItem(
                                     text = {
                                         Text(
-                                            if (isAlreadyDownloaded) "Replace with Desktop Version"
-                                            else "Download via Desktop Companion"
+                                            if (isAlreadyDownloaded) "Refresh on Desktop / Cloud"
+                                            else "Download via Desktop / Cloud"
                                         )
                                     },
                                     onClick = {

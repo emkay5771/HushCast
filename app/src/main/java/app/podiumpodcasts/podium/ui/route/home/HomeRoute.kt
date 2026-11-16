@@ -89,6 +89,8 @@ import app.podiumpodcasts.podium.ui.theme.Typography
 import app.podiumpodcasts.podium.ui.vm.home.SubscriptionsViewModel
 import kotlinx.coroutines.launch
 
+private var homeStartupSyncDone = false
+
 @OptIn(
     ExperimentalMaterial3Api::class, ExperimentalMaterial3AdaptiveApi::class,
     ExperimentalMaterial3ExpressiveApi::class
@@ -119,10 +121,16 @@ fun HomeRoute(
 
     val context = androidx.compose.ui.platform.LocalContext.current
     androidx.compose.runtime.LaunchedEffect(Unit) {
-        app.podiumpodcasts.podium.PodcastGridOrganization.init(context)
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            db.podcastSubscriptions().subscribeAllExistingPodcasts()
-            db.podcastSubscriptions().recalculateAllNewEpisodesCounts()
+            app.podiumpodcasts.podium.PodcastGridOrganization.init(context)
+        }
+        if (!homeStartupSyncDone) {
+            homeStartupSyncDone = true
+            kotlinx.coroutines.delay(450)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                db.podcastSubscriptions().subscribeAllExistingPodcasts()
+                db.podcastSubscriptions().recalculateAllNewEpisodesCounts()
+            }
         }
     }
 
@@ -324,49 +332,49 @@ fun HomeRoute(
         }
     }
 
-    BoxWithConstraints {
-        Scaffold(
-            Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-            contentWindowInsets = WindowInsets.statusBars,
-            topBar = {
-                CenterAlignedTopAppBar(
-                    scrollBehavior = scrollBehavior,
-                    title = {
-                        Text(stringResource(R.string.app_name))
-                    },
-                    actions = {
-                        IconButton(onClick = { showCreateFolderDialog = true }) {
-                            Icon(
-                                androidx.compose.material.icons.Icons.Rounded.Add,
-                                contentDescription = "New folder"
-                            )
-                        }
-                        IconButton(onClick = { showOptionsSheet = true }) {
-                            Icon(Icons.Rounded.Tune, contentDescription = "Podcasts options")
-                        }
-                        FilledIconButton(
-                            shapes = IconButtonDefaults.shapes(),
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainer
-                            ),
-                            onClick = onSettings
-                        ) {
-                            Icon(
-                                Icons.Rounded.Settings,
-                                contentDescription = stringResource(R.string.route_settings)
-                            )
-                        }
+    val screenWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+    Scaffold(
+        Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        contentWindowInsets = WindowInsets.statusBars,
+        topBar = {
+            CenterAlignedTopAppBar(
+                scrollBehavior = scrollBehavior,
+                title = {
+                    Text(stringResource(R.string.app_name))
+                },
+                actions = {
+                    IconButton(onClick = { showCreateFolderDialog = true }) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Rounded.Add,
+                            contentDescription = "New folder"
+                        )
                     }
-                )
-            },
-            floatingActionButton = {
-                androidx.compose.material3.SmallFloatingActionButton(
-                    modifier = Modifier.padding(
-                        bottom = if(maxWidth <= FloatingMediaPlayerBreakpoint)
-                            LocalFloatingMediaPlayerHeight.current
-                        else
-                            0.dp
-                    ),
+                    IconButton(onClick = { showOptionsSheet = true }) {
+                        Icon(Icons.Rounded.Tune, contentDescription = "Podcasts options")
+                    }
+                    FilledIconButton(
+                        shapes = IconButtonDefaults.shapes(),
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainer
+                        ),
+                        onClick = onSettings
+                    ) {
+                        Icon(
+                            Icons.Rounded.Settings,
+                            contentDescription = stringResource(R.string.route_settings)
+                        )
+                    }
+                }
+            )
+        },
+        floatingActionButton = {
+            androidx.compose.material3.SmallFloatingActionButton(
+                modifier = Modifier.padding(
+                    bottom = if(screenWidthDp <= FloatingMediaPlayerBreakpoint)
+                        LocalFloatingMediaPlayerHeight.current
+                    else
+                        0.dp
+                ),
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     onClick = onClickAddPodcast
@@ -442,7 +450,8 @@ fun HomeRoute(
                                                 .clip(RoundedCornerShape(10.dp)),
                                             model = bundle.podcast.imageUrl,
                                             contentDescription = bundle.podcast.fetchTitle(),
-                                            contentScale = ContentScale.Crop
+                                            contentScale = ContentScale.Crop,
+                                            targetSizePx = 128
                                         )
                                     },
                                     content = {
@@ -635,4 +644,5 @@ fun HomeRoute(
             }
         }
     }
+}
 }

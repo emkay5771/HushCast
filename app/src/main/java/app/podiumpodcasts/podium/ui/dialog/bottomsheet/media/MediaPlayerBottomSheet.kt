@@ -916,40 +916,49 @@ fun MediaPlayerBottomSheet(
         }
 
         if (showNotDownloadedDialog) {
-            androidx.compose.material3.AlertDialog(
-                onDismissRequest = { showNotDownloadedDialog = false },
-                title = { Text("Episode not downloaded") },
-                text = {
-                    Text("HushCast AI analyzes episodes locally on your device, so the audio file needs to be downloaded first.")
-                },
-                confirmButton = {
-                    androidx.compose.material3.TextButton(
-                        onClick = {
-                            showNotDownloadedDialog = false
-                            if (episodeId.isNotBlank()) {
-                                scope.launch {
-                                    app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
-                                        context,
-                                        appDb,
-                                        episodeId
-                                    )
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Downloading episode…",
-                                        android.widget.Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            }
+            val isAlreadyDownloaded = remember(episodeId, currentEpisodeBundle) {
+                currentEpisodeBundle?.episode?.craftDownloadFile(context)?.exists() == true
+            }
+            app.podiumpodcasts.podium.ui.component.media.HushCastAnalyzeDialog(
+                episodeTitle = currentEpisodeBundle?.episode?.title
+                    ?: vm.mediaMetadata?.title?.toString()
+                    ?: "this episode",
+                isDownloaded = isAlreadyDownloaded,
+                onDismiss = { showNotDownloadedDialog = false },
+                onAnalyzeDesktop = {
+                    if (episodeId.isNotBlank()) {
+                        scope.launch {
+                            app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                context = context,
+                                db = appDb,
+                                episodeId = episodeId,
+                                downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
+                            )
                         }
-                    ) {
-                        Text("Download")
                     }
                 },
-                dismissButton = {
-                    androidx.compose.material3.TextButton(
-                        onClick = { showNotDownloadedDialog = false }
-                    ) {
-                        Text("Cancel")
+                onAnalyzeOnDevice = {
+                    if (episodeId.isNotBlank()) {
+                        scope.launch {
+                            app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                context = context,
+                                db = appDb,
+                                episodeId = episodeId,
+                                downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
+                            )
+                        }
+                    }
+                },
+                onDownloadAudioOnly = {
+                    if (episodeId.isNotBlank()) {
+                        scope.launch {
+                            app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                context = context,
+                                db = appDb,
+                                episodeId = episodeId,
+                                downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.AUDIO_ONLY
+                            )
+                        }
                     }
                 }
             )

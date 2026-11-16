@@ -1,3 +1,15 @@
+# HushCast v0.1.20-hushcast
+
+## What's New
+- **Smooth Initial Podcast Grid Load**:
+  - Deferred startup subscription sync and `PodcastGridOrganization` disk initialization off the initial composition frame, replaced `BoxWithConstraints` subcomposition in [`HomeRoute`](app/src/main/java/app/podiumpodcasts/podium/ui/route/home/HomeRoute.kt) with `LocalConfiguration.current.screenWidthDp`, and added `targetSizePx = 128` to subscription list thumbnails.
+- **Unified HushCast Analysis Dialog**:
+  - Standardized all HushCast analysis prompts across episode rows, media rows, and the player sheet via [`HushCastAnalyzeDialog`](app/src/main/java/app/podiumpodcasts/podium/ui/component/media/HushCastPlayerOverlays.kt), following the consistent option tree: Desktop/Cloud Worker connected → On-Device models ready → Not set up yet.
+- **Obvious "Refresh on Desktop / Cloud" Action**:
+  - Added a direct refresh icon button on analyzed episode rows in [`PodcastEpisodeListItem`](app/src/main/java/app/podiumpodcasts/podium/ui/component/model/episode/PodcastEpisodeListItem.kt) when a Desktop/Cloud worker is connected, and renamed the detail overflow menu action in [`PodcastEpisodeDetailView`](app/src/main/java/app/podiumpodcasts/podium/ui/view/model/PodcastEpisodeDetailView.kt) to **Refresh on Desktop / Cloud**.
+
+---
+
 # HushCast v0.1.19-hushcast
 
 ## What's New

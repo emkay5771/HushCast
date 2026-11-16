@@ -291,77 +291,127 @@ fun PodcastEpisodeListItem(
                                     strokeWidth = 2.dp
                                 )
                             }
-                            ReadinessBadge.READY -> Unit
+                            ReadinessBadge.READY -> {
+                                val desktopConnected = remember(context) {
+                                    app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) &&
+                                        app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+                                }
+                                if (desktopConnected) {
+                                    val refreshScope = rememberCoroutineScope()
+                                    val appDb = app.podiumpodcasts.podium.ui.helper.LocalDatabase.current
+                                    var showRefreshDialog by remember { mutableStateOf(false) }
+                                    if (showRefreshDialog) {
+                                        app.podiumpodcasts.podium.ui.component.media.HushCastAnalyzeDialog(
+                                            episodeTitle = bundle.episode.title,
+                                            isDownloaded = true,
+                                            onDismiss = { showRefreshDialog = false },
+                                            onAnalyzeDesktop = {
+                                                refreshScope.launch {
+                                                    app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                                        context = context,
+                                                        db = appDb,
+                                                        episodeId = bundle.episode.id,
+                                                        downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
+                                                    )
+                                                }
+                                            },
+                                            onAnalyzeOnDevice = {
+                                                val audioFile = bundle.episode.craftDownloadFile(context)
+                                                if (audioFile.exists()) {
+                                                    EpisodeAnalysisWorker.enqueueAnalyzeNow(
+                                                        context = context,
+                                                        episodeId = bundle.episode.id,
+                                                        audioPath = audioFile.absolutePath,
+                                                        actionMode = HushCastEngineBridge.defaultActionMode,
+                                                        episodeTitle = bundle.episode.title
+                                                    )
+                                                }
+                                            },
+                                            onDownloadAudioOnly = {}
+                                        )
+                                    }
+                                    IconButton(onClick = { showRefreshDialog = true }) {
+                                        Icon(
+                                            imageVector = androidx.compose.material.icons.Icons.Rounded.Refresh,
+                                            contentDescription = "Refresh on Desktop / Cloud"
+                                        )
+                                    }
+                                }
+                            }
                             ReadinessBadge.WORD_MUTE_READY,
                             ReadinessBadge.NOT_PROCESSED -> {
                                 val sparkleScope = rememberCoroutineScope()
                                 val appDb = app.podiumpodcasts.podium.ui.helper.LocalDatabase.current
-                                var showNeedDownloadDialog by remember { mutableStateOf(false) }
+                                var showAnalyzeDialog by remember { mutableStateOf(false) }
 
-                                if (showNeedDownloadDialog) {
-                                    androidx.compose.material3.AlertDialog(
-                                        onDismissRequest = { showNeedDownloadDialog = false },
-                                        title = { Text("Analyze with HushCast AI") },
-                                        text = {
-                                            Text("This episode isn't downloaded yet. Download it now so HushCast AI can transcribe, auto-mute profanity, and skip sponsor reads.")
-                                        },
-                                        confirmButton = {
-                                            androidx.compose.material3.TextButton(
-                                                onClick = {
-                                                    showNeedDownloadDialog = false
-                                                    sparkleScope.launch {
-                                                        app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
-                                                            context = context,
-                                                            db = appDb,
-                                                            episodeId = bundle.episode.id
-                                                        )
-                                                    }
-                                                }
-                                            ) {
-                                                Text("Download & Analyze")
+                                if (showAnalyzeDialog) {
+                                    val audioExists = remember(bundle.episode.id) {
+                                        bundle.episode.craftDownloadFile(context).exists()
+                                    }
+                                    app.podiumpodcasts.podium.ui.component.media.HushCastAnalyzeDialog(
+                                        episodeTitle = bundle.episode.title,
+                                        isDownloaded = audioExists,
+                                        onDismiss = { showAnalyzeDialog = false },
+                                        onAnalyzeDesktop = {
+                                            sparkleScope.launch {
+                                                app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                                    context = context,
+                                                    db = appDb,
+                                                    episodeId = bundle.episode.id,
+                                                    downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
+                                                )
                                             }
                                         },
-                                        dismissButton = {
-                                            androidx.compose.material3.TextButton(
-                                                onClick = { showNeedDownloadDialog = false }
-                                            ) {
-                                                Text("Cancel")
+                                        onAnalyzeOnDevice = {
+                                            val audioFile = bundle.episode.craftDownloadFile(context)
+                                            if (audioFile.exists()) {
+                                                sparkleScope.launch {
+                                                    autoMuteDb.dao().upsertStatus(
+                                                        app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
+                                                            episodeId = bundle.episode.id,
+                                                            badge = ReadinessBadge.ANALYZING.name,
+                                                            progressPercent = 0,
+                                                            stageLabel = "Queued for AI analysis…"
+                                                        )
+                                                    )
+                                                }
+                                                EpisodeAnalysisWorker.enqueueAnalyzeNow(
+                                                    context = context,
+                                                    episodeId = bundle.episode.id,
+                                                    audioPath = audioFile.absolutePath,
+                                                    actionMode = HushCastEngineBridge.defaultActionMode,
+                                                    episodeTitle = bundle.episode.title
+                                                )
+                                                Toast.makeText(
+                                                    context,
+                                                    "Queued for HushCast AI analysis",
+                                                    Toast.LENGTH_SHORT
+                                                ).show()
+                                            } else {
+                                                sparkleScope.launch {
+                                                    app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                                        context = context,
+                                                        db = appDb,
+                                                        episodeId = bundle.episode.id,
+                                                        downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        onDownloadAudioOnly = {
+                                            sparkleScope.launch {
+                                                app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                                    context = context,
+                                                    db = appDb,
+                                                    episodeId = bundle.episode.id,
+                                                    downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.AUDIO_ONLY
+                                                )
                                             }
                                         }
                                     )
                                 }
 
-                                IconButton(
-                                    onClick = {
-                                        val audioFile = bundle.episode.craftDownloadFile(context)
-                                        if (audioFile.exists()) {
-                                            sparkleScope.launch {
-                                                autoMuteDb.dao().upsertStatus(
-                                                    app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
-                                                        episodeId = bundle.episode.id,
-                                                        badge = ReadinessBadge.ANALYZING.name,
-                                                        progressPercent = 0,
-                                                        stageLabel = "Queued for AI analysis…"
-                                                    )
-                                                )
-                                            }
-                                            EpisodeAnalysisWorker.enqueueAnalyzeNow(
-                                                context = context,
-                                                episodeId = bundle.episode.id,
-                                                audioPath = audioFile.absolutePath,
-                                                actionMode = HushCastEngineBridge.defaultActionMode,
-                                                episodeTitle = bundle.episode.title
-                                            )
-                                            Toast.makeText(
-                                                context,
-                                                "Queued for HushCast AI analysis",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
-                                        } else {
-                                            showNeedDownloadDialog = true
-                                        }
-                                    }
-                                ) {
+                                IconButton(onClick = { showAnalyzeDialog = true }) {
                                     Icon(
                                         imageVector = Icons.Rounded.AutoAwesome,
                                         contentDescription = "Analyze with HushCast AI"

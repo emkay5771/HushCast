@@ -918,3 +918,118 @@ private fun formatTranscriptTimestamp(ms: Long): String {
     val s = totalSec % 60L
     return if (h > 0L) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
+
+/**
+ * Unified HushCast AI Analysis / Download dialog following the consistent option tree:
+ * 1. Desktop / Cloud Worker connected -> offer Desktop/Cloud analyze (+ on-device fallback if models ready)
+ * 2. Only Mobile ready -> offer On-Device Download & Analyze (+ Audio Only)
+ * 3. No models & no Desktop -> explain setup needed + offer Audio Only
+ */
+@Composable
+fun HushCastAnalyzeDialog(
+    episodeTitle: String,
+    isDownloaded: Boolean,
+    onDismiss: () -> Unit,
+    onAnalyzeDesktop: () -> Unit,
+    onAnalyzeOnDevice: () -> Unit,
+    onDownloadAudioOnly: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val desktopConnected = remember(context) {
+        app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) &&
+            app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+    }
+    val localModelsReady = remember(context) {
+        app.hushcast.automute.engine.ModelManager(context).areAllModelsReady()
+    }
+
+    val title: String
+    val body: String
+    val primaryLabel: String
+    val primaryAction: () -> Unit
+    val secondaryLabel: String?
+    val secondaryAction: (() -> Unit)?
+
+    when {
+        desktopConnected -> {
+            title = if (isDownloaded) "Refresh on Desktop / Cloud" else "Analyze with Desktop / Cloud"
+            body = if (isDownloaded) {
+                "Re-download and analyze \"$episodeTitle\" on your connected Desktop/Cloud Worker for fresh transcript, speakers, chapters, and ad markers."
+            } else {
+                "Download and analyze \"$episodeTitle\" on your connected Desktop/Cloud Worker, then stream the exact audio + AI bundle to your phone."
+            }
+            primaryLabel = if (isDownloaded) "Refresh on Desktop" else "Download & Analyze (Worker)"
+            primaryAction = onAnalyzeDesktop
+            if (localModelsReady) {
+                secondaryLabel = if (isDownloaded) "Analyze On-Device" else "On-Device Instead"
+                secondaryAction = onAnalyzeOnDevice
+            } else {
+                secondaryLabel = null
+                secondaryAction = null
+            }
+        }
+        localModelsReady -> {
+            title = "Analyze On-Device with HushCast AI"
+            body = if (isDownloaded) {
+                "Run on-device HushCast AI on \"$episodeTitle\" to transcribe, auto-mute words, and detect sponsor reads."
+            } else {
+                "\"$episodeTitle\" isn't downloaded yet. Download it now to run on-device HushCast AI."
+            }
+            primaryLabel = if (isDownloaded) "Analyze On-Device" else "Download & Analyze"
+            primaryAction = onAnalyzeOnDevice
+            if (!isDownloaded) {
+                secondaryLabel = "Audio Only"
+                secondaryAction = onDownloadAudioOnly
+            } else {
+                secondaryLabel = null
+                secondaryAction = null
+            }
+        }
+        else -> {
+            title = "HushCast AI Not Set Up"
+            body = "No on-device AI models (~455 MB) are downloaded and no Desktop/Cloud Worker is connected. Open Settings → HushCast to download models or scan a worker QR code."
+            if (!isDownloaded) {
+                primaryLabel = "Download Audio Only"
+                primaryAction = onDownloadAudioOnly
+            } else {
+                primaryLabel = "OK"
+                primaryAction = onDismiss
+            }
+            secondaryLabel = null
+            secondaryAction = null
+        }
+    }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = { Text(body) },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                onClick = {
+                    onDismiss()
+                    primaryAction()
+                }
+            ) {
+                Text(primaryLabel)
+            }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (secondaryLabel != null && secondaryAction != null) {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            onDismiss()
+                            secondaryAction()
+                        }
+                    ) {
+                        Text(secondaryLabel)
+                    }
+                }
+                androidx.compose.material3.TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+            }
+        }
+    )
+}
