@@ -29,6 +29,9 @@ android {
         versionName = "1.0.0-alpha09"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
 
         val localProps = org.jetbrains.kotlin.konan.properties.Properties().apply {
             val f = rootProject.file("local.properties")

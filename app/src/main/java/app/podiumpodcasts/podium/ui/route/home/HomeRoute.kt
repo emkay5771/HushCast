@@ -4,18 +4,27 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Podcasts
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -25,49 +34,58 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumExtendedFloatingActionButton
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SegmentedListItem
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.paging.compose.collectAsLazyPagingItems
 import app.podiumpodcasts.podium.R
+import app.podiumpodcasts.podium.SubscriptionsBadgeMode
+import app.podiumpodcasts.podium.SubscriptionsLayout
+import app.podiumpodcasts.podium.SubscriptionsSort
 import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeModel
 import app.podiumpodcasts.podium.ui.component.layout.InfoLayout
-import app.podiumpodcasts.podium.ui.component.layout.Section
-import app.podiumpodcasts.podium.ui.component.layout.SectionCarousel
 import app.podiumpodcasts.podium.ui.component.media.FloatingMediaPlayerBreakpoint
 import app.podiumpodcasts.podium.ui.component.media.FloatingMediaPlayerSpacer
 import app.podiumpodcasts.podium.ui.component.media.LocalFloatingMediaPlayerHeight
-import app.podiumpodcasts.podium.ui.component.model.PodcastCard
 import app.podiumpodcasts.podium.ui.component.model.SubscriptionCard
 import app.podiumpodcasts.podium.ui.component.model.episode.PodcastEpisodeListItem
+import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 import app.podiumpodcasts.podium.ui.helper.PagerScaffold
+import app.podiumpodcasts.podium.ui.theme.Typography
 import app.podiumpodcasts.podium.ui.vm.home.ContinuePlayingViewModel
-import app.podiumpodcasts.podium.ui.vm.home.LocallyAvailableViewModel
-import app.podiumpodcasts.podium.ui.vm.home.NewEpisodesViewModel
 import app.podiumpodcasts.podium.ui.vm.home.SubscriptionsViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(
     ExperimentalMaterial3Api::class, ExperimentalMaterial3AdaptiveApi::class,
@@ -89,42 +107,109 @@ fun HomeRoute(
     onClickPodcast: (origin: String) -> Unit,
     onClickEpisode: (episode: PodcastEpisodeModel) -> Unit
 ) {
+    val scope = rememberCoroutineScope()
     val db = LocalDatabase.current
-
     val settingsRepository = LocalSettingsRepository.current
-
-    val useAlternativeBranding = settingsRepository.appearance.useAlternativeBranding
-        .collectAsState(false)
 
     val subscriptionsVm = viewModel { SubscriptionsViewModel(db) }
     val continuePlayingVm = viewModel { ContinuePlayingViewModel(db) }
-    val newEpisodesVm = viewModel { NewEpisodesViewModel(db) }
-    val locallyAvailableVm = viewModel { LocallyAvailableViewModel(db) }
 
     val subscriptionsPager = subscriptionsVm.subscriptions.collectAsLazyPagingItems()
     val continuePlayingPager = continuePlayingVm.continuePlaying.collectAsLazyPagingItems()
-    val newEpisodesPager = newEpisodesVm.newEpisodes.collectAsLazyPagingItems()
-    val locallyAvailablePager = locallyAvailableVm.locallyAvailable.collectAsLazyPagingItems()
 
-    val loaded = remember { mutableStateOf(false) }
-    LaunchedEffect(
-        subscriptionsPager.loadState.isIdle,
-        continuePlayingPager.loadState.isIdle,
-        newEpisodesPager.loadState.isIdle,
-        locallyAvailablePager.loadState.isIdle
-    ) {
-        if(!subscriptionsPager.loadState.isIdle) return@LaunchedEffect
-        if(!continuePlayingPager.loadState.isIdle) return@LaunchedEffect
-        if(!newEpisodesPager.loadState.isIdle) return@LaunchedEffect
-        if(!locallyAvailablePager.loadState.isIdle) return@LaunchedEffect
-        loaded.value = true
+    val layout by settingsRepository.appearance.subscriptionsLayout.collectAsState(SubscriptionsLayout.LARGE_GRID)
+    val sort by settingsRepository.appearance.subscriptionsSort.collectAsState(SubscriptionsSort.RECENTLY_ADDED)
+    val badgeMode by settingsRepository.appearance.subscriptionsBadgeMode.collectAsState(SubscriptionsBadgeMode.UNPLAYED_COUNT)
+
+    var showOptionsSheet by remember { mutableStateOf(false) }
+
+    val sortedSubscriptions = remember(subscriptionsPager.itemSnapshotList.items, sort) {
+        val list = subscriptionsPager.itemSnapshotList.items
+        when(sort) {
+            SubscriptionsSort.A_Z -> list.sortedBy { it.podcast.fetchTitle().lowercase() }
+            SubscriptionsSort.RECENTLY_ADDED -> list
+        }
     }
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
-
+    val gridState = rememberLazyGridState()
     val listState = rememberLazyListState()
 
-    val expandedFab by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
+    val expandedFab by remember {
+        derivedStateOf {
+            if(layout == SubscriptionsLayout.LIST) {
+                listState.firstVisibleItemIndex == 0
+            } else {
+                gridState.firstVisibleItemIndex == 0
+            }
+        }
+    }
+
+    if(showOptionsSheet) {
+        ModalBottomSheet(onDismissRequest = { showOptionsSheet = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Text("Podcasts Options", style = Typography.titleLargeEmphasized)
+                Spacer(Modifier.height(16.dp))
+
+                Text("Layout", style = Typography.labelLarge)
+                Spacer(Modifier.height(8.dp))
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    val options = listOf(
+                        SubscriptionsLayout.LARGE_GRID to "Large Grid",
+                        SubscriptionsLayout.SMALL_GRID to "Small Grid",
+                        SubscriptionsLayout.LIST to "List"
+                    )
+                    options.forEachIndexed { idx, (value, label) ->
+                        SegmentedButton(
+                            selected = layout == value,
+                            onClick = { scope.launch { settingsRepository.appearance.setSubscriptionsLayout(value) } },
+                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
+                        ) { Text(label) }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Text("Sort by", style = Typography.labelLarge)
+                Spacer(Modifier.height(8.dp))
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    val options = listOf(
+                        SubscriptionsSort.RECENTLY_ADDED to "New Episodes",
+                        SubscriptionsSort.A_Z to "A–Z"
+                    )
+                    options.forEachIndexed { idx, (value, label) ->
+                        SegmentedButton(
+                            selected = sort == value,
+                            onClick = { scope.launch { settingsRepository.appearance.setSubscriptionsSort(value) } },
+                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
+                        ) { Text(label) }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Text("Badges", style = Typography.labelLarge)
+                Spacer(Modifier.height(8.dp))
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    val options = listOf(
+                        SubscriptionsBadgeMode.UNPLAYED_COUNT to "Count",
+                        SubscriptionsBadgeMode.LATEST_ONLY to "Dot",
+                        SubscriptionsBadgeMode.OFF to "Off"
+                    )
+                    options.forEachIndexed { idx, (value, label) ->
+                        SegmentedButton(
+                            selected = badgeMode == value,
+                            onClick = { scope.launch { settingsRepository.appearance.setSubscriptionsBadgeMode(value) } },
+                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
+                        ) { Text(label) }
+                    }
+                }
+                Spacer(Modifier.height(24.dp))
+            }
+        }
+    }
 
     BoxWithConstraints {
         Scaffold(
@@ -136,6 +221,9 @@ fun HomeRoute(
                         Text(stringResource(R.string.app_name))
                     },
                     actions = {
+                        IconButton(onClick = { showOptionsSheet = true }) {
+                            Icon(Icons.Rounded.Tune, contentDescription = "Podcasts options")
+                        }
                         FilledIconButton(
                             shapes = IconButtonDefaults.shapes(),
                             colors = IconButtonDefaults.filledIconButtonColors(
@@ -181,9 +269,6 @@ fun HomeRoute(
             ) {
                 PagerScaffold(
                     subscriptionsPager,
-                    continuePlayingPager,
-                    newEpisodesPager,
-                    locallyAvailablePager,
                     isEmpty = {
                         InfoLayout(
                             icon = Icons.Rounded.Podcasts,
@@ -217,180 +302,141 @@ fun HomeRoute(
                         )
                     }
                 ) {
-                    Box(
-                        Modifier.fillMaxSize()
-                    ) {
-                        if(loaded.value) LazyColumn(
+                    if(layout == SubscriptionsLayout.LIST) {
+                        LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            state = listState
+                            state = listState,
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
                         ) {
-                            if(subscriptionsPager.itemCount > 0) item(
-                                key = "SUBSCRIPTIONS"
-                            ) {
-                                SectionCarousel(
-                                    modifier = Modifier.animateItem(),
-                                    title = stringResource(R.string.route_subscriptions),
-                                    onClickExpand = { onClickSubscriptions() }
-                                ) {
-                                    items(subscriptionsPager.itemCount) {
-                                        val bundle = subscriptionsPager[it]
-                                            ?: return@items
-
-                                        SubscriptionCard(
-                                            modifier = Modifier.animateItem(),
-                                            bundle = bundle,
-                                            onClick = {
-                                                onClickPodcast(bundle.podcast.origin)
+                            if(continuePlayingPager.itemCount > 0) {
+                                continuePlayingPager[0]?.let { item ->
+                                    item(key = "CONTINUE_PLAYING", contentType = "continue") {
+                                        Column(Modifier.padding(bottom = 8.dp)) {
+                                            TextButton(onClick = onClickContinuePlaying) {
+                                                Text(stringResource(R.string.route_continue_playing))
                                             }
-                                        )
-                                    }
-                                }
-                            }
-
-                            if(continuePlayingPager.itemCount > 0) item(
-                                key = "CONTINUE_PLAYING"
-                            ) {
-                                Section(
-                                    modifier = Modifier.animateItem(),
-                                    title = stringResource(R.string.route_continue_playing),
-                                    badge = {
-                                        Badge {
-                                            Text(
-                                                text = continuePlayingPager.itemCount.toString()
-                                            )
-                                        }
-                                    },
-                                    onClickExpand = { onClickContinuePlaying() }
-                                ) {
-                                    val backgroundColor = MaterialTheme.colorScheme.background
-
-                                    val count = continuePlayingPager.itemCount.coerceAtMost(2)
-
-                                    Column(
-                                        Modifier
-                                            .padding(start = 16.dp, end = 16.dp)
-                                            .drawWithContent {
-                                                drawContent()
-
-                                                if(continuePlayingPager.itemCount > 2) drawRect(
-                                                    Brush.verticalGradient(
-                                                        listOf(
-                                                            Color.Transparent,
-                                                            backgroundColor
-                                                        )
-                                                    )
-                                                )
-                                            },
-                                        verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
-                                    ) {
-                                        repeat(count) {
-                                            val item = continuePlayingPager[it] ?: return@repeat
-
                                             PodcastEpisodeListItem(
                                                 bundle = item.toPodcastEpisodeBundle(),
-
                                                 descriptionText = item.episode.podcastTitle,
-
-                                                index = it,
-                                                count = count,
-
+                                                index = 0,
+                                                count = 1,
                                                 colors = ListItemDefaults.segmentedColors(
                                                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                                                 ),
-
-                                                onClick = {
-                                                    onClickEpisode(item.episode)
-                                                }
+                                                onClick = { onClickEpisode(item.episode) }
                                             )
                                         }
                                     }
                                 }
                             }
 
-                            if(newEpisodesPager.itemCount > 0) item(
-                                key = "NEW_EPISODES"
-                            ) {
-                                Section(
-                                    modifier = Modifier.animateItem(),
-                                    title = stringResource(R.string.route_new_episodes),
-                                    badge = {
-                                        Badge {
-                                            Text(
-                                                text = newEpisodesPager.itemCount.toString()
-                                            )
+                            itemsIndexed(
+                                items = sortedSubscriptions,
+                                key = { _, bundle -> bundle.podcast.origin },
+                                contentType = { _, _ -> "podcast_row" }
+                            ) { index, bundle ->
+                                SegmentedListItem(
+                                    shapes = ListItemDefaults.segmentedShapes(
+                                        index = index,
+                                        count = sortedSubscriptions.size
+                                    ),
+                                    leadingContent = {
+                                        ShimmerAsyncImage(
+                                            modifier = Modifier
+                                                .size(52.dp)
+                                                .clip(RoundedCornerShape(10.dp)),
+                                            model = bundle.podcast.imageUrl,
+                                            contentDescription = bundle.podcast.fetchTitle(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    },
+                                    content = {
+                                        Text(
+                                            text = bundle.podcast.fetchTitle(),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    supportingContent = {
+                                        Text(
+                                            text = bundle.podcast.author,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    },
+                                    trailingContent = {
+                                        if(bundle.subscription.newEpisodes > 0 && badgeMode != SubscriptionsBadgeMode.OFF) {
+                                            Badge(
+                                                containerColor = MaterialTheme.colorScheme.primary
+                                            ) {
+                                                if(badgeMode == SubscriptionsBadgeMode.UNPLAYED_COUNT) {
+                                                    Text(bundle.subscription.newEpisodes.toString())
+                                                }
+                                            }
                                         }
                                     },
-                                    onClickExpand = { onClickNewEpisodes() }
-                                ) {
-                                    val backgroundColor = MaterialTheme.colorScheme.background
+                                    onClick = { onClickPodcast(bundle.podcast.origin) }
+                                )
+                            }
 
-                                    val count = newEpisodesPager.itemCount.coerceAtMost(2)
-
-                                    Column(
-                                        Modifier
-                                            .padding(start = 16.dp, end = 16.dp)
-                                            .drawWithContent {
-                                                drawContent()
-
-                                                if(newEpisodesPager.itemCount > 2) drawRect(
-                                                    Brush.verticalGradient(
-                                                        listOf(
-                                                            Color.Transparent,
-                                                            backgroundColor
-                                                        )
-                                                    )
-                                                )
-                                            },
-                                        verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
+                            item(key = "SPACER") {
+                                FloatingMediaPlayerSpacer()
+                            }
+                        }
+                    } else {
+                        val minCellSize = if(layout == SubscriptionsLayout.SMALL_GRID) 84.dp else 110.dp
+                        LazyVerticalGrid(
+                            modifier = Modifier.fillMaxSize(),
+                            state = gridState,
+                            columns = GridCells.Adaptive(minCellSize),
+                            contentPadding = PaddingValues(16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            if(continuePlayingPager.itemCount > 0) {
+                                continuePlayingPager[0]?.let { item ->
+                                    item(
+                                        key = "CONTINUE_PLAYING",
+                                        span = { GridItemSpan(maxLineSpan) },
+                                        contentType = "continue"
                                     ) {
-                                        repeat(count) {
-                                            val item = newEpisodesPager[it] ?: return@repeat
-
+                                        Column(Modifier.padding(bottom = 4.dp)) {
+                                            TextButton(onClick = onClickContinuePlaying) {
+                                                Text(stringResource(R.string.route_continue_playing))
+                                            }
                                             PodcastEpisodeListItem(
-                                                bundle = item,
-
+                                                bundle = item.toPodcastEpisodeBundle(),
                                                 descriptionText = item.episode.podcastTitle,
-
-                                                index = it,
-                                                count = count,
-
+                                                index = 0,
+                                                count = 1,
                                                 colors = ListItemDefaults.segmentedColors(
                                                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                                                 ),
-
-                                                onClick = {
-                                                    onClickEpisode(item.episode)
-                                                }
+                                                onClick = { onClickEpisode(item.episode) }
                                             )
                                         }
                                     }
                                 }
                             }
 
-                            if(locallyAvailablePager.itemCount > 0) item(
-                                key = "LOCALLY_AVAILABLE"
-                            ) {
-                                SectionCarousel(
-                                    modifier = Modifier.animateItem(),
-                                    title = stringResource(R.string.route_locally_available),
-                                    onClickExpand = { onClickLocallyAvailable() }
-                                ) {
-                                    items(locallyAvailablePager.itemCount) {
-                                        val podcast = locallyAvailablePager[it]
-                                            ?: return@items
-
-                                        PodcastCard(
-                                            modifier = Modifier.animateItem(),
-                                            podcast = podcast,
-                                            onClick = {
-                                                onClickPodcast(podcast.origin)
-                                            }
-                                        )
-                                    }
-                                }
+                            items(
+                                count = sortedSubscriptions.size,
+                                key = { sortedSubscriptions[it].podcast.origin },
+                                contentType = { "podcast_card" }
+                            ) { index ->
+                                val bundle = sortedSubscriptions[index]
+                                SubscriptionCard(
+                                    bundle = bundle,
+                                    badgeMode = badgeMode,
+                                    onClick = { onClickPodcast(bundle.podcast.origin) }
+                                )
                             }
 
-                            item {
+                            item(
+                                key = "SPACER",
+                                span = { GridItemSpan(maxLineSpan) }
+                            ) {
                                 FloatingMediaPlayerSpacer()
                             }
                         }

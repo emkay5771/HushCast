@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -104,6 +105,32 @@ fun ListRoute(
                     )
                 },
                 actions = {
+                    if(items.itemCount > 0) {
+                        val playerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+                        val context = androidx.compose.ui.platform.LocalContext.current
+                        BubbleButton(
+                            icon = androidx.compose.material.icons.Icons.Rounded.PlayArrow,
+                            contentDescription = "Play all"
+                        ) {
+                            val episodes = items.itemSnapshotList.items
+                                .filter { it.episode != null }
+                                .map { it.toPodcastEpisodeBundle() }
+                            if(episodes.isNotEmpty()) {
+                                playerVm.play(context, episodes.first())
+                                episodes.drop(1).forEach { playerVm.enqueue(context, it) }
+                            }
+                        }
+                        BubbleButton(
+                            icon = Icons.AutoMirrored.Rounded.PlaylistAdd,
+                            contentDescription = "Add all to Up Next"
+                        ) {
+                            items.itemSnapshotList.items
+                                .filter { it.episode != null }
+                                .forEach {
+                                    playerVm.enqueue(context, it.toPodcastEpisodeBundle())
+                                }
+                        }
+                    }
                     if(list.value?.isSystemList == false) {
                         BubbleButton(
                             icon = Icons.Rounded.Edit,

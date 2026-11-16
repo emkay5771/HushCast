@@ -31,6 +31,7 @@ class Resampler(private val inRate: Int, private val outRate: Int) {
     private var histLen = 0
     private var histBase = 0L            // input index of hist[0]
     private var nextOut = 0L             // index of the next output sample
+    private val outBuf = FloatList(1024)
 
     private fun h(d: Double): Double {
         if (abs(d) >= half) return 0.0
@@ -63,7 +64,10 @@ class Resampler(private val inRate: Int, private val outRate: Int) {
     }
 
     private fun produce(lastInput: Long): FloatArray {
-        val out = FloatList(256)
+        outBuf.clear()
+        val bankLocal = bank
+        val histLocal = hist
+        val tapsLocal = taps
         while (true) {
             // output sample n sits at input position n * inRate / outRate
             val num = nextOut * inRate
@@ -73,25 +77,27 @@ class Resampler(private val inRate: Int, private val outRate: Int) {
             val rem = num % outRate
             val base = (center - half + 1 - histBase).toInt()   // hist index of the first tap
             val j0 = if (base < 0) -base else 0
-            var acc = 0.0
-            val b = bank?.get((rem / g).toInt())
-            // the hot loop: keep the common (precomputed table) case free of per-tap branches
+            val b = bankLocal?.get((rem / g).toInt())
+            // the hot loop: keep the common (precomputed table) case in Float so ART/NEON vectorizes
             if (b != null) {
-                for (j in j0 until taps) acc += hist[base + j].toDouble() * b[j]
+                var acc = 0f
+                for (j in j0 until tapsLocal) acc += histLocal[base + j] * b[j]
+                outBuf.add(acc)
             } else {
+                var acc = 0.0
                 val frac = rem.toDouble() / outRate
-                for (j in j0 until taps) acc += hist[base + j].toDouble() * h(j - half + 1 - frac)
+                for (j in j0 until tapsLocal) acc += histLocal[base + j].toDouble() * h(j - half + 1 - frac)
+                outBuf.add(acc)
             }
-            out.add(acc)
             nextOut++
         }
         val keepFrom = (nextOut * inRate) / outRate - half - 1
         val drop = (keepFrom - histBase).toInt()
         if (drop in 1 until histLen) {
-            System.arraycopy(hist, drop, hist, 0, histLen - drop)
+            System.arraycopy(histLocal, drop, histLocal, 0, histLen - drop)
             histLen -= drop; histBase += drop
         }
-        return out.toArray()
+        return outBuf.toArray()
     }
 
     companion object {

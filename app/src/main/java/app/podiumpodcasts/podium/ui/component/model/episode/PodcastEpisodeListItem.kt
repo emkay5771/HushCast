@@ -50,7 +50,11 @@ import coil3.compose.AsyncImage
 fun PodcastEpisodeListItem(
     modifier: Modifier = Modifier,
     bundle: PodcastEpisodeBundle,
-    overlineText: String = formatPubDate(LocalContext.current, bundle.episode.pubDate),
+    overlineText: String = LocalContext.current.let { ctx ->
+        androidx.compose.runtime.remember(bundle.episode.pubDate) {
+            formatPubDate(ctx, bundle.episode.pubDate)
+        }
+    },
     titleText: String = bundle.episode.title,
     descriptionText: String = bundle.episode.description,
     leadingContent: @Composable (() -> Unit)? = null,

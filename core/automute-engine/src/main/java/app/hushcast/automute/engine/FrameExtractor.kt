@@ -75,6 +75,8 @@ class FrameExtractor {
     private val mag = DoubleArray(N_BINS)
     private var prevMag: DoubleArray? = null
     private val cepWindow = DoubleArray(Q_HI - Q_LO)
+    private val cepScratch = DoubleArray(Q_HI - Q_LO)
+    private val bandSum = DoubleArray(N_BANDS)
 
     private var buf = FloatArray(1 shl 16)
     private var bufLen = PAD_LEFT
@@ -166,7 +168,7 @@ class FrameExtractor {
         }
         var centroid = 0.0; var flatness = 0.0; var flux = 0.0
         var bestCpp = Double.NEGATIVE_INFINITY; var bestF0 = 0.0
-        val bandSum = DoubleArray(N_BANDS)
+        java.util.Arrays.fill(bandSum, 0.0)
         for (k in 0 until HOP / SHOP) {
             val start = (f * (HOP / SHOP) + k) * SHOP + SHOP / 2
             for (i in 0 until NFFT) { re[i] = buf[start + i] * win[i]; im[i] = 0.0 }
@@ -198,7 +200,11 @@ class FrameExtractor {
                 cepWindow[q - Q_LO] = v
                 if (v > peakV) { peakV = v; peak = q - Q_LO }
             }
-            val cpp = (peakV - Stats.median(cepWindow.copyOf())) * (10.0 / ln(10.0))
+            System.arraycopy(cepWindow, 0, cepScratch, 0, cepWindow.size)
+            java.util.Arrays.sort(cepScratch)
+            val midIdx = cepScratch.size / 2
+            val med = if (cepScratch.size and 1 == 1) cepScratch[midIdx] else (cepScratch[midIdx - 1] + cepScratch[midIdx]) * 0.5
+            val cpp = (peakV - med) * (10.0 / ln(10.0))
             if (cpp > bestCpp) { bestCpp = cpp; bestF0 = SR.toDouble() / (peak + Q_LO) }
         }
         val per = (HOP / SHOP).toDouble()
@@ -222,6 +228,15 @@ internal class FloatList(initial: Int = 1024) {
     fun add(v: Double) {
         if (size == a.size) a = a.copyOf(a.size * 2)
         a[size++] = v.toFloat()
+    }
+
+    fun add(v: Float) {
+        if (size == a.size) a = a.copyOf(a.size * 2)
+        a[size++] = v
+    }
+
+    fun clear() {
+        size = 0
     }
 
     fun toArray(): FloatArray = a.copyOf(size)

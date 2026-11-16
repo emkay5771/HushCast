@@ -201,27 +201,30 @@ class PlaybackService : MediaLibraryService() {
 
         scope.launch {
             downloadedEpisodeEvents.collect { downloadedId ->
-                val p = mediaSession?.player ?: return@collect
-                val currentIdx = p.currentMediaItemIndex
-                for(i in 0 until p.mediaItemCount) {
-                    val item = p.getMediaItemAt(i)
-                    val extras = item.mediaMetadata.extras
-                    val epId = extras?.getString(MediaMetadataExtra.EPISODE_ID.name)
-                    val isAlreadyDownload = extras?.getBoolean(MediaMetadataExtra.IS_DOWNLOAD.name) ?: false
-                    if(epId == downloadedId && !isAlreadyDownload) {
-                        val bundle = withContext(Dispatchers.IO) {
-                            runCatching { db.podcastEpisodes().getSync(downloadedId) }.getOrNull()
-                        } ?: continue
-                        val localItem = bundle.createMediaItem(this@PlaybackService)
-                        if(i == currentIdx) {
-                            val posMs = p.currentPosition.coerceAtLeast(0L)
-                            val wasPlaying = p.playWhenReady
-                            p.replaceMediaItem(i, localItem)
-                            p.seekTo(i, posMs)
-                            p.prepare()
-                            p.playWhenReady = wasPlaying
-                        } else {
-                            p.replaceMediaItem(i, localItem)
+                val bundle = withContext(Dispatchers.IO) {
+                    runCatching { db.podcastEpisodes().getSync(downloadedId) }.getOrNull()
+                } ?: return@collect
+                val localItem = bundle.createMediaItem(this@PlaybackService)
+
+                withContext(Dispatchers.Main) {
+                    val p = mediaSession?.player ?: return@withContext
+                    val currentIdx = p.currentMediaItemIndex
+                    for(i in 0 until p.mediaItemCount) {
+                        val item = p.getMediaItemAt(i)
+                        val extras = item.mediaMetadata.extras
+                        val epId = extras?.getString(MediaMetadataExtra.EPISODE_ID.name)
+                        val isAlreadyDownload = extras?.getBoolean(MediaMetadataExtra.IS_DOWNLOAD.name) ?: false
+                        if(epId == downloadedId && !isAlreadyDownload) {
+                            if(i == currentIdx) {
+                                val posMs = p.currentPosition.coerceAtLeast(0L)
+                                val wasPlaying = p.playWhenReady
+                                p.replaceMediaItem(i, localItem)
+                                p.seekTo(i, posMs)
+                                p.prepare()
+                                p.playWhenReady = wasPlaying
+                            } else {
+                                p.replaceMediaItem(i, localItem)
+                            }
                         }
                     }
                 }

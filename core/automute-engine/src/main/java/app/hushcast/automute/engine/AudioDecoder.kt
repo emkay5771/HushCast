@@ -42,16 +42,45 @@ object AudioDecoder {
         }
         codec.start()
 
-        var toFrames = Resampler(rate, FrameExtractor.SR)
-        var toFramesSide = Resampler(rate, FrameExtractor.SR)
-        var toWhisper = Resampler(rate, 16000)
+        var toFrames = if (frames != null) Resampler(rate, FrameExtractor.SR) else null
+        var toFramesSide = if (frames != null) Resampler(rate, FrameExtractor.SR) else null
+        var toWhisper = if (pcm16k != null) {
+            Resampler(if (frames != null) FrameExtractor.SR else rate, 16000)
+        } else null
         var started = false
         val info = MediaCodec.BufferInfo()
         var inputDone = false
         var outputDone = false
         var floatScratch = FloatArray(0)
         var shortScratch = ShortArray(0)
+        var midScratch = FloatArray(0)
+        var sideScratch = FloatArray(0)
         var lastReportedFraction = -1f
+
+        val frameQueue = if (frames != null) java.util.concurrent.ArrayBlockingQueue<Pair<FloatArray, FloatArray?>>(64) else null
+        val frameError = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
+        val frameThread = if (frames != null && frameQueue != null) {
+            Thread({
+                try {
+                    while (true) {
+                        val item = frameQueue.take()
+                        if (item.first.isEmpty() && item.second == null) break
+                        feed(frames, item.first, item.second)
+                    }
+                } catch (t: Throwable) {
+                    frameError.compareAndSet(null, t)
+                }
+            }, "HushCast-FrameExtractor").apply { start() }
+        } else null
+
+        fun enqueueFrame(mid24k: FloatArray, side24k: FloatArray?) {
+            val err = frameError.get()
+            if (err != null) throw err
+            if (mid24k.isNotEmpty()) {
+                frameQueue?.put(mid24k to side24k)
+            }
+        }
+
         try {
             while (!outputDone) {
                 if (!inputDone) {
@@ -75,9 +104,11 @@ object AudioDecoder {
                     if (f.containsKey(MediaFormat.KEY_PCM_ENCODING)) encoding = f.getInteger(MediaFormat.KEY_PCM_ENCODING)
                     if (newRate != rate && !started) {
                         rate = newRate
-                        toFrames = Resampler(rate, FrameExtractor.SR)
-                        toFramesSide = Resampler(rate, FrameExtractor.SR)
-                        toWhisper = Resampler(rate, 16000)
+                        toFrames = if (frames != null) Resampler(rate, FrameExtractor.SR) else null
+                        toFramesSide = if (frames != null) Resampler(rate, FrameExtractor.SR) else null
+                        toWhisper = if (pcm16k != null) {
+                            Resampler(if (frames != null) FrameExtractor.SR else rate, 16000)
+                        } else null
                     }
                 } else if (o >= 0) {
                     val buf = codec.getOutputBuffer(o)!!.order(ByteOrder.nativeOrder())
@@ -87,8 +118,8 @@ object AudioDecoder {
                     if (count > 0) {
                         started = true
                         val totalSamples = count * channels
-                        val mid = FloatArray(count)
-                        val side = if (stereo) FloatArray(count) else null
+                        if (midScratch.size < count) midScratch = FloatArray(count)
+                        if (stereo && sideScratch.size < count) sideScratch = FloatArray(count)
                         if (encoding == AudioFormat.ENCODING_PCM_FLOAT) {
                             if (floatScratch.size < totalSamples) floatScratch = FloatArray(totalSamples)
                             buf.asFloatBuffer().get(floatScratch, 0, totalSamples)
@@ -97,13 +128,13 @@ object AudioDecoder {
                                     val idx = k * channels
                                     val l = floatScratch[idx]
                                     val r = floatScratch[idx + 1]
-                                    mid[k] = (l + r) * 0.5f
-                                    side!![k] = (l - r) * 0.5f
+                                    midScratch[k] = (l + r) * 0.5f
+                                    sideScratch[k] = (l - r) * 0.5f
                                 }
                             } else if (channels == 1) {
-                                System.arraycopy(floatScratch, 0, mid, 0, count)
+                                System.arraycopy(floatScratch, 0, midScratch, 0, count)
                             } else {
-                                for (k in 0 until count) mid[k] = floatScratch[k * channels]
+                                for (k in 0 until count) midScratch[k] = floatScratch[k * channels]
                             }
                         } else {
                             if (shortScratch.size < totalSamples) shortScratch = ShortArray(totalSamples)
@@ -113,17 +144,25 @@ object AudioDecoder {
                                     val idx = k * channels
                                     val l = shortScratch[idx] / 32768f
                                     val r = shortScratch[idx + 1] / 32768f
-                                    mid[k] = (l + r) * 0.5f
-                                    side!![k] = (l - r) * 0.5f
+                                    midScratch[k] = (l + r) * 0.5f
+                                    sideScratch[k] = (l - r) * 0.5f
                                 }
                             } else {
-                                for (k in 0 until count) mid[k] = shortScratch[k * channels] / 32768f
+                                for (k in 0 until count) midScratch[k] = shortScratch[k * channels] / 32768f
                             }
                         }
-                        if (frames != null) {
-                            feed(frames, toFrames.process(mid), side?.let { toFramesSide.process(it) })
+                        if (frames != null && toFrames != null) {
+                            val mid24k = toFrames.process(midScratch, 0, count)
+                            val side24k = if (stereo) toFramesSide?.process(sideScratch, 0, count) else null
+                            enqueueFrame(mid24k, side24k)
+                            if (pcm16k != null && toWhisper != null && mid24k.isNotEmpty()) {
+                                val w = toWhisper.process(mid24k, 0, mid24k.size)
+                                if (w.isNotEmpty()) pcm16k.append(w)
+                            }
+                        } else if (pcm16k != null && toWhisper != null) {
+                            val w = toWhisper.process(midScratch, 0, count)
+                            if (w.isNotEmpty()) pcm16k.append(w)
                         }
-                        pcm16k?.append(toWhisper.process(mid))
 
                         if (onProgress != null && duration > 0L) {
                             val fraction = (info.presentationTimeUs.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
@@ -137,11 +176,29 @@ object AudioDecoder {
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true
                 }
             }
-            if (frames != null) {
-                feed(frames, toFrames.finish(), if (channels >= 2) toFramesSide.finish() else null)
+            if (frames != null && toFrames != null) {
+                val mid24k = toFrames.finish()
+                val side24k = if (channels >= 2) toFramesSide?.finish() else null
+                enqueueFrame(mid24k, side24k)
+                if (pcm16k != null && toWhisper != null) {
+                    if (mid24k.isNotEmpty()) {
+                        val w = toWhisper.process(mid24k, 0, mid24k.size)
+                        if (w.isNotEmpty()) pcm16k.append(w)
+                    }
+                    val wf = toWhisper.finish()
+                    if (wf.isNotEmpty()) pcm16k.append(wf)
+                }
+            } else if (pcm16k != null && toWhisper != null) {
+                val wf = toWhisper.finish()
+                if (wf.isNotEmpty()) pcm16k.append(wf)
             }
-            pcm16k?.append(toWhisper.finish())
+            if (frameQueue != null && frameThread != null) {
+                frameQueue.put(FloatArray(0) to null)
+                frameThread.join()
+                frameError.get()?.let { throw it }
+            }
         } finally {
+            frameThread?.interrupt()
             codec.stop(); codec.release(); ex.release()
         }
         return Info(rate, channels, duration)

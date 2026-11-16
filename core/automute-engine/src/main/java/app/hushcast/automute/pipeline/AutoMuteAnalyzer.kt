@@ -229,7 +229,26 @@ class AutoMuteAnalyzer(
         val embeddings: FloatArray
         val embedder = Embedder(paths.qwenEmbedder.absolutePath)
         try {
-            embeddings = embedder.embed(segments.map { it.text })
+            var lastEmbedPct = 70
+            embeddings = embedder.embed(segments.map { it.text }) { fraction ->
+                val pct = (70 + (fraction * 19f).toInt()).coerceIn(70, 89)
+                if (pct > lastEmbedPct) {
+                    lastEmbedPct = pct
+                    onProgress(AnalysisProgress(pct, "Embedding sentences ($pct%)", ReadinessBadge.WORD_MUTE_READY))
+                    kotlinx.coroutines.runBlocking {
+                        dao.upsertStatus(
+                            EpisodeAnalysisStatusEntity(
+                                episodeId = episodeId,
+                                fileSha256 = currentSha,
+                                badge = ReadinessBadge.WORD_MUTE_READY.name,
+                                progressPercent = pct,
+                                stageLabel = "Embedding sentences",
+                                peakRssMb = peakRssMb
+                            )
+                        )
+                    }
+                }
+            }
             peakRssMb = maxOf(peakRssMb, currentRssMb())
         } finally {
             // Strictly unload Qwen3 before ONNX tagging
