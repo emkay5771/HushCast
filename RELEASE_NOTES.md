@@ -1,6 +1,9 @@
 # HushCast v0.1.15-hushcast
 
 ## What's New
+- **Full-Screen Player & Transcript Improvements**:
+  - Swipe up (or tap the expand icon) on `MediaPlayerBottomSheet` to expand the player to full page for reading Show Notes and Transcripts.
+  - Added transcript search, `mm:ss` timestamps, tap-to-jump on any line/word, long-press-to-mute/unmute (with working rule removal), working **Play** on Sponsor Read cards, and a 1-tap **Copy Transcript & Ad Report** button.
 - **Episode & Queue AI Analysis Status + One-Tap Analyze**:
   - Episode list items (`PodcastEpisodeListItem`) and Up Next queue rows (`MediaItemListItem`) now display HushCast readiness badges (`AI Ready`, `Word-Mute`, or live `%` progress) and a one-tap **Analyze** (`AutoAwesome`) button so you can analyze downloaded episodes without queueing them.
 - **Miniplayer Seek Controls (M3E)**:
