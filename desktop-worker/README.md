@@ -68,7 +68,7 @@ echo "Save this token: $TOKEN"
 uv run modal secret create hushcast-token HUSHCAST_WORKER_TOKEN="$TOKEN"
 ```
 
-> **Note:** Keep `$TOKEN` saved somewhere safe (e.g. a password manager) — you will enter it on your phone or pass it to `pair_qr` below. If you ever need to rotate it, delete and recreate the `hushcast-token` secret in Modal and re-run `modal deploy`.
+> **Note:** Keep `$TOKEN` saved somewhere safe (e.g. a password manager) — you will enter it on your phone or pass it to `pair_qr` below. Make sure the secret key is named **`HUSHCAST_WORKER_TOKEN`** and created in the same Modal environment (`main`) you deploy to.
 
 ### 4. Download Models into Persistent Modal Storage (One-Time)
 
@@ -95,7 +95,7 @@ https://<your-modal-username>--hushcast-worker-fastapi-app.modal.run
 ### 6. Pair Your Android Phone
 
 **Option A — Scan QR Code (Easiest):**
-Print a scannable `hushcast://pair?...` QR code in your terminal using your deployed URL and token:
+Print a scannable `hushcast://pair?...` QR code in your terminal using your deployed URL and token (make sure `$TOKEN` is still set in your shell):
 
 ```bash
 uv run modal run modal_app.py::pair_qr \
@@ -116,8 +116,22 @@ On your phone:
 4. Tap **Test** to verify both connectivity and token authentication.
 
 ### Notes & Troubleshooting
+- **Verify auth directly with `curl`:** `/v1/health` is unauthenticated, while `/v1/episodes` and `/v1/jobs` require your token. You can verify both your URL and token from your terminal:
+  ```bash
+  curl -i -H "Authorization: Bearer $TOKEN" \
+    "https://<your-modal-username>--hushcast-worker-fastapi-app.modal.run/v1/episodes"
+  ```
+  It should return `HTTP/2 200` (`[]` if no episodes are cached yet).
+- **Rotating or updating `hushcast-token` (`HTTP 401` after `modal secret create --force`):** If you update `hushcast-token` without changing `modal_app.py`, `uv run modal deploy modal_app.py` may print `Deployment skipped: no changes detected!` and keep existing containers running with the old token. Stop the app first so new containers pick up the updated secret:
+  ```bash
+  uv run modal secret create --force hushcast-token HUSHCAST_WORKER_TOKEN="$TOKEN"
+  uv run modal app stop hushcast-worker
+  uv run modal deploy modal_app.py
+  ```
+  You can also run `uv run modal secret list` to confirm `hushcast-token` is in the active environment.
 - **Cold starts (scale-to-zero):** To save credits, Modal scales the GPU container down after 2 minutes of idle time (`scaledown_window=120`). The first **Test** or episode download after idle may take ~15–25 seconds while the T4 container boots; subsequent requests while warm are instant.
 - **Updating the worker:** After pulling new changes (`git pull origin main`), re-run `uv run modal deploy modal_app.py` inside `desktop-worker/`.
 - **Optional LLM Chat / Summaries:** If you also want an instruct GGUF model on Modal, upload or download it into `/data/models/` inside the `hushcast-data` volume.
+
 
 
