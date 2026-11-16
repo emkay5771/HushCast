@@ -206,7 +206,7 @@ fun MediaPlayerBottomSheet(
         mutableStateOf<List<app.hushcast.automute.desktop.DesktopChapterDto>>(emptyList())
     }
 
-    LaunchedEffect(episodeId, analysisStatus?.badge) {
+    LaunchedEffect(episodeId, analysisStatus?.badge, analysisStatus?.stageLabel) {
         if (episodeId.isBlank()) return@LaunchedEffect
         val idx = autoMuteDb.dao().getWordIndexByEpisode(episodeId)
         val insights = autoMuteDb.dao().getInsights(episodeId)
@@ -929,7 +929,8 @@ fun MediaPlayerBottomSheet(
                                 context = context,
                                 db = appDb,
                                 episodeId = episodeId,
-                                downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
+                                downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP,
+                                forceReprocess = isAlreadyDownloaded
                             )
                         }
                     }

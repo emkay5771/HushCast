@@ -1,3 +1,14 @@
+# HushCast v0.1.23-hushcast
+
+## What's New
+- **Force Reprocessing on Desktop / Cloud Refresh**:
+  - Added `force` flag to [`DesktopJobRequest`](core/automute-engine/src/main/java/app/hushcast/automute/desktop/DesktopWorkerModels.kt) and `POST /v1/jobs` in [`server.py`](desktop-worker/hushcast_worker/server.py) so **Refresh on Desktop / Cloud** (from episode rows, detail menu, or player sheet) bypasses URL and SHA-256 cache fast-paths and re-runs full analysis.
+  - [`MediaPlayerBottomSheet`](app/src/main/java/app/podiumpodcasts/podium/ui/dialog/bottomsheet/media/MediaPlayerBottomSheet.kt) now also reloads summary and chapters whenever `stageLabel` updates.
+- **Cleaner Extractive Summary Fallback**:
+  - Updated [`pipeline.py`](desktop-worker/hushcast_worker/pipeline.py) to reconstruct complete sentences across contiguous non-ad segments (with filler/promo filtering) instead of joining mid-sentence Whisper fragments when no local Instruct GGUF is installed.
+
+---
+
 # HushCast v0.1.22-hushcast
 
 ## What's New

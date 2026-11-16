@@ -320,7 +320,8 @@ fun PodcastEpisodeListItem(
                                                         context = context,
                                                         db = appDb,
                                                         episodeId = bundle.episode.id,
-                                                        downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
+                                                        downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP,
+                                                        forceReprocess = true
                                                     )
                                                 }
                                             },
@@ -367,7 +368,8 @@ fun PodcastEpisodeListItem(
                                                     context = context,
                                                     db = appDb,
                                                     episodeId = bundle.episode.id,
-                                                    downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
+                                                    downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP,
+                                                    forceReprocess = audioExists
                                                 )
                                             }
                                         },

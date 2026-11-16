@@ -28,7 +28,8 @@ class DownloadManager {
             db: AppDatabase,
             episodeId: String,
             auto: Boolean = false,
-            downloadMethod: app.hushcast.automute.engine.DownloadAnalysisMethod? = null
+            downloadMethod: app.hushcast.automute.engine.DownloadAnalysisMethod? = null,
+            forceReprocess: Boolean = false
         ) {
             if(db.podcastEpisodeDownloads().getSync(episodeId) == null) {
                 db.podcastEpisodeDownloads().add(episodeId)
@@ -38,7 +39,8 @@ class DownloadManager {
                 context = context,
                 episodeId = episodeId,
                 auto = auto,
-                downloadMethod = downloadMethod
+                downloadMethod = downloadMethod,
+                forceReprocess = forceReprocess
             )
         }
 

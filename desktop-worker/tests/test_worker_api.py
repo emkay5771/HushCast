@@ -193,6 +193,46 @@ def test_job_lifecycle_auth_and_sha256_serving(tmp_path: Path) -> None:
         assert len(eps.json()) == 1
         assert eps.json()[0]["fileSha256"] == expected_sha
 
+        # Re-submitting without force hits cache immediately
+        cached_res = client.post(
+            "/v1/jobs",
+            headers=headers,
+            json={
+                "episodeId": "ep1",
+                "audioUrl": "https://example.com/1.mp3",
+                "title": "Test Ep",
+            },
+        )
+        assert cached_res.status_code == 200
+        assert cached_res.json()["state"] == "READY"
+        assert cached_res.json()["stageLabel"] == "Cached on desktop"
+
+        # Re-submitting with force=True bypasses cache and runs a fresh job
+        forced_res = client.post(
+            "/v1/jobs",
+            headers=headers,
+            json={
+                "episodeId": "ep1",
+                "audioUrl": "https://example.com/1.mp3",
+                "title": "Test Ep",
+                "force": True,
+            },
+        )
+        assert forced_res.status_code == 200
+        forced_id = forced_res.json()["jobId"]
+        assert forced_res.json()["stageLabel"] == "Reprocessing on desktop"
+        forced_data = None
+        for _ in range(30):
+            poll = client.get(f"/v1/jobs/{forced_id}", headers=headers)
+            assert poll.status_code == 200
+            forced_data = poll.json()
+            if forced_data["state"] == "READY":
+                break
+            time.sleep(0.02)
+        assert forced_data is not None
+        assert forced_data["state"] == "READY"
+        assert forced_data["stageLabel"] == "Ready"
+
         # Clear audio-only cache (keeps bundle/embeddings, removes .audio)
         clear_audio = client.delete("/v1/cache?audio_only=true", headers=headers)
         assert clear_audio.status_code == 200

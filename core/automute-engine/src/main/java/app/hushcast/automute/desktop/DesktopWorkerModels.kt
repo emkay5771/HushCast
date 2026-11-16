@@ -21,7 +21,8 @@ data class DesktopJobRequest(
     val audioUrl: String,
     val title: String = "",
     val feedTranscriptRaw: String? = null,
-    val feedTranscriptMime: String = ""
+    val feedTranscriptMime: String = "",
+    val force: Boolean = false
 )
 
 @Serializable

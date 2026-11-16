@@ -25,6 +25,7 @@ class PodcastEpisodeDownloadWork(
         episodeId: String,
         downloadMethod: app.hushcast.automute.engine.DownloadAnalysisMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO,
         isAuto: Boolean = false,
+        forceReprocess: Boolean = false,
         onProgressUpdate: ((title: String, sourceLabel: String, percent: Int) -> Unit)? = null
     ): Boolean {
         val bundle = db.podcastEpisodes().getSync(episodeId)
@@ -60,6 +61,7 @@ class PodcastEpisodeDownloadWork(
                 destFile = file,
                 workerUrl = workerUrl,
                 token = app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerToken(context),
+                forceReprocess = forceReprocess,
                 onProgressUpdate = onProgressUpdate
             )
             if (offloaded) {
@@ -160,6 +162,7 @@ class PodcastEpisodeDownloadWork(
         destFile: java.io.File,
         workerUrl: String,
         token: String,
+        forceReprocess: Boolean = false,
         onProgressUpdate: ((title: String, sourceLabel: String, percent: Int) -> Unit)?
     ): Boolean {
         return try {
@@ -182,7 +185,8 @@ class PodcastEpisodeDownloadWork(
                 request = app.hushcast.automute.desktop.DesktopJobRequest(
                     episodeId = episodeId,
                     audioUrl = audioUrl,
-                    title = title
+                    title = title,
+                    force = forceReprocess
                 )
             )
             val ready = app.hushcast.automute.desktop.DesktopWorkerClient.pollJobUntilReady(

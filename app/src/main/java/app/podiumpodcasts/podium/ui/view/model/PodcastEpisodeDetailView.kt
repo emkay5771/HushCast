@@ -316,7 +316,8 @@ fun PodcastEpisodeDetailView(
                                                 context = downloadContext,
                                                 db = downloadDb,
                                                 episodeId = episode.id,
-                                                downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
+                                                downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP,
+                                                forceReprocess = isAlreadyDownloaded
                                             )
                                         }
                                     }

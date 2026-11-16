@@ -829,7 +829,7 @@ def _generate_chapters_and_summary(
             )
         )
 
-    # Coherent extractive TL;DR: score informative non-banter sentences
+    # Coherent extractive TL;DR: reconstruct complete sentences across contiguous non-ad segments
     from collections import Counter
 
     ep_keywords = Counter()
@@ -840,10 +840,13 @@ def _generate_chapters_and_summary(
 
     centroid = np.mean(sub_emb, axis=0)
     centroid /= float(np.linalg.norm(centroid)) + 1e-12
-    emb_scores = sub_emb @ centroid
 
     filler_starts = re.compile(
-        r"^(?:yeah|yes|no|well|okay|ok|right|totally|exactly|i mean|so,|but,|and,)\b",
+        r"^(?:yeah|yes|no|well|okay|ok|right|totally|exactly|i mean|you know|so,|but,|and,|uh\b|um\b|like,)\b",
+        re.IGNORECASE,
+    )
+    promo_cues = re.compile(
+        r"\b(?:promo code|dot com|slash|subscribe|patreon|sponsor|sponsored by)\b",
         re.IGNORECASE,
     )
     intro_cues = re.compile(
@@ -851,28 +854,118 @@ def _generate_chapters_and_summary(
         re.IGNORECASE,
     )
 
-    candidates: list[tuple[float, int, SegmentDto]] = []
+    # Group non-ad segments into contiguous speech runs
+    runs: list[list[int]] = []
     for k, idx in enumerate(non_ad_indices):
-        seg = segments[idx]
-        txt = seg.text.strip()
-        wc = len(txt.split())
-        if wc < 10 or wc > 42 or txt.endswith("?") or filler_starts.search(txt):
-            continue
-        kw_hits = sum(1 for low, _ in _extract_chapter_tokens(txt) if low in top_kw)
-        score = float(emb_scores[k]) + 0.08 * min(kw_hits, 5)
-        if k < max(10, m // 8) and intro_cues.search(txt):
-            score += 0.35
-        candidates.append((score, idx, seg))
+        if not runs:
+            runs.append([k])
+        else:
+            prev_idx = non_ad_indices[runs[-1][-1]]
+            gap = segments[idx].start - segments[prev_idx].end
+            if idx == prev_idx + 1 and gap < 2.5:
+                runs[-1].append(k)
+            else:
+                runs.append([k])
 
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    chosen: list[tuple[int, SegmentDto]] = []
-    for _, idx, seg in candidates:
-        if all(abs(seg.start - c_seg.start) >= 60.0 for _, c_seg in chosen):
-            chosen.append((idx, seg))
-            if len(chosen) >= 3:
+    sentence_candidates: list[tuple[float, float, str]] = []
+    for run in runs:
+        spans: list[tuple[int, int, int]] = []
+        parts: list[str] = []
+        cursor = 0
+        for k in run:
+            t = re.sub(r"\s+", " ", segments[non_ad_indices[k]].text).strip()
+            if not t:
+                continue
+            if parts:
+                parts.append(" ")
+                cursor += 1
+            start_c = cursor
+            parts.append(t)
+            cursor += len(t)
+            spans.append((start_c, cursor, k))
+        run_text = "".join(parts)
+        if not run_text:
+            continue
+
+        # Split into sentences at terminal punctuation followed by whitespace + capital/quote or end
+        sent_start = 0
+        for m_split in re.finditer(r'(?<=[.!?])\s+(?=[A-Z"\'(])', run_text):
+            sent_end = m_split.start()
+            _score_sentence = run_text[sent_start:sent_end].strip()
+            _s_start, _s_end = sent_start, sent_end
+            sent_start = m_split.end()
+            if _score_sentence:
+                k_list = [k for cs, ce, k in spans if ce > _s_start and cs < _s_end]
+                if not k_list:
+                    continue
+                wc = len(_score_sentence.split())
+                if wc < 10 or wc > 45:
+                    continue
+                if not (_score_sentence[0].isupper() or _score_sentence[0] in '"\''):
+                    continue
+                if not _score_sentence.endswith((".", "!")) or _score_sentence.endswith("?"):
+                    continue
+                if filler_starts.search(_score_sentence) or promo_cues.search(_score_sentence):
+                    continue
+                sent_vec = np.mean(sub_emb[k_list], axis=0)
+                sent_vec /= float(np.linalg.norm(sent_vec)) + 1e-12
+                emb_sc = float(np.dot(sent_vec, centroid))
+                kw_hits = sum(1 for low, _ in _extract_chapter_tokens(_score_sentence) if low in top_kw)
+                score = emb_sc + 0.08 * min(kw_hits, 5) + (0.05 if 14 <= wc <= 32 else 0.0)
+                if k_list[0] < max(10, m // 8) and intro_cues.search(_score_sentence):
+                    score += 0.35
+                sentence_candidates.append((score, segments[non_ad_indices[k_list[0]]].start, _score_sentence))
+
+        # Trailing sentence in run if it ends with terminal punctuation
+        tail = run_text[sent_start:].strip()
+        if tail and tail.endswith((".", "!")) and not tail.endswith("?"):
+            k_list = [k for cs, ce, k in spans if ce > sent_start]
+            wc = len(tail.split())
+            if (
+                k_list
+                and 10 <= wc <= 45
+                and (tail[0].isupper() or tail[0] in '"\'')
+                and not filler_starts.search(tail)
+                and not promo_cues.search(tail)
+            ):
+                sent_vec = np.mean(sub_emb[k_list], axis=0)
+                sent_vec /= float(np.linalg.norm(sent_vec)) + 1e-12
+                emb_sc = float(np.dot(sent_vec, centroid))
+                kw_hits = sum(1 for low, _ in _extract_chapter_tokens(tail) if low in top_kw)
+                score = emb_sc + 0.08 * min(kw_hits, 5) + (0.05 if 14 <= wc <= 32 else 0.0)
+                if k_list[0] < max(10, m // 8) and intro_cues.search(tail):
+                    score += 0.35
+                sentence_candidates.append((score, segments[non_ad_indices[k_list[0]]].start, tail))
+
+    # Fallback for unpunctuated transcripts
+    if not sentence_candidates:
+        emb_scores = sub_emb @ centroid
+        for k, idx in enumerate(non_ad_indices):
+            seg = segments[idx]
+            txt = re.sub(r"\s+", " ", seg.text).strip()
+            wc = len(txt.split())
+            if wc < 10 or wc > 42 or txt.endswith("?") or filler_starts.search(txt):
+                continue
+            kw_hits = sum(1 for low, _ in _extract_chapter_tokens(txt) if low in top_kw)
+            score = float(emb_scores[k]) + 0.08 * min(kw_hits, 5)
+            if k < max(10, m // 8) and intro_cues.search(txt):
+                score += 0.35
+            cleaned = txt.rstrip(",;:- ")
+            if cleaned and cleaned[0].islower():
+                cleaned = cleaned[0].upper() + cleaned[1:]
+            if cleaned and cleaned[-1] not in ".!?":
+                cleaned += "."
+            sentence_candidates.append((score, seg.start, cleaned))
+
+    sentence_candidates.sort(key=lambda x: x[0], reverse=True)
+    chosen_sents: list[tuple[float, str]] = []
+    for _, start_s, sent_txt in sentence_candidates:
+        if all(abs(start_s - c_start) >= 60.0 for c_start, _ in chosen_sents):
+            chosen_sents.append((start_s, sent_txt))
+            if len(chosen_sents) >= 3:
                 break
-    chosen.sort(key=lambda x: x[0])
-    summary = " ".join(seg.text.strip() for _, seg in chosen) if chosen else None
+    chosen_sents.sort(key=lambda x: x[0])
+    summary = " ".join(sent_txt for _, sent_txt in chosen_sents) if chosen_sents else None
 
     return summary, chapters
 

@@ -66,6 +66,7 @@ class DesktopJobRequest(BaseModel):
     title: str = ""
     feedTranscriptRaw: Optional[str] = None
     feedTranscriptMime: str = ""
+    force: bool = False
 
 
 class DesktopJobResponse(BaseModel):

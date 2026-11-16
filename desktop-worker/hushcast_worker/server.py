@@ -80,27 +80,28 @@ def create_app(
         dependencies=[Depends(verify_auth)],
     )
     async def submit_job(req: DesktopJobRequest) -> DesktopJobResponse:
-        # 1. Fast-path: already analyzed & cached for this audioUrl
-        existing_sha = cache.lookup_by_url(req.audioUrl)
-        if existing_sha:
-            job_id = str(uuid.uuid4())
-            resp = DesktopJobResponse(
-                jobId=job_id,
-                episodeId=req.episodeId,
-                state=JobState.READY,
-                progressPercent=100,
-                stageLabel="Cached on desktop",
-                fileSha256=existing_sha,
-            )
-            jobs[job_id] = resp
-            return resp
+        if not req.force:
+            # 1. Fast-path: already analyzed & cached for this audioUrl
+            existing_sha = cache.lookup_by_url(req.audioUrl)
+            if existing_sha:
+                job_id = str(uuid.uuid4())
+                resp = DesktopJobResponse(
+                    jobId=job_id,
+                    episodeId=req.episodeId,
+                    state=JobState.READY,
+                    progressPercent=100,
+                    stageLabel="Cached on desktop",
+                    fileSha256=existing_sha,
+                )
+                jobs[job_id] = resp
+                return resp
 
-        # 2. Reuse in-flight job for same URL if still running
-        in_flight_id = url_to_job_id.get(req.audioUrl)
-        if in_flight_id and in_flight_id in jobs:
-            existing_job = jobs[in_flight_id]
-            if existing_job.state not in (JobState.READY, JobState.FAILED):
-                return existing_job
+            # 2. Reuse in-flight job for same URL if still running
+            in_flight_id = url_to_job_id.get(req.audioUrl)
+            if in_flight_id and in_flight_id in jobs:
+                existing_job = jobs[in_flight_id]
+                if existing_job.state not in (JobState.READY, JobState.FAILED):
+                    return existing_job
 
         job_id = str(uuid.uuid4())
         job = DesktopJobResponse(
@@ -108,7 +109,7 @@ def create_app(
             episodeId=req.episodeId,
             state=JobState.QUEUED,
             progressPercent=0,
-            stageLabel="Queued on desktop",
+            stageLabel="Reprocessing on desktop" if req.force else "Queued on desktop",
         )
         jobs[job_id] = job
         url_to_job_id[req.audioUrl] = job_id
@@ -141,7 +142,7 @@ def create_app(
             sha256, content_type = await downloader(req.audioUrl, tmp_audio, on_dl_bytes)
 
             # Check if another URL already produced this exact SHA-256
-            if cache.has_complete(sha256):
+            if not req.force and cache.has_complete(sha256):
                 tmp_audio.unlink(missing_ok=True)
                 jobs[job_id] = jobs[job_id].model_copy(
                     update={
