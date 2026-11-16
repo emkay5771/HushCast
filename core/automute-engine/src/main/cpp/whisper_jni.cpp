@@ -67,12 +67,28 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_pcmFree(JNIEnv *, jclass, jlo
     delete reinterpret_cast<std::vector<float> *>(pcm);
 }
 
+struct WhisperProgressCtx {
+    JNIEnv * env;
+    jobject cb;
+    jmethodID method;
+    int last_pct;
+};
+
+static void whisper_jni_progress(struct whisper_context *, struct whisper_state *, int progress, void * user_data) {
+    auto * c = reinterpret_cast<WhisperProgressCtx *>(user_data);
+    if (!c || !c->cb || !c->method) return;
+    if (progress > c->last_pct) {
+        c->last_pct = progress;
+        c->env->CallVoidMethod(c->cb, c->method, (jint) progress);
+    }
+}
+
 // Transcribes [startSample, endSample) (or full buffer if endSample < 0).
 // Returns Object[] { float[] (segment, start, end per word, seconds), byte[][] (UTF-8 word text) }.
 extern "C" JNIEXPORT jobjectArray JNICALL
 Java_app_hushcast_automute_nativebridge_WhisperJni_transcribeRange(
         JNIEnv * env, jclass, jlong h, jlong pcm, jint startSample, jint endSample,
-        jint threads, jstring jlang, jint beam_size) {
+        jint threads, jstring jlang, jint beam_size, jobject jcb) {
     auto * ctx = reinterpret_cast<whisper_context *>(h);
     auto * audio = reinterpret_cast<std::vector<float> *>(pcm);
     const int total = (int) audio->size();
@@ -95,6 +111,18 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_transcribeRange(
     p.print_realtime = false;
     p.print_timestamps = false;
     p.print_special = false;
+
+    WhisperProgressCtx pctx { env, jcb, nullptr, -1 };
+    if (jcb) {
+        jclass cls = env->GetObjectClass(jcb);
+        pctx.method = env->GetMethodID(cls, "onProgress", "(I)V");
+        env->DeleteLocalRef(cls);
+        if (pctx.method) {
+            p.progress_callback = whisper_jni_progress;
+            p.progress_callback_user_data = &pctx;
+        }
+    }
+
     const int rc = whisper_full(ctx, p, samples, n_samples);
     env->ReleaseStringUTFChars(jlang, lang);
     if (rc != 0) {

@@ -61,6 +61,7 @@ class PodcastManager(
         db.podcasts().insertAll(podcast)
         db.podcastEpisodes()._insertAll(*episodes.toTypedArray())
         episodes.forEach { db.podcastEpisodePlayStates().initState(it.id) }
+        db.podcastSubscriptions().subscribe(podcast.origin)
 
         return AddPodcastResult.Created(
             podcast = podcast

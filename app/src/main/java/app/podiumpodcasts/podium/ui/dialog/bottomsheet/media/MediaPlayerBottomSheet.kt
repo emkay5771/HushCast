@@ -353,26 +353,25 @@ fun MediaPlayerBottomSheet(
                                 }
 
                                 Column(
-                                    Modifier.fillMaxWidth()
+                                    Modifier.fillMaxWidth(),
+                                    horizontalAlignment = if(compactLayout) Alignment.Start else Alignment.CenterHorizontally
                                 ) {
                                     Text(
                                         text = mediaMetadata?.title.toString(),
-                                        autoSize = TextAutoSize.StepBased(
-                                            minFontSize = 24.sp,
-                                            maxFontSize = 36.sp
-                                        ),
                                         maxLines = 2,
                                         overflow = TextOverflow.Ellipsis,
-                                        style = Typography.displaySmallEmphasized.copy(
-                                            lineHeight = TextUnit.Unspecified
-                                        )
+                                        textAlign = if(compactLayout) androidx.compose.ui.text.style.TextAlign.Start else androidx.compose.ui.text.style.TextAlign.Center,
+                                        style = Typography.titleLargeEmphasized
                                     )
+
+                                    Spacer(Modifier.height(4.dp))
 
                                     Text(
                                         text = mediaMetadata?.subtitle.toString(),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
-                                        color = if(onOpenPodcast != null && vm.metadataOrigin != null) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                                        textAlign = if(compactLayout) androidx.compose.ui.text.style.TextAlign.Start else androidx.compose.ui.text.style.TextAlign.Center,
+                                        color = if(onOpenPodcast != null && vm.metadataOrigin != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                         style = Typography.bodyMedium,
                                         modifier = if(onOpenPodcast != null && vm.metadataOrigin != null) {
                                             Modifier.clickable {
@@ -383,7 +382,7 @@ fun MediaPlayerBottomSheet(
                                         } else Modifier
                                     )
 
-                                    Spacer(Modifier.height(6.dp))
+                                    Spacer(Modifier.height(8.dp))
 
                                     val badge = runCatching {
                                         analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) }
@@ -573,167 +572,56 @@ fun MediaPlayerBottomSheet(
                     }
                 }
 
-                FlowRow(
-                    Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .padding(16.dp)
-                        .fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh
                 ) {
-                    val size = ButtonDefaults.ExtraSmallContainerHeight
-                    val colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceDim,
-                        contentColor = MaterialTheme.colorScheme.onSurface
-                    )
-
-                    AnimatedContent(sleepTimerState.value) { sleepTimerState ->
-                        Button(
-                            modifier = Modifier
-                                .heightIn(size)
-                                .padding(4.dp),
-                            contentPadding = ButtonDefaults.contentPaddingFor(size),
-                            shapes = ButtonDefaults.shapesFor(size),
-                            colors = when(sleepTimerState) {
-                                null -> colors
-                                else -> ButtonDefaults.buttonColors()
-                            },
-                            onClick = { showSleepTimerBottomSheet = true }
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Filled.Bedtime,
-                                    contentDescription = stringResource(R.string.common_sleep_timer),
-                                    modifier = Modifier.size(ButtonDefaults.iconSizeFor(size)),
-                                )
-
-                                Spacer(Modifier.size(ButtonDefaults.iconSpacingFor(size)))
-
-                                Text(
-                                    text = when(sleepTimerState) {
-                                        null -> stringResource(R.string.common_sleep_timer)
-                                        else -> stringResource(
-                                            R.string.template_min,
-                                            sleepTimerState
-                                        )
-                                    },
-                                    style = ButtonDefaults.textStyleFor(size)
-                                )
-                            }
-                        }
-                    }
-
-                    AnimatedContent(vm.speed) { speed ->
-                        Button(
-                            modifier = Modifier
-                                .heightIn(size)
-                                .padding(4.dp),
-                            contentPadding = ButtonDefaults.contentPaddingFor(size),
-                            shapes = ButtonDefaults.shapesFor(size),
-                            colors = when(speed) {
-                                1f -> colors
-                                else -> ButtonDefaults.buttonColors()
-                            },
-                            onClick = { showSpeedBottomSheet = true }
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Filled.Speed,
-                                    contentDescription = stringResource(R.string.common_playback_speed),
-                                    modifier = Modifier.size(ButtonDefaults.iconSizeFor(size)),
-                                )
-
-                                Spacer(Modifier.size(ButtonDefaults.iconSpacingFor(size)))
-
-                                Text(
-                                    text = when(speed) {
-                                        1f -> stringResource(R.string.common_playback_speed)
-                                        else -> String.format(
-                                            Locale.getDefault(),
-                                            "%.2f",
-                                            speed
-                                        ) + "x"
-                                    },
-                                    style = ButtonDefaults.textStyleFor(size)
-                                )
-                            }
-                        }
-                    }
-
-                    if(vm.queue.isNotEmpty()) Button(
+                    Row(
                         modifier = Modifier
-                            .heightIn(size)
-                            .padding(vertical = 2.dp),
-                        contentPadding = ButtonDefaults.contentPaddingFor(size),
-                        shapes = ButtonDefaults.shapesFor(size),
-                        colors = colors,
-                        onClick = { showQueueBottomSheet = true }
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
+                        androidx.compose.material3.TextButton(onClick = { showSpeedBottomSheet = true }) {
+                            Text(
+                                text = String.format(Locale.getDefault(), "%.1fx", vm.speed),
+                                style = Typography.labelLargeEmphasized,
+                                color = if(vm.speed != 1f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        androidx.compose.material3.IconButton(onClick = { showSleepTimerBottomSheet = true }) {
                             Icon(
-                                Icons.AutoMirrored.Rounded.QueueMusic,
+                                imageVector = Icons.Filled.Bedtime,
+                                contentDescription = stringResource(R.string.common_sleep_timer),
+                                tint = if(sleepTimerState.value != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        androidx.compose.material3.IconButton(onClick = { showQueueBottomSheet = true }) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
                                 contentDescription = stringResource(R.string.common_queue),
-                                modifier = Modifier.size(ButtonDefaults.iconSizeFor(size)),
-                            )
-
-                            Spacer(Modifier.size(ButtonDefaults.iconSpacingFor(size)))
-
-                            Text(
-                                text = stringResource(R.string.common_queue),
-                                maxLines = 1,
-                                style = ButtonDefaults.textStyleFor(size)
+                                tint = if(vm.queue.isNotEmpty()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                    }
-                    Button(
-                        modifier = Modifier
-                            .heightIn(size)
-                            .padding(vertical = 2.dp),
-                        contentPadding = ButtonDefaults.contentPaddingFor(size),
-                        shapes = ButtonDefaults.shapesFor(size),
-                        colors = if (showTranscript) ButtonDefaults.buttonColors() else colors,
-                        onClick = { showTranscript = true }
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+
+                        androidx.compose.material3.IconButton(onClick = { showTranscript = true }) {
                             Icon(
-                                Icons.Rounded.Subtitles,
+                                imageVector = Icons.Rounded.Subtitles,
                                 contentDescription = "Transcript",
-                                modifier = Modifier.size(ButtonDefaults.iconSizeFor(size))
-                            )
-                            Spacer(Modifier.size(ButtonDefaults.iconSpacingFor(size)))
-                            Text(
-                                text = "Transcript",
-                                maxLines = 1,
-                                style = ButtonDefaults.textStyleFor(size)
+                                tint = if(showTranscript) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                             )
                         }
-                    }
 
-                    Button(
-                        modifier = Modifier
-                            .heightIn(size)
-                            .padding(vertical = 2.dp),
-                        contentPadding = ButtonDefaults.contentPaddingFor(size),
-                        shapes = ButtonDefaults.shapesFor(size),
-                        colors = colors,
-                        onClick = { showMoreSheet = true }
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.IconButton(onClick = { showMoreSheet = true }) {
                             Icon(
-                                Icons.Rounded.MoreHoriz,
-                                contentDescription = "More",
-                                modifier = Modifier.size(ButtonDefaults.iconSizeFor(size))
-                            )
-                            Spacer(Modifier.size(ButtonDefaults.iconSpacingFor(size)))
-                            Text(
-                                text = "More",
-                                maxLines = 1,
-                                style = ButtonDefaults.textStyleFor(size)
+                                imageVector = Icons.Rounded.MoreHoriz,
+                                contentDescription = "More"
                             )
                         }
                     }

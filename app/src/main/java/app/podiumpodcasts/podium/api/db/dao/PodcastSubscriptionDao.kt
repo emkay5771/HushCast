@@ -44,8 +44,11 @@ interface PodcastSubscriptionDao {
     @Query("UPDATE podcastSubscription SET lastUpdate=:timestamp WHERE origin=:origin")
     suspend fun logUpdate(origin: String, timestamp: Long = System.currentTimeMillis())
 
-    @Query("INSERT INTO podcastSubscription (origin, enableNotifications, enableAutoDownload, lastUpdate, newEpisodes, cacheETag, cacheLastModified, cacheContentLength) VALUES (:origin, 0, 0, 0, 0, '', '', '')")
+    @Query("INSERT OR IGNORE INTO podcastSubscription (origin, enableNotifications, enableAutoDownload, lastUpdate, newEpisodes, cacheETag, cacheLastModified, cacheContentLength) VALUES (:origin, 0, 0, 0, 0, '', '', '')")
     suspend fun subscribe(origin: String)
+
+    @Query("INSERT OR IGNORE INTO podcastSubscription (origin, enableNotifications, enableAutoDownload, lastUpdate, newEpisodes, cacheETag, cacheLastModified, cacheContentLength) SELECT origin, 0, 0, 0, 0, '', '', '' FROM podcast")
+    suspend fun subscribeAllExistingPodcasts()
 
     @Query("DELETE FROM podcastSubscription WHERE origin=:origin")
     suspend fun unsubscribe(origin: String)

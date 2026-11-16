@@ -14,7 +14,9 @@ class SubscriptionsViewModel(
 
     val subscriptions = Pager(
         PagingConfig(
-            pageSize = 15
+            pageSize = 200,
+            initialLoadSize = 200,
+            enablePlaceholders = false
         )
     ) {
         db.podcastSubscriptions().allByNewEpisodes()

@@ -93,11 +93,9 @@ fun PodcastEpisodeDetailView(
     onShowParent: () -> Unit = { },
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     val uriHandler = LocalUriHandler.current
-
     val episode = bundle.episode
-
-    val BACKDROP_SIZE = 200.dp
 
     Scaffold(
         topBar = {
@@ -107,242 +105,182 @@ fun PodcastEpisodeDetailView(
                         onBack()
                     }
                 },
-                actions = {
-                    if(showParentLink) FilledIconButton(
-                        shapes = IconButtonDefaults.shapes(),
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainer
-                        ),
-                        onClick = {
-                            onShowParent()
-                        }
-                    ) {
-                        ShimmerAsyncImage(
-                            modifier = Modifier
-                                .size(IconButtonDefaults.mediumIconSize)
-                                .clip(CircleShape),
-
-                            model = parent?.imageUrl,
-                            contentDescription = stringResource(R.string.common_cover_image)
+                title = {
+                    if(parent != null) {
+                        Text(
+                            text = parent.fetchTitle(),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            color = MaterialTheme.colorScheme.primary,
+                            style = Typography.titleMedium,
+                            modifier = if(showParentLink) Modifier.clickable { onShowParent() } else Modifier
                         )
                     }
                 },
+                actions = {
+                    if(showParentLink && parent != null) {
+                        FilledIconButton(
+                            shapes = IconButtonDefaults.shapes(),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer
+                            ),
+                            onClick = { onShowParent() }
+                        ) {
+                            ShimmerAsyncImage(
+                                modifier = Modifier
+                                    .size(IconButtonDefaults.mediumIconSize)
+                                    .clip(CircleShape),
+                                model = parent.imageUrl,
+                                contentDescription = stringResource(R.string.common_cover_image)
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                    scrolledContainerColor = Color.Transparent
-                ),
-                title = { }
+                    containerColor = backgroundColor,
+                    scrolledContainerColor = backgroundColor
+                )
             )
         },
         containerColor = backgroundColor
     ) { insets ->
-        Box {
-            ShimmerAsyncImage(
+        Column(
+            Modifier
+                .padding(insets)
+                .verticalScroll(rememberScrollState())
+        ) {
+            // Pocket Casts-style compact episode header
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(insets.calculateTopPadding() + BACKDROP_SIZE)
-                    .hazeEffect(),
-
-                model = episode.imageUrl ?: parent?.imageUrl,
-                contentDescription = null,
-
-                contentScale = ContentScale.Crop
-            )
-
-            Box(
-                Modifier.verticalScroll(
-                    state = rememberScrollState()
-                )
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.Top
             ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(insets.calculateTopPadding() + BACKDROP_SIZE)
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(
-                                    Color.Transparent,
-                                    backgroundColor
-                                )
-                            )
+                ShimmerAsyncImage(
+                    modifier = Modifier
+                        .size(76.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable(enabled = showParentLink) { onShowParent() },
+                    model = episode.imageUrl ?: parent?.imageUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop
+                )
+
+                Spacer(Modifier.width(14.dp))
+
+                Column(Modifier.weight(1f)) {
+                    SelectionContainer {
+                        Text(
+                            text = episode.title,
+                            style = Typography.titleLargeEmphasized,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis
                         )
+                    }
+
+                    Spacer(Modifier.height(6.dp))
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if(bundle.episode.new) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ) {
+                                Text(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    text = stringResource(R.string.common_new_uppercase),
+                                    style = Typography.labelSmallEmphasized
+                                )
+                            }
+                            Spacer(Modifier.width(8.dp))
+                        }
+
+                        Text(
+                            text = buildString {
+                                append(formatPubDate(context, episode.pubDate))
+                                if(episode.duration > 0) {
+                                    append(" • ")
+                                    append(formatEpisodePlayTime(context, episode.duration))
+                                }
+                            },
+                            style = Typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            // Pocket Casts-style balanced action row
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ShimmerAsyncImage(
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .size(128.dp)
-                            .shadow(
-                                elevation = 8.dp,
-                                shape = RoundedCornerShape(16.dp),
-                                clip = true
-                            ),
+                    PodcastEpisodePlayButton(
+                        bundle = bundle,
+                        colors = ToggleButtonDefaults.toggleButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+                        )
+                    )
 
-                        model = episode.imageUrl ?: parent?.imageUrl,
-                        contentDescription = null,
+                    Spacer(Modifier.weight(1f))
 
-                        contentScale = ContentScale.Crop
+                    PodcastEpisodeDownloadButton(
+                        icon = true,
+                        bundle = bundle
+                    )
+
+                    app.podiumpodcasts.podium.ui.component.model.episode.PodcastEpisodeQueueButton(
+                        bundle = bundle
+                    )
+
+                    PodcastEpisodeMarkAsPlayedButton(
+                        bundle = bundle,
+                        colors = IconButtonDefaults.filledIconToggleButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            checkedContainerColor = MaterialTheme.colorScheme.primary,
+                            checkedContentColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    )
+
+                    ContentFavoriteButton(
+                        contentId = episode.id,
+                        isPodcast = false
+                    )
+
+                    ContentSaveToListButton(
+                        contentId = episode.id,
+                        isPodcast = false
                     )
                 }
+            }
 
-                Column(
-                    Modifier.padding(insets)
+            // Show notes expanded by default (Pocket Casts style)
+            Column(Modifier.padding(16.dp)) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface
                 ) {
-                    Spacer(Modifier.height(BACKDROP_SIZE))
-
-                    Column(
-                        Modifier.background(backgroundColor)
-                    ) {
-                        Spacer(Modifier.height(16.dp))
-
-                        SelectionContainer(
-                            Modifier
-                                .padding(start = 16.dp, end = 16.dp)
-                        ) {
-                            Column {
-                                ExpandableText(
-                                    text = episode.title,
-                                    autoSize = TextAutoSize.StepBased(
-                                        minFontSize = 24.sp,
-                                        maxFontSize = 32.sp
-                                    ),
-                                    minAutoSize = 24.sp,
-                                    maxLines = 5,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = Typography.headlineLargeEmphasized.copy(
-                                        lineHeight = TextUnit.Unspecified
-                                    )
-                                )
-
-                                Spacer(Modifier.height(4.dp))
-
-                                Row {
-                                    AnimatedVisibility(
-                                        visible = bundle.episode.new,
-                                        enter = fadeIn() + expandIn(
-                                            expandFrom = Alignment.CenterStart
-                                        ),
-                                        exit = fadeOut() + shrinkOut(
-                                            shrinkTowards = Alignment.CenterStart
-                                        )
-                                    ) {
-                                        Text(
-                                            modifier = Modifier.padding(end = 16.dp),
-                                            text = stringResource(R.string.common_new_uppercase),
-                                            style = Typography.labelLargeEmphasized
-                                        )
-                                    }
-
-                                    Text(
-                                        text = formatPubDate(LocalContext.current, episode.pubDate),
-                                        style = Typography.labelLarge
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.height(8.dp))
-
-                        Row(
-                            Modifier.horizontalScroll(rememberScrollState()),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Spacer(Modifier.width(16.dp))
-
-                            PodcastEpisodePlayButton(
-                                bundle = bundle,
-                                colors = ToggleButtonDefaults.toggleButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surface
-                                )
-                            )
-
-                            PodcastEpisodeMarkAsPlayedButton(
-                                bundle = bundle,
-
-                                colors = IconButtonDefaults.filledIconToggleButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.surface,
-                                    checkedContainerColor = MaterialTheme.colorScheme.primary,
-                                    checkedContentColor = MaterialTheme.colorScheme.onPrimary
-                                )
-                            )
-
-                            Spacer(Modifier.width(4.dp))
-
-                            app.podiumpodcasts.podium.ui.component.model.episode.PodcastEpisodeQueueButton(
-                                bundle = bundle
-                            )
-
-                            Spacer(Modifier.width(8.dp))
-
-                            VerticalDivider(
-                                Modifier.height(24.dp)
-                            )
-
-                            Spacer(Modifier.width(16.dp))
-
-                            PodcastEpisodeDownloadButton(
-                                icon = false,
-                                bundle = bundle
-                            )
-
-                            Spacer(Modifier.width(8.dp))
-
-                            ContentSaveToListButton(
-                                contentId = episode.id,
-                                isPodcast = false
-                            )
-
-                            Spacer(Modifier.width(4.dp))
-
-                            ContentFavoriteButton(
-                                contentId = episode.id,
-                                isPodcast = false
-                            )
-
-                            Spacer(Modifier.width(8.dp))
-                        }
-
-                        Column(
-                            Modifier.padding(16.dp)
-                        ) {
-                            var canExpandDescription by remember { mutableStateOf(false) }
-                            var expandDescription by remember { mutableStateOf(false) }
-
-                            Surface(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .clickable(canExpandDescription || expandDescription) {
-                                        expandDescription = !expandDescription
-                                    },
-                                color = MaterialTheme.colorScheme.surface,
-                                contentColor = MaterialTheme.colorScheme.onSurface
-                            ) {
-                                SelectionContainer(
-                                    Modifier.padding(16.dp)
-                                ) {
-                                    AnimatedContent(expandDescription) {
-                                        when(it) {
-                                            true -> Text(
-                                                text = AnnotatedString.fromHtml(
-                                                    htmlString = episode.description
-                                                        .replace("\n", "<br>")
-                                                )
-                                            )
-
-                                            false -> Text(
-                                                text = AnnotatedString.fromHtml(
-                                                    htmlString = episode.description
-                                                        .replace("\n", "<br>")
-                                                ),
-                                                maxLines = 5,
-                                                overflow = TextOverflow.Ellipsis,
-                                                onTextLayout = { result ->
-                                                    canExpandDescription = result.hasVisualOverflow
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                    SelectionContainer(Modifier.padding(16.dp)) {
+                        Text(
+                            text = AnnotatedString.fromHtml(
+                                htmlString = episode.description.replace("\n", "<br>")
+                            ),
+                            style = Typography.bodyMedium
+                        )
+                    }
+                }
 
                             Spacer(Modifier.height(16.dp))
 
@@ -389,12 +327,9 @@ fun PodcastEpisodeDetailView(
                                     )
                                 )
                             )
-                        }
-                    }
-
-                    FloatingMediaPlayerSpacer()
-                }
             }
+
+            FloatingMediaPlayerSpacer()
         }
     }
 }

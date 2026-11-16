@@ -22,7 +22,8 @@ class PodcastEpisodeDownloadWork(
     var lastProgressUpdate = 0L
 
     suspend fun doWork(
-        episodeId: String
+        episodeId: String,
+        onProgressUpdate: ((title: String, percent: Int) -> Unit)? = null
     ): Boolean {
         val bundle = db.podcastEpisodes().getSync(episodeId)
         val episode = bundle.episode
@@ -30,6 +31,7 @@ class PodcastEpisodeDownloadWork(
         if(bundle.download == null)
             return false
 
+        onProgressUpdate?.invoke(episode.title, 0)
         delay(1000)
 
         db.podcastEpisodeDownloads()
@@ -51,6 +53,9 @@ class PodcastEpisodeDownloadWork(
 
                     db.podcastEpisodeDownloads()
                         .setProgress(episodeId, progress, total)
+
+                    val pct = ((progress * 100L) / total).toInt().coerceIn(0, 100)
+                    onProgressUpdate?.invoke(episode.title, pct)
                 }
             )
         }

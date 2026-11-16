@@ -96,7 +96,7 @@ class AutoMuteAnalyzer(
             )
         }
 
-        report(5, "Verifying audio file hash")
+        report(2, "Verifying audio file")
         val sha256 = knownSha256?.takeIf { it.isNotBlank() } ?: StreamingSha256.hashFile(audioFile)
         currentSha = sha256
 
@@ -117,27 +117,29 @@ class AutoMuteAnalyzer(
             words = blob.words
             segments = blob.segments
         } else {
-            report(15, "Decoding audio")
+            report(5, "Decoding audio")
             val extractor = if (!quickWordMuteOnly) FrameExtractor() else null
             val pcm = PcmBuffer()
             try {
-                var lastDecodePct = 15
+                var lastDecodePct = 5
                 AudioDecoder.decode(audioFile.absolutePath, extractor, pcm) { fraction ->
-                    val pct = (15 + (fraction * 19f).toInt()).coerceIn(15, 34)
+                    val pct = (5 + (fraction * 20f).toInt()).coerceIn(5, 25)
                     if (pct > lastDecodePct) {
                         lastDecodePct = pct
                         onProgress(AnalysisProgress(pct, "Decoding audio ($pct%)", ReadinessBadge.ANALYZING))
-                        kotlinx.coroutines.runBlocking {
-                            dao.upsertStatus(
-                                EpisodeAnalysisStatusEntity(
-                                    episodeId = episodeId,
-                                    fileSha256 = currentSha,
-                                    badge = ReadinessBadge.ANALYZING.name,
-                                    progressPercent = pct,
-                                    stageLabel = "Decoding audio",
-                                    peakRssMb = peakRssMb
+                        if (pct % 5 == 0 || pct == 25) {
+                            kotlinx.coroutines.runBlocking {
+                                dao.upsertStatus(
+                                    EpisodeAnalysisStatusEntity(
+                                        episodeId = episodeId,
+                                        fileSha256 = currentSha,
+                                        badge = ReadinessBadge.ANALYZING.name,
+                                        progressPercent = pct,
+                                        stageLabel = "Decoding audio",
+                                        peakRssMb = peakRssMb
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                 }
@@ -148,7 +150,7 @@ class AutoMuteAnalyzer(
                     runCatching { TranscriptParser.parse(it, feedTranscriptMime) }.getOrNull()
                 }
 
-                report(35, "Transcribing speech (Whisper DTW)")
+                report(25, "Transcribing speech (Whisper DTW)")
                 val transcriber = Transcriber(paths.whisperBaseEn.absolutePath, useDtw = true)
                 try {
                     val output = transcribeWithFeedFallback(
@@ -370,16 +372,17 @@ class AutoMuteAnalyzer(
         transcriber: Transcriber,
         vadPath: File,
         pcm: PcmBuffer,
-        parsedFeed: ParsedTranscript?
+        parsedFeed: ParsedTranscript?,
+        onWhisperProgress: ((Int) -> Unit)? = null
     ): Pair<List<Word>, List<Segment>> {
         if (parsedFeed == null || parsedFeed.segments.isEmpty() || !parsedFeed.hasWordLevelTimings) {
-            val out = transcriber.transcribe(pcm)
+            val out = transcriber.transcribe(pcm, onWhisperProgress)
             return out.words to out.segments
         }
 
         val dur = pcm.durationSeconds
         if (dur < 90.0) {
-            val out = transcriber.transcribe(pcm)
+            val out = transcriber.transcribe(pcm, onWhisperProgress)
             return out.words to out.segments
         }
 
@@ -403,7 +406,7 @@ class AutoMuteAnalyzer(
 
         if (passed < 2) {
             // DAI shifted timestamps or transcript mismatch -> full Whisper
-            val out = transcriber.transcribe(pcm)
+            val out = transcriber.transcribe(pcm, onWhisperProgress)
             return out.words to out.segments
         }
 

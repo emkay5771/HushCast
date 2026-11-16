@@ -1,5 +1,9 @@
 package app.hushcast.automute.nativebridge
 
+internal fun interface WhisperProgressCallback {
+    fun onProgress(percent: Int)
+}
+
 internal object WhisperJni {
     init {
         System.loadLibrary("hushcast_whisper")
@@ -16,7 +20,8 @@ internal object WhisperJni {
         endSample: Int,
         threads: Int,
         language: String,
-        beamSize: Int
+        beamSize: Int,
+        progressCallback: WhisperProgressCallback?
     ): Array<Any>
 
     @JvmStatic

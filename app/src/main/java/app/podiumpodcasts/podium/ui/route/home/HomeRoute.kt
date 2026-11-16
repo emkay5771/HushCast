@@ -117,13 +117,20 @@ fun HomeRoute(
     val subscriptionsPager = subscriptionsVm.subscriptions.collectAsLazyPagingItems()
     val continuePlayingPager = continuePlayingVm.continuePlaying.collectAsLazyPagingItems()
 
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            db.podcastSubscriptions().subscribeAllExistingPodcasts()
+        }
+    }
+
     val layout by settingsRepository.appearance.subscriptionsLayout.collectAsState(SubscriptionsLayout.LARGE_GRID)
     val sort by settingsRepository.appearance.subscriptionsSort.collectAsState(SubscriptionsSort.RECENTLY_ADDED)
     val badgeMode by settingsRepository.appearance.subscriptionsBadgeMode.collectAsState(SubscriptionsBadgeMode.UNPLAYED_COUNT)
 
     var showOptionsSheet by remember { mutableStateOf(false) }
 
-    val sortedSubscriptions = remember(subscriptionsPager.itemSnapshotList.items, sort) {
+    val itemCount = subscriptionsPager.itemCount
+    val sortedSubscriptions = remember(itemCount, subscriptionsPager.itemSnapshotList.items, sort) {
         val list = subscriptionsPager.itemSnapshotList.items
         when(sort) {
             SubscriptionsSort.A_Z -> list.sortedBy { it.podcast.fetchTitle().lowercase() }

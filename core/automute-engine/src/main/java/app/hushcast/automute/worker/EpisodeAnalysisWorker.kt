@@ -164,8 +164,8 @@ class EpisodeAnalysisWorker(
                 .build()
 
             WorkManager.getInstance(context).enqueueUniqueWork(
-                "hushcast_analyze_$episodeId",
-                ExistingWorkPolicy.KEEP,
+                ANALYSIS_QUEUE_NAME,
+                ExistingWorkPolicy.APPEND,
                 request
             )
         }
@@ -181,6 +181,8 @@ class EpisodeAnalysisWorker(
             // Expedited jobs on Android only allow network and storage constraints
             // (setting battery-not-low throws IllegalArgumentException in WorkRequest.Builder.build).
             val request = OneTimeWorkRequestBuilder<EpisodeAnalysisWorker>()
+                .addTag(ANALYSIS_QUEUE_NAME)
+                .addTag("episode:$episodeId")
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .setInputData(
                     workDataOf(
@@ -194,10 +196,12 @@ class EpisodeAnalysisWorker(
                 .build()
 
             WorkManager.getInstance(context).enqueueUniqueWork(
-                "hushcast_analyze_$episodeId",
-                ExistingWorkPolicy.REPLACE,
+                ANALYSIS_QUEUE_NAME,
+                ExistingWorkPolicy.APPEND_OR_REPLACE,
                 request
             )
         }
+
+        const val ANALYSIS_QUEUE_NAME = "hushcast_analysis_queue"
     }
 }

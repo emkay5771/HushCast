@@ -37,8 +37,16 @@ class PodcastEpisodeDownloadWorker(
             val episodeId = inputData.getString(KEY_EPISODE_ID)
                 ?: throw NullPointerException()
 
+            runCatching {
+                setForeground(createDownloadForegroundInfo("Downloading episode…", 0))
+            }
+
             val worker = PodcastEpisodeDownloadWork(applicationContext, db)
-            val result = worker.doWork(episodeId)
+            val result = worker.doWork(episodeId) { title, pct ->
+                runCatching {
+                    setForegroundAsync(createDownloadForegroundInfo(title, pct))
+                }
+            }
 
             if(result) {
                 Result.success()
@@ -51,7 +59,42 @@ class PodcastEpisodeDownloadWorker(
         }
     }
 
+    private fun createDownloadForegroundInfo(title: String, percent: Int): androidx.work.ForegroundInfo {
+        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        if(android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val channel = android.app.NotificationChannel(
+                DOWNLOAD_CHANNEL_ID,
+                "Episode Downloads",
+                android.app.NotificationManager.IMPORTANCE_LOW
+            )
+            manager.createNotificationChannel(channel)
+        }
+
+        val clamped = percent.coerceIn(0, 100)
+        val notification = androidx.core.app.NotificationCompat.Builder(applicationContext, DOWNLOAD_CHANNEL_ID)
+            .setContentTitle("Downloading episode")
+            .setContentText(if(clamped > 0) "$title ($clamped%)" else title)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(androidx.core.app.NotificationCompat.CATEGORY_PROGRESS)
+            .setProgress(100, clamped, clamped == 0)
+            .build()
+
+        val notificationId = 41002
+        return if(android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            androidx.work.ForegroundInfo(
+                notificationId,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            androidx.work.ForegroundInfo(notificationId, notification)
+        }
+    }
+
     companion object {
+        private const val DOWNLOAD_CHANNEL_ID = "episode_downloads"
         fun generateUniqueWorkName(episodeId: String): String {
             return "app.podiumpodcasts.podium.background.worker.PodcastEpisodeDownloadWorker:$episodeId"
         }
