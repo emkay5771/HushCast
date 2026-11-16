@@ -71,6 +71,10 @@ fun DownloadManagementBottomSheet(
         val cachedBundle = cachedBundle.value
         if(cachedBundle.download == null) return@ModalBottomSheet
 
+        val hasDesktopUrl = remember(context) {
+            app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+        }
+
         LazyColumn(
             Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(24.dp),
@@ -109,9 +113,6 @@ fun DownloadManagementBottomSheet(
                 )
             }
 
-            val hasDesktopUrl = remember(context) {
-                app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
-            }
             if (hasDesktopUrl && cachedBundle.download.state == PodcastEpisodeDownloadState.DOWNLOADED.value) {
                 item {
                     androidx.compose.material3.OutlinedButton(
