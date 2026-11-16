@@ -31,6 +31,9 @@ object DesktopWorkerClient {
         encodeDefaults = true
     }
 
+    private fun defaultTimeoutMs(normalizedUrl: String): Int =
+        if (normalizedUrl.startsWith("https://", ignoreCase = true)) 35_000 else 15_000
+
     suspend fun healthCheck(baseUrl: String, token: String = ""): DesktopHealthResponse =
         withContext(Dispatchers.IO) {
             val normalized = normalizeUrl(baseUrl)
@@ -44,14 +47,16 @@ object DesktopWorkerClient {
         token: String,
         request: DesktopJobRequest
     ): DesktopJobResponse = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl)
         val payload = json.encodeToString(request)
-        val body = postJson("${normalizeUrl(baseUrl)}/v1/jobs", token, payload)
+        val body = postJson("$normalized/v1/jobs", token, payload, timeoutMs = defaultTimeoutMs(normalized))
         json.decodeFromString<DesktopJobResponse>(body)
     }
 
     suspend fun getJob(baseUrl: String, token: String, jobId: String): DesktopJobResponse =
         withContext(Dispatchers.IO) {
-            val body = getText("${normalizeUrl(baseUrl)}/v1/jobs/$jobId", token)
+            val normalized = normalizeUrl(baseUrl)
+            val body = getText("$normalized/v1/jobs/$jobId", token, timeoutMs = defaultTimeoutMs(normalized))
             json.decodeFromString<DesktopJobResponse>(body)
         }
 
@@ -85,7 +90,8 @@ object DesktopWorkerClient {
         token: String,
         sha256: String
     ): DesktopAnalysisBundle = withContext(Dispatchers.IO) {
-        val body = getText("${normalizeUrl(baseUrl)}/v1/episodes/$sha256/bundle", token)
+        val normalized = normalizeUrl(baseUrl)
+        val body = getText("$normalized/v1/episodes/$sha256/bundle", token, timeoutMs = defaultTimeoutMs(normalized))
         json.decodeFromString<DesktopAnalysisBundle>(body)
     }
 
@@ -93,7 +99,8 @@ object DesktopWorkerClient {
         baseUrl: String,
         token: String
     ): List<DesktopReadyEpisode> = withContext(Dispatchers.IO) {
-        val body = getText("${normalizeUrl(baseUrl)}/v1/episodes", token)
+        val normalized = normalizeUrl(baseUrl)
+        val body = getText("$normalized/v1/episodes", token, timeoutMs = defaultTimeoutMs(normalized))
         json.decodeFromString<List<DesktopReadyEpisode>>(body)
     }
 
@@ -103,8 +110,9 @@ object DesktopWorkerClient {
         query: String,
         topK: Int = 15
     ): DesktopSearchResponse = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl)
         val payload = json.encodeToString(DesktopSearchRequest(query = query, topK = topK))
-        val body = postJson("${normalizeUrl(baseUrl)}/v1/search", token, payload)
+        val body = postJson("$normalized/v1/search", token, payload, timeoutMs = defaultTimeoutMs(normalized))
         json.decodeFromString<DesktopSearchResponse>(body)
     }
 

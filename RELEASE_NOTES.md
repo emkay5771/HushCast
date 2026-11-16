@@ -1,3 +1,14 @@
+# HushCast v0.1.28-hushcast
+
+## What's New
+- **Cloud & Desktop Worker Reliability Fixes**:
+  - Increased `https://` cloud worker timeouts to 35s across `healthCheck`, `submitJob`, `getJob`, `fetchBundle`, `listReadyEpisodes`, and `semanticSearch` in [`DesktopWorkerClient`](core/automute-engine/src/main/java/app/hushcast/automute/desktop/DesktopWorkerClient.kt) so Modal cold starts don't time out mid-request.
+  - Updated **Scan QR** and **Test** in [`SettingsHushCastPane`](app/src/main/java/app/podiumpodcasts/podium/ui/route/settings/pane/SettingsHushCastPane.kt) to verify the Pairing Token against an authenticated endpoint (`/v1/episodes`) instead of only unauthenticated `/v1/health`, preventing false "Connected" status when the token is invalid.
+  - Preserved desktop/cloud offload failure reasons in `EpisodeAnalysisStatusEntity.errorMessage` inside [`PodcastEpisodeDownloadWork`](app/src/main/java/app/podiumpodcasts/podium/background/work/PodcastEpisodeDownloadWork.kt) and added `HushCastDesktop` logs to **Export Logs** diagnostics.
+  - Fixed Modal worker `LocalMlBackend` import, `ad_tagger.onnx` fallback download, and embedded chapter extraction in [`modal_app.py`](desktop-worker/modal_app.py) and [`pipeline.py`](desktop-worker/hushcast_worker/pipeline.py).
+
+---
+
 # HushCast v0.1.27-hushcast
 
 ## What's New

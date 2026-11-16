@@ -456,13 +456,24 @@ fun SettingsHushCastPane(
                                                     app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerToken(context, scannedToken)
                                                 }
                                                 desktopStatus = "Scanned $scannedUrl — verifying…"
-                                                scope.launch {
+                                                 scope.launch {
                                                     try {
+                                                        val effectiveToken = scannedToken.ifBlank { desktopToken }
                                                         val health = app.hushcast.automute.desktop.DesktopWorkerClient.healthCheck(
                                                             baseUrl = scannedUrl,
-                                                            token = scannedToken.ifBlank { desktopToken }
+                                                            token = effectiveToken
                                                         )
-                                                        desktopStatus = "Connected: ${health.hostname} (${health.accelerator.uppercase()}) • ${health.whisperModel}"
+                                                        val authErr = runCatching {
+                                                            app.hushcast.automute.desktop.DesktopWorkerClient.listReadyEpisodes(
+                                                                baseUrl = scannedUrl,
+                                                                token = effectiveToken
+                                                            )
+                                                        }.exceptionOrNull()
+                                                        desktopStatus = if (authErr != null) {
+                                                            "Server reachable (${health.hostname}), but auth failed: ${authErr.message ?: authErr.javaClass.simpleName}"
+                                                        } else {
+                                                            "Connected: ${health.hostname} (${health.accelerator.uppercase()}) • ${health.whisperModel}"
+                                                        }
                                                     } catch (t: Throwable) {
                                                         desktopStatus = "Saved QR config, but connection check failed: ${t.message ?: t.javaClass.simpleName}"
                                                     } finally {
@@ -513,13 +524,23 @@ fun SettingsHushCastPane(
                                                     baseUrl = desktopUrl,
                                                     token = desktopToken
                                                 )
-                                                val modelNote = buildString {
-                                                    if (health.whisperModel.isNotBlank()) append(" • ${health.whisperModel}")
-                                                    if (health.chatModelReady) append(" • LLM Chat")
+                                                val authErr = runCatching {
+                                                    app.hushcast.automute.desktop.DesktopWorkerClient.listReadyEpisodes(
+                                                        baseUrl = desktopUrl,
+                                                        token = desktopToken
+                                                    )
+                                                }.exceptionOrNull()
+                                                if (authErr != null) {
+                                                    desktopStatus = "Server reachable (${health.hostname}), but auth failed: ${authErr.message ?: authErr.javaClass.simpleName}"
+                                                } else {
+                                                    val modelNote = buildString {
+                                                        if (health.whisperModel.isNotBlank()) append(" • ${health.whisperModel}")
+                                                        if (health.chatModelReady) append(" • LLM Chat")
+                                                    }
+                                                    desktopStatus = "Connected: ${health.hostname} (${health.accelerator.uppercase()}) • " +
+                                                        (if (health.modelsReady) "Models Ready" else "Models Missing") +
+                                                        "$modelNote • ${health.cachedEpisodes} cached"
                                                 }
-                                                desktopStatus = "Connected: ${health.hostname} (${health.accelerator.uppercase()}) • " +
-                                                    (if (health.modelsReady) "Models Ready" else "Models Missing") +
-                                                    "$modelNote • ${health.cachedEpisodes} cached"
                                             } catch (t: Throwable) {
                                                 desktopStatus = "Connection failed: ${t.message ?: t.javaClass.simpleName}"
                                             } finally {
@@ -1000,7 +1021,7 @@ fun SettingsHushCastPane(
                                             appendLine("--- HushCastPerf & Crashes ---")
                                         }
                                         val perfLogs = runCatching {
-                                            val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-s", "HushCastPerf:V", "AndroidRuntime:E"))
+                                            val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-s", "HushCastPerf:V", "HushCastDesktop:V", "AndroidRuntime:E"))
                                             proc.inputStream.bufferedReader().use { it.readText() }
                                         }.getOrElse { "perf logcat failed: ${it.message}" }
                                         val tailLogs = runCatching {

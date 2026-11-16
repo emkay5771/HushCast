@@ -259,7 +259,8 @@ class PodcastEpisodeDownloadWork(
             app.podiumpodcasts.podium.background.PlaybackService.notifyEpisodeDownloaded(episodeId)
             true
         } catch (t: Throwable) {
-            Log.w("HushCastDesktop", "Desktop worker offload failed for $episodeId: ${t.message}")
+            val errMsg = t.message ?: t.javaClass.simpleName
+            Log.w("HushCastDesktop", "Desktop worker offload failed for $episodeId: $errMsg", t)
             runCatching {
                 val autoMuteDb = app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
                 autoMuteDb.dao().upsertStatus(
@@ -267,7 +268,8 @@ class PodcastEpisodeDownloadWork(
                         episodeId = episodeId,
                         badge = app.hushcast.automute.dsp.ReadinessBadge.NOT_PROCESSED.name,
                         progressPercent = 0,
-                        stageLabel = "Not Processed"
+                        stageLabel = "Desktop/Cloud failed",
+                        errorMessage = errMsg
                     )
                 )
             }
