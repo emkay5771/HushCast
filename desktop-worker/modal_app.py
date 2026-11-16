@@ -81,7 +81,7 @@ _base_image = (
     .run_commands(
         "find /usr/local/lib/python3.11/site-packages -name 'libwhisper*.so*' -o -name 'libggml*.so*' | xargs -r -n1 dirname | sort -u > /etc/ld.so.conf.d/hushcast-cuda.conf",
         "ldconfig",
-        "LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:${LD_LIBRARY_PATH:-} python3 -c 'import av, numpy, onnxruntime, llama_cpp; from pywhispercpp.model import Model; print(\"ML imports OK\")'",
+        "mkdir -p /tmp/cuda-stubs && ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /tmp/cuda-stubs/libcuda.so.1 && LD_LIBRARY_PATH=/tmp/cuda-stubs:${LD_LIBRARY_PATH:-} python3 -c 'import av, numpy, onnxruntime, llama_cpp; from pywhispercpp.model import Model; print(\"ML imports OK\")' && rm -rf /tmp/cuda-stubs",
     )
 )
 if _LOCAL_AD_TAGGER is not None:
