@@ -1,3 +1,16 @@
+# HushCast v0.1.22-hushcast
+
+## What's New
+- **Sync Delete With Currently Playing Episode & AI Status**:
+  - [`DownloadManager.deleteEpisodeDownload`](app/src/main/java/app/podiumpodcasts/podium/manager/DownloadManager.kt) now also clears the episode's `AutoMuteDatabase` analysis status, transcript, insights, and ad/mute segments via [`clearAnalysisForEpisode`](core/automute-engine/src/main/java/app/hushcast/automute/storage/AutoMuteDatabase.kt).
+  - [`MediaPlayerBottomSheet`](app/src/main/java/app/podiumpodcasts/podium/ui/dialog/bottomsheet/media/MediaPlayerBottomSheet.kt) now observes `podcastEpisodes().get(episodeId)` reactively so deleting a download updates the player's download & AI Ready status immediately.
+- **Distinct Processing Type Badges**:
+  - Episode cards in [`PodcastEpisodeListItem`](app/src/main/java/app/podiumpodcasts/podium/ui/component/model/episode/PodcastEpisodeListItem.kt) now display **`Desktop AI`**, **`Cloud AI`**, **`On-Device AI`**, **`Word-Mute`**, or **`Audio Only`** so you can tell at a glance how each episode was processed.
+- **Desktop Worker Cache Clearing**:
+  - Added `DELETE /v1/cache` (and `?audio_only=true`) plus `--clear-cache` / `--clear-audio-cache` CLI flags in `desktop-worker`.
+
+---
+
 # HushCast v0.1.21-hushcast
 
 ## What's New

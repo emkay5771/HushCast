@@ -169,16 +169,13 @@ fun MediaPlayerBottomSheet(
     val isCastingExternal by HushCastEngineBridge.isCastingExternal.collectAsState()
 
     var selectedTab by remember { mutableStateOf(MediaPlayerTab.PLAYER) }
-    var currentEpisodeBundle by remember(episodeId) { mutableStateOf<PodcastEpisodeBundle?>(null) }
+    val currentEpisodeBundle by remember(episodeId) {
+        if (episodeId.isNotBlank()) appDb.podcastEpisodes().get(episodeId)
+        else kotlinx.coroutines.flow.flowOf(null)
+    }.collectAsState(initial = null)
     var showMoreSheet by remember { mutableStateOf(false) }
     var showNotDownloadedDialog by remember { mutableStateOf(false) }
     var transcriptBlob by remember(episodeId) { mutableStateOf<WordIndexBlob?>(null) }
-
-    LaunchedEffect(episodeId) {
-        currentEpisodeBundle = if (episodeId.isNotBlank()) {
-            runCatching { appDb.podcastEpisodes().getSync(episodeId) }.getOrNull()
-        } else null
-    }
 
     fun triggerAnalyzeNow() {
         if (episodeId.isBlank()) return

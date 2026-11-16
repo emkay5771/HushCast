@@ -57,6 +57,12 @@ class DownloadManager {
 
             db.podcastEpisodeDownloads()
                 .delete(episode.id)
+
+            runCatching {
+                app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
+                    .dao()
+                    .clearAnalysisForEpisode(episode.id)
+            }
         }
 
         fun getDownloadsDirectory(context: Context): File {

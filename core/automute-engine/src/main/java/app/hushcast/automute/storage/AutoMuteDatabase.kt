@@ -245,6 +245,30 @@ interface AutoMuteDao {
 
     @Query("SELECT * FROM episode_insights WHERE episodeId = :episodeId LIMIT 1")
     fun observeInsights(episodeId: String): Flow<EpisodeInsightsEntity?>
+
+    @Query("DELETE FROM episode_analysis_status WHERE episodeId = :episodeId")
+    suspend fun deleteStatusByEpisode(episodeId: String)
+
+    @Query("DELETE FROM episode_word_index WHERE episodeId = :episodeId")
+    suspend fun deleteWordIndexByEpisode(episodeId: String)
+
+    @Query("DELETE FROM episode_insights WHERE episodeId = :episodeId")
+    suspend fun deleteInsightsByEpisode(episodeId: String)
+
+    @Query("DELETE FROM mute_segments WHERE episodeId = :episodeId")
+    suspend fun deleteMuteSegmentsByEpisode(episodeId: String)
+
+    @Query("DELETE FROM ad_segments WHERE episodeId = :episodeId")
+    suspend fun deleteAdSegmentsByEpisode(episodeId: String)
+
+    @androidx.room.Transaction
+    suspend fun clearAnalysisForEpisode(episodeId: String) {
+        deleteStatusByEpisode(episodeId)
+        deleteWordIndexByEpisode(episodeId)
+        deleteInsightsByEpisode(episodeId)
+        deleteMuteSegmentsByEpisode(episodeId)
+        deleteAdSegmentsByEpisode(episodeId)
+    }
 }
 
 @Database(

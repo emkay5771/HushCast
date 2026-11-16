@@ -171,11 +171,19 @@ fun PodcastEpisodeListItem(
                     overflow = TextOverflow.Ellipsis
                 )
 
+                val isDownloaded = bundle.download?.state == app.podiumpodcasts.podium.api.db.model.PodcastEpisodeDownloadState.DOWNLOADED.value
                 val badgeLabel = when (readinessBadge) {
-                    ReadinessBadge.READY -> "AI Ready"
+                    ReadinessBadge.READY -> {
+                        val stage = analysisStatus?.stageLabel.orEmpty()
+                        when {
+                            stage.contains("Cloud", ignoreCase = true) || stage.contains("Modal", ignoreCase = true) -> "Cloud AI"
+                            stage.contains("Desktop", ignoreCase = true) -> "Desktop AI"
+                            else -> "On-Device AI"
+                        }
+                    }
                     ReadinessBadge.WORD_MUTE_READY -> "Word-Mute"
                     ReadinessBadge.ANALYZING -> "${analysisStatus?.progressPercent ?: 0}%"
-                    ReadinessBadge.NOT_PROCESSED -> null
+                    ReadinessBadge.NOT_PROCESSED -> if (isDownloaded) "Audio Only" else null
                 }
                 if (badgeLabel != null) {
                     Surface(
