@@ -32,3 +32,25 @@ It prints your LAN URL, pairing token, and advertises `_hushcast._tcp.local.` ov
 ```bash
 pytest
 ```
+
+## Cloud Hosting (Modal Serverless GPU — Free Tier Friendly)
+
+If you want to run the companion worker in the cloud (scales to zero when idle, ~$30/mo free credit on Modal) while still keeping local on-device Android and local Mac/LAN modes available:
+
+```bash
+cd desktop-worker
+pip install modal
+modal setup
+
+# Lock your public HTTPS endpoint with a pairing token:
+modal secret create hushcast-token HUSHCAST_WORKER_TOKEN="your-secret-token"
+
+# One-time model download into persistent Modal Volume 'hushcast-data':
+modal run modal_app.py::setup_models
+
+# Deploy the HTTPS endpoint:
+modal deploy modal_app.py
+```
+
+Paste the resulting `https://<user>--hushcast-worker-fastapi-app.modal.run` URL and `HUSHCAST_WORKER_TOKEN` into **Settings → HushCast → Desktop Companion** on your phone.
+
