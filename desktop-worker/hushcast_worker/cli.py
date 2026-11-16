@@ -81,6 +81,8 @@ def main() -> None:
     print(f"  URL:           http://{lan_ip}:{args.port}")
     print(f"  Pairing Token: {token}")
     print(f"  Models Ready:  {backend.models_ready()} (dir: {backend.models_dir})")
+    print(f"  Whisper Model: {backend.whisper_model_name()}")
+    print(f"  Chat Model:    {backend.chat_model_path().name if backend.chat_model_ready() else 'Extractive fallback (drop any Instruct GGUF in models dir to enable LLM summaries)'}")
 
     zc: Optional[Zeroconf] = None
     info: Optional[ServiceInfo] = None

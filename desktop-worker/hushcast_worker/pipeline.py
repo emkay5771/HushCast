@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import platform
 import time
+import os
+import re
 from pathlib import Path
 from typing import Callable, Optional, Protocol
 
@@ -11,6 +13,7 @@ import httpx
 from .models import (
     AdSegmentDto,
     DesktopAnalysisBundle,
+    DesktopChapterDto,
     JobState,
     SegmentDto,
     WordDto,
@@ -18,6 +21,21 @@ from .models import (
 )
 
 ProgressCallback = Callable[[JobState, int, str], None]
+
+WHISPER_MODEL_CANDIDATES = [
+    "ggml-large-v3-turbo.bin",
+    "ggml-large-v3-turbo-q5_0.bin",
+    "ggml-large-v3-turbo-q8_0.bin",
+    "ggml-large-v3.bin",
+    "ggml-medium.en.bin",
+    "ggml-medium.en-q5_0.bin",
+    "ggml-medium.bin",
+    "ggml-small.en.bin",
+    "ggml-small.en-q5_1.bin",
+    "ggml-small.bin",
+    "ggml-base.en.bin",
+    "ggml-base.en-q5_1.bin",
+]
 
 
 def detect_accelerator() -> str:
@@ -62,9 +80,47 @@ class LocalMlBackend:
     def __init__(self, models_dir: Path, ad_tagger_onnx: Optional[Path] = None) -> None:
         self.models_dir = models_dir
         self.models_dir.mkdir(parents=True, exist_ok=True)
-        self.whisper_model = models_dir / "ggml-base.en-q5_1.bin"
+        self.whisper_model = self._resolve_whisper_model()
         self.qwen_model = models_dir / "Qwen3-Embedding-0.6B-Q8_0.gguf"
         self.ad_tagger_onnx = ad_tagger_onnx or (models_dir / "ad_tagger.onnx")
+
+    def _resolve_whisper_model(self) -> Path:
+        env_model = os.environ.get("HUSHCAST_WHISPER_MODEL", "").strip()
+        if env_model:
+            p = Path(env_model).expanduser()
+            if p.exists():
+                return p
+            candidate = self.models_dir / env_model
+            if candidate.exists():
+                return candidate
+        for name in WHISPER_MODEL_CANDIDATES:
+            candidate = self.models_dir / name
+            if candidate.exists():
+                return candidate
+        return self.models_dir / "ggml-base.en-q5_1.bin"
+
+    def whisper_model_name(self) -> str:
+        return self.whisper_model.name
+
+    def chat_model_path(self) -> Optional[Path]:
+        env_chat = os.environ.get("HUSHCAST_CHAT_MODEL", "").strip()
+        if env_chat:
+            p = Path(env_chat).expanduser()
+            if p.exists():
+                return p
+            candidate = self.models_dir / env_chat
+            if candidate.exists():
+                return candidate
+        for p in sorted(self.models_dir.glob("*.gguf")):
+            lower = p.name.lower()
+            if "embedding" in lower:
+                continue
+            if any(k in lower for k in ("instruct", "chat", "qwen2.5", "llama-3", "gemma", "mistral")):
+                return p
+        return None
+
+    def chat_model_ready(self) -> bool:
+        return self.chat_model_path() is not None
 
     def models_ready(self) -> bool:
         return (
@@ -72,6 +128,41 @@ class LocalMlBackend:
             and self.qwen_model.exists()
             and self.ad_tagger_onnx.exists()
         )
+
+    def _load_embedding_llm(self):
+        from llama_cpp import Llama
+
+        try:
+            return Llama(
+                model_path=str(self.qwen_model),
+                embedding=True,
+                pooling_type=3,  # LLAMA_POOLING_TYPE_LAST (matches llama_jni.cpp)
+                n_gpu_layers=-1,
+                verbose=False,
+            )
+        except TypeError:
+            return Llama(
+                model_path=str(self.qwen_model),
+                embedding=True,
+                n_gpu_layers=-1,
+                verbose=False,
+            )
+
+    def embed_query(self, text: str) -> list[float]:
+        import numpy as np
+
+        if not self.qwen_model.exists():
+            raise FileNotFoundError(f"Missing embedding model: {self.qwen_model}")
+        llm = self._load_embedding_llm()
+        vec = np.asarray(llm.embed(text), dtype=np.float32)
+        if vec.ndim == 2:
+            vec = vec[-1]
+        elif vec.ndim > 2:
+            vec = vec.reshape(-1, vec.shape[-1])[-1]
+        norm = float(np.linalg.norm(vec))
+        if norm > 1e-12:
+            vec = vec / norm
+        return vec.tolist()
 
     def analyze(
         self,
@@ -83,6 +174,27 @@ class LocalMlBackend:
         feed_transcript_mime: str,
         on_progress: ProgressCallback,
     ) -> DesktopAnalysisBundle:
+        bundle, _ = self.analyze_with_embeddings(
+            audio_path=audio_path,
+            file_sha256=file_sha256,
+            episode_id=episode_id,
+            feed_transcript_raw=feed_transcript_raw,
+            feed_transcript_mime=feed_transcript_mime,
+            on_progress=on_progress,
+        )
+        return bundle
+
+    def analyze_with_embeddings(
+        self,
+        *,
+        audio_path: Path,
+        file_sha256: str,
+        episode_id: str,
+        feed_transcript_raw: Optional[str],
+        feed_transcript_mime: str,
+        on_progress: ProgressCallback,
+    ):
+        self.whisper_model = self._resolve_whisper_model()
         if not self.models_ready():
             missing = [
                 str(p.name)
@@ -106,33 +218,26 @@ class LocalMlBackend:
             ) from exc
 
         t0 = time.monotonic()
-        on_progress(JobState.TRANSCRIBING, 25, "Decoding & transcribing on GPU")
+        on_progress(JobState.TRANSCRIBING, 25, f"Transcribing ({self.whisper_model.name})")
 
-        # 1. Decode to 16 kHz mono for Whisper
+        # 1. Decode to 16 kHz mono for Whisper & acoustic speaker diarization
         pcm_16k, duration_sec = _decode_audio_16k_mono(audio_path)
         whisper = WhisperModel(str(self.whisper_model), print_progress=False)
         raw_segments = whisper.transcribe(pcm_16k, token_timestamps=True)
 
         words, segments = _extract_whisper_words_and_segments(whisper, raw_segments)
 
+        # 2. Acoustic speaker diarization
+        if segments and len(pcm_16k) > 0:
+            _assign_speakers(pcm_16k, segments)
+
         on_progress(JobState.EMBEDDING, 65, "Embedding sentences (Qwen3 Metal)")
-        try:
-            llm = Llama(
-                model_path=str(self.qwen_model),
-                embedding=True,
-                pooling_type=3,  # LLAMA_POOLING_TYPE_LAST (matches llama_jni.cpp)
-                n_gpu_layers=-1,
-                verbose=False,
-            )
-        except TypeError:
-            llm = Llama(
-                model_path=str(self.qwen_model),
-                embedding=True,
-                n_gpu_layers=-1,
-                verbose=False,
-            )
+        llm = self._load_embedding_llm()
         texts = [s.text for s in segments]
         ad_segments: list[AdSegmentDto] = []
+        emb_2d = None
+        summary: Optional[str] = None
+        chapters: list[DesktopChapterDto] = []
 
         if texts:
             import numpy as np
@@ -148,25 +253,37 @@ class LocalMlBackend:
                 if norm > 1e-12:
                     vec = vec / norm
                 emb_list.append(vec)
-            emb = np.stack(emb_list, axis=0)[None, :, :]  # (1, N, 1024)
+            emb_2d = np.stack(emb_list, axis=0)  # (N, 1024)
+            emb = emb_2d[None, :, :]  # (1, N, 1024)
 
-            on_progress(JobState.TAGGING, 85, "Running ad_tagger.onnx")
+            on_progress(JobState.TAGGING, 85, "Tagging ads & generating chapters")
             feats = _basic_segment_features(segments, duration_sec)[None, :, :]  # (1, N, 28)
 
             sess = ort.InferenceSession(str(self.ad_tagger_onnx))
             probs = sess.run(None, {"emb": emb, "feats": feats})[0][0]  # (N, 5)
             ad_segments = _decode_ad_segments(probs, segments)
 
+            summary, chapters = _generate_chapters_and_summary(
+                segments=segments,
+                embeddings=emb_2d,
+                ad_segments=ad_segments,
+                chat_model_path=self.chat_model_path(),
+            )
+
         elapsed_ms = int((time.monotonic() - t0) * 1000)
-        return DesktopAnalysisBundle(
+        bundle = DesktopAnalysisBundle(
             fileSha256=file_sha256,
             episodeId=episode_id,
             durationSec=round(duration_sec, 1),
             wordIndexBlob=WordIndexBlobDto(words=words, segments=segments),
             adSegments=ad_segments,
+            summary=summary,
+            chapters=chapters,
+            whisperModel=self.whisper_model.name,
             analysisDurationMs=elapsed_ms,
             workerAccelerator=detect_accelerator(),
         )
+        return bundle, emb_2d
 
 
 def _extract_whisper_words_and_segments(
@@ -285,6 +402,119 @@ def _decode_audio_16k_mono(audio_path: Path):
     return pcm, float(len(pcm) / 16000.0)
 
 
+def _assign_speakers(pcm_16k, segments: list[SegmentDto]) -> None:
+    """
+    Lightweight acoustic speaker diarization using per-segment spectral/timbre
+    fingerprints on 16 kHz mono PCM + online cosine clustering.
+    """
+    import numpy as np
+
+    sr = 16000
+    n_segs = len(segments)
+    if n_segs == 0 or len(pcm_16k) < sr // 10:
+        return
+
+    # 8 log-spaced frequency bands from 80 Hz to 7500 Hz + ZCR + spectral centroid + RMS
+    band_edges = np.geomspace(80.0, 7500.0, 9)
+    feats: list[Optional[np.ndarray]] = []
+
+    for s in segments:
+        i0 = max(0, int(s.start * sr))
+        i1 = min(len(pcm_16k), int(s.end * sr))
+        chunk = pcm_16k[i0:i1]
+        if len(chunk) < 320:
+            feats.append(None)
+            continue
+        rms = float(np.sqrt(np.mean(chunk * chunk)))
+        if rms < 1e-4:
+            feats.append(None)
+            continue
+
+        # Take up to 3 seconds centered in the segment for fast FFT
+        if len(chunk) > 3 * sr:
+            mid = len(chunk) // 2
+            chunk = chunk[mid - (3 * sr) // 2 : mid + (3 * sr) // 2]
+
+        zcr = float(np.mean(np.abs(np.diff(np.signbit(chunk)))))
+        window = np.hanning(len(chunk)).astype(np.float32)
+        spec = np.abs(np.fft.rfft(chunk * window))
+        freqs = np.fft.rfftfreq(len(chunk), d=1.0 / sr)
+        power = spec * spec + 1e-12
+        total_power = float(np.sum(power))
+        centroid = float(np.sum(freqs * power) / total_power) / 4000.0
+
+        bands = []
+        for b in range(8):
+            mask = (freqs >= band_edges[b]) & (freqs < band_edges[b + 1])
+            band_e = float(np.sum(power[mask])) if np.any(mask) else 1e-12
+            bands.append(float(np.log10(band_e / total_power + 1e-9)))
+
+        vec = np.array([np.log10(rms + 1e-6), zcr * 10.0, centroid, *bands], dtype=np.float32)
+        feats.append(vec)
+
+    valid_idx = [i for i, v in enumerate(feats) if v is not None]
+    if not valid_idx:
+        for s in segments:
+            s.speaker = 0
+        return
+
+    mat = np.stack([feats[i] for i in valid_idx], axis=0)
+    mean = np.mean(mat, axis=0)
+    std = np.std(mat, axis=0) + 1e-6
+    mat_norm = (mat - mean) / std
+    norms = np.linalg.norm(mat_norm, axis=1, keepdims=True) + 1e-12
+    mat_unit = mat_norm / norms
+
+    # Greedy cosine-similarity speaker clustering (capped at 6 speakers)
+    centroids: list[np.ndarray] = []
+    counts: list[int] = []
+    labels = [0] * len(valid_idx)
+    sim_threshold = 0.72
+    max_speakers = 6
+
+    for row_i, vec in enumerate(mat_unit):
+        if not centroids:
+            centroids.append(vec.copy())
+            counts.append(1)
+            labels[row_i] = 0
+            continue
+        sims = [float(np.dot(vec, c)) for c in centroids]
+        best_spk = int(np.argmax(sims))
+        if sims[best_spk] >= sim_threshold or len(centroids) >= max_speakers:
+            labels[row_i] = best_spk
+            c_cnt = counts[best_spk]
+            new_c = (centroids[best_spk] * c_cnt + vec) / (c_cnt + 1)
+            new_c /= float(np.linalg.norm(new_c)) + 1e-12
+            centroids[best_spk] = new_c
+            counts[best_spk] = c_cnt + 1
+        else:
+            new_id = len(centroids)
+            centroids.append(vec.copy())
+            counts.append(1)
+            labels[row_i] = new_id
+
+    for row_i, seg_i in enumerate(valid_idx):
+        segments[seg_i].speaker = labels[row_i]
+
+    # Fill silent/short segments from neighbor
+    last_spk = 0
+    for s in segments:
+        if s.speaker is None:
+            s.speaker = last_spk
+        else:
+            last_spk = s.speaker
+
+    # Smooth single-segment blips (< 1.2s) where prev == next != cur
+    for i in range(1, n_segs - 1):
+        dur = segments[i].end - segments[i].start
+        if (
+            dur < 1.2
+            and segments[i - 1].speaker == segments[i + 1].speaker
+            and segments[i].speaker != segments[i - 1].speaker
+        ):
+            segments[i].speaker = segments[i - 1].speaker
+
+
 def _basic_segment_features(segments: list[SegmentDto], duration_sec: float):
     import numpy as np
 
@@ -299,7 +529,166 @@ def _basic_segment_features(segments: list[SegmentDto], duration_sec: float):
         feats[i, 14] = float(s.start / dur)  # rel_pos
         feats[i, 15] = float(max(0.0, s.end - s.start))  # seg_dur
         feats[i, 16] = float(s.nWords)  # n_words
+        if i > 0 and s.speaker is not None and segments[i - 1].speaker is not None:
+            feats[i, 17] = 1.0 if s.speaker != segments[i - 1].speaker else 0.0  # spk_change
     return feats
+
+
+def _is_inside_ad(start_s: float, end_s: float, ad_segments: list[AdSegmentDto]) -> bool:
+    s_ms = int(start_s * 1000)
+    e_ms = int(end_s * 1000)
+    for ad in ad_segments:
+        if s_ms < ad.endMs and e_ms > ad.startMs:
+            return True
+    return False
+
+
+def _clean_chapter_title(text: str) -> str:
+    cleaned = re.sub(r"^\s*(?:and|so|but|well|yeah|okay|ok|um|uh|like)[,\s]+", "", text.strip(), flags=re.IGNORECASE)
+    words = cleaned.split()
+    if not words:
+        words = text.strip().split()
+    snippet = " ".join(words[:8]).rstrip(" ,.;:-")
+    if len(words) > 8:
+        snippet += "…"
+    return snippet[:1].upper() + snippet[1:] if snippet else "Topic"
+
+
+def _generate_chapters_and_summary(
+    *,
+    segments: list[SegmentDto],
+    embeddings,
+    ad_segments: list[AdSegmentDto],
+    chat_model_path: Optional[Path] = None,
+) -> tuple[Optional[str], list[DesktopChapterDto]]:
+    import json
+    import numpy as np
+
+    non_ad_indices = [
+        i for i, s in enumerate(segments)
+        if not _is_inside_ad(s.start, s.end, ad_segments) and len(s.text.split()) >= 3
+    ]
+    if len(non_ad_indices) < 4:
+        return None, []
+
+    # Optional local chat GGUF upgrade when user drops an instruct GGUF in models_dir
+    if chat_model_path is not None and chat_model_path.exists():
+        try:
+            from llama_cpp import Llama
+
+            step = max(1, len(non_ad_indices) // 60)
+            sampled = [segments[i] for i in non_ad_indices[::step]][:60]
+            transcript_sample = "\n".join(
+                f"[{int(s.start // 60):02d}:{int(s.start % 60):02d}] {s.text.strip()}"
+                for s in sampled
+            )[:6000]
+            prompt = (
+                "Summarize this podcast episode in 2-3 concise sentences and generate 4-8 "
+                "chronological chapter titles with timestamps in seconds.\n"
+                "Return ONLY valid JSON: "
+                '{"summary": "...", "chapters": [{"startSec": 0, "title": "..."}]}\n\n'
+                f"Transcript:\n{transcript_sample}\n\nJSON:"
+            )
+            chat_llm = Llama(
+                model_path=str(chat_model_path),
+                n_ctx=4096,
+                n_gpu_layers=-1,
+                verbose=False,
+            )
+            out = chat_llm.create_completion(prompt, max_tokens=512, temperature=0.2)
+            raw_text = out["choices"][0]["text"].strip()
+            m = re.search(r"\{.*\}", raw_text, flags=re.DOTALL)
+            if m:
+                parsed = json.loads(m.group(0))
+                llm_summary = str(parsed.get("summary") or "").strip() or None
+                llm_chapters = [
+                    DesktopChapterDto(
+                        startMs=max(0, int(float(c.get("startSec", 0)) * 1000)),
+                        title=str(c.get("title", "Chapter")).strip()[:80],
+                    )
+                    for c in (parsed.get("chapters") or [])
+                    if str(c.get("title", "")).strip()
+                ]
+                if llm_summary and llm_chapters:
+                    return llm_summary, llm_chapters
+        except Exception:
+            pass
+
+    # Default zero-extra-model path using already-computed Qwen3-Embedding vectors
+    sub_emb = embeddings[non_ad_indices]
+    centroid = np.mean(sub_emb, axis=0)
+    c_norm = float(np.linalg.norm(centroid))
+    if c_norm > 1e-12:
+        centroid = centroid / c_norm
+
+    # Extractive TL;DR: pick 3 central, well-spaced sentences (>= 8 words)
+    scores = sub_emb @ centroid
+    ranked = sorted(
+        [
+            (float(scores[k]), idx, segments[idx])
+            for k, idx in enumerate(non_ad_indices)
+            if len(segments[idx].text.split()) >= 8
+        ],
+        key=lambda x: x[0],
+        reverse=True,
+    )
+    chosen: list[tuple[int, SegmentDto]] = []
+    for _, idx, seg in ranked:
+        if all(abs(seg.start - c_seg.start) >= 45.0 for _, c_seg in chosen):
+            chosen.append((idx, seg))
+            if len(chosen) >= 3:
+                break
+    chosen.sort(key=lambda x: x[0])
+    summary = " ".join(seg.text.strip() for _, seg in chosen) if chosen else None
+
+    # Topic-shift chapters via sliding-window cosine similarity valleys
+    m = len(non_ad_indices)
+    win = min(5, max(2, m // 10))
+    boundaries: list[int] = [non_ad_indices[0]]
+    if m > win * 2 + 2:
+        sims: list[tuple[int, float]] = []
+        for k in range(win, m - win):
+            left = np.mean(sub_emb[k - win : k], axis=0)
+            right = np.mean(sub_emb[k : k + win], axis=0)
+            ln = float(np.linalg.norm(left))
+            rn = float(np.linalg.norm(right))
+            sim = float(np.dot(left / (ln + 1e-12), right / (rn + 1e-12)))
+            sims.append((k, sim))
+
+        # Pick lowest similarity valleys separated by >= 120 seconds
+        sims.sort(key=lambda x: x[1])
+        min_gap_sec = 120.0
+        max_chapters = 8
+        selected_times: list[float] = [segments[non_ad_indices[0]].start]
+        for k, _ in sims:
+            seg_idx = non_ad_indices[k]
+            t = segments[seg_idx].start
+            if all(abs(t - st) >= min_gap_sec for st in selected_times):
+                boundaries.append(seg_idx)
+                selected_times.append(t)
+                if len(boundaries) >= max_chapters:
+                    break
+        boundaries.sort()
+
+    chapters: list[DesktopChapterDto] = []
+    for b_pos, start_idx in enumerate(boundaries):
+        end_idx = boundaries[b_pos + 1] if b_pos + 1 < len(boundaries) else len(segments)
+        chunk_indices = [idx for idx in range(start_idx, end_idx) if not _is_inside_ad(segments[idx].start, segments[idx].end, ad_segments)]
+        if not chunk_indices:
+            chunk_indices = [start_idx]
+        chunk_emb = embeddings[chunk_indices]
+        ch_cent = np.mean(chunk_emb, axis=0)
+        ch_cent /= float(np.linalg.norm(ch_cent)) + 1e-12
+        best_local = int(np.argmax(chunk_emb @ ch_cent))
+        rep_text = segments[chunk_indices[best_local]].text
+        chapters.append(
+            DesktopChapterDto(
+                startMs=max(0, int(round(segments[start_idx].start * 1000))),
+                title=_clean_chapter_title(rep_text),
+            )
+        )
+
+    return summary, chapters
 
 
 def _extract_sponsor_name(text: str) -> Optional[str]:

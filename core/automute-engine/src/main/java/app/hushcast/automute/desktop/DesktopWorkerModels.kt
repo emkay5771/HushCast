@@ -10,6 +10,8 @@ data class DesktopHealthResponse(
     val hostname: String = "",
     val accelerator: String = "cpu",
     val modelsReady: Boolean = false,
+    val whisperModel: String = "",
+    val chatModelReady: Boolean = false,
     val cachedEpisodes: Int = 0
 )
 
@@ -43,12 +45,21 @@ data class DesktopAdSegmentDto(
 )
 
 @Serializable
+data class DesktopChapterDto(
+    val startMs: Long,
+    val title: String
+)
+
+@Serializable
 data class DesktopAnalysisBundle(
     val fileSha256: String,
     val episodeId: String,
     val durationSec: Double,
     val wordIndexBlob: WordIndexBlob,
     val adSegments: List<DesktopAdSegmentDto> = emptyList(),
+    val summary: String? = null,
+    val chapters: List<DesktopChapterDto> = emptyList(),
+    val whisperModel: String = "",
     val analysisDurationMs: Long = 0L,
     val workerAccelerator: String = "cpu"
 )
@@ -63,4 +74,27 @@ data class DesktopReadyEpisode(
     val wordCount: Int = 0,
     val adCount: Int = 0,
     val createdAtMs: Long = 0L
+)
+
+@Serializable
+data class DesktopSearchRequest(
+    val query: String,
+    val topK: Int = 15
+)
+
+@Serializable
+data class DesktopSearchHit(
+    val fileSha256: String,
+    val episodeId: String,
+    val episodeTitle: String = "",
+    val startMs: Long,
+    val endMs: Long,
+    val text: String,
+    val score: Float
+)
+
+@Serializable
+data class DesktopSearchResponse(
+    val query: String,
+    val hits: List<DesktopSearchHit> = emptyList()
 )

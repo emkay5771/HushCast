@@ -422,9 +422,13 @@ fun SettingsHushCastPane(
                                                     baseUrl = desktopUrl,
                                                     token = desktopToken
                                                 )
+                                                val modelNote = buildString {
+                                                    if (health.whisperModel.isNotBlank()) append(" • ${health.whisperModel}")
+                                                    if (health.chatModelReady) append(" • LLM Chat")
+                                                }
                                                 desktopStatus = "Connected: ${health.hostname} (${health.accelerator.uppercase()}) • " +
                                                     (if (health.modelsReady) "Models Ready" else "Models Missing") +
-                                                    " • ${health.cachedEpisodes} cached"
+                                                    "$modelNote • ${health.cachedEpisodes} cached"
                                             } catch (t: Throwable) {
                                                 desktopStatus = "Connection failed: ${t.message ?: t.javaClass.simpleName}"
                                             } finally {
@@ -443,6 +447,103 @@ fun SettingsHushCastPane(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                            }
+
+                            if (desktopUrl.isNotBlank()) {
+                                Spacer(Modifier.height(14.dp))
+                                HorizontalDivider()
+                                Spacer(Modifier.height(10.dp))
+                                Text("Semantic Search Across Episodes", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    "Search topics or concepts across all desktop-analyzed episodes using Qwen3 embeddings.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                var searchQuery by remember { mutableStateOf("") }
+                                var searchBusy by remember { mutableStateOf(false) }
+                                var searchError by remember { mutableStateOf<String?>(null) }
+                                var searchHits by remember {
+                                    mutableStateOf<List<app.hushcast.automute.desktop.DesktopSearchHit>>(emptyList())
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedTextField(
+                                        value = searchQuery,
+                                        onValueChange = { searchQuery = it },
+                                        label = { Text("Ask or search a topic…") },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Button(
+                                        enabled = !searchBusy && searchQuery.isNotBlank(),
+                                        onClick = {
+                                            searchBusy = true
+                                            searchError = null
+                                            scope.launch {
+                                                try {
+                                                    val resp = app.hushcast.automute.desktop.DesktopWorkerClient.semanticSearch(
+                                                        baseUrl = desktopUrl,
+                                                        token = desktopToken,
+                                                        query = searchQuery,
+                                                        topK = 8
+                                                    )
+                                                    searchHits = resp.hits
+                                                    if (resp.hits.isEmpty()) {
+                                                        searchError = "No matching moments found in cached episodes."
+                                                    }
+                                                } catch (t: Throwable) {
+                                                    searchError = t.message ?: t.javaClass.simpleName
+                                                } finally {
+                                                    searchBusy = false
+                                                }
+                                            }
+                                        }
+                                    ) {
+                                        Text(if (searchBusy) "…" else "Search")
+                                    }
+                                }
+                                searchError?.let { err ->
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        err,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                if (searchHits.isNotEmpty()) {
+                                    Spacer(Modifier.height(8.dp))
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        searchHits.forEach { hit ->
+                                            val totalSec = (hit.startMs / 1000L).coerceAtLeast(0L)
+                                            val h = totalSec / 3600L
+                                            val m = (totalSec % 3600L) / 60L
+                                            val s = totalSec % 60L
+                                            val ts = if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
+                                            Surface(
+                                                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+                                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Column(modifier = Modifier.padding(10.dp)) {
+                                                    Text(
+                                                        text = "${hit.episodeTitle.ifBlank { hit.episodeId }} • $ts (${"%.2f".format(hit.score)})",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    Spacer(Modifier.height(2.dp))
+                                                    Text(
+                                                        text = hit.text,
+                                                        style = MaterialTheme.typography.bodySmall
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
 

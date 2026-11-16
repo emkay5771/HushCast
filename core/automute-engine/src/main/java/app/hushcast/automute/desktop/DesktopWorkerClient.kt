@@ -7,6 +7,7 @@ import app.hushcast.automute.storage.AdSegmentEntity
 import app.hushcast.automute.storage.AutoMuteDatabase
 import app.hushcast.automute.storage.BlobCodec
 import app.hushcast.automute.storage.EpisodeAnalysisStatusEntity
+import app.hushcast.automute.storage.EpisodeInsightsEntity
 import app.hushcast.automute.storage.EpisodeWordIndexEntity
 import app.hushcast.automute.storage.MuteSegmentEntity
 import app.hushcast.automute.storage.toDomain
@@ -92,6 +93,17 @@ object DesktopWorkerClient {
     ): List<DesktopReadyEpisode> = withContext(Dispatchers.IO) {
         val body = getText("${normalizeUrl(baseUrl)}/v1/episodes", token)
         json.decodeFromString<List<DesktopReadyEpisode>>(body)
+    }
+
+    suspend fun semanticSearch(
+        baseUrl: String,
+        token: String,
+        query: String,
+        topK: Int = 15
+    ): DesktopSearchResponse = withContext(Dispatchers.IO) {
+        val payload = json.encodeToString(DesktopSearchRequest(query = query, topK = topK))
+        val body = postJson("${normalizeUrl(baseUrl)}/v1/search", token, payload)
+        json.decodeFromString<DesktopSearchResponse>(body)
     }
 
     /**
@@ -211,6 +223,17 @@ object DesktopWorkerClient {
                         label = ad.label
                     )
                 }
+            )
+        }
+
+        if (!bundle.summary.isNullOrBlank() || bundle.chapters.isNotEmpty()) {
+            dao.upsertInsights(
+                EpisodeInsightsEntity(
+                    episodeId = episodeId,
+                    fileSha256 = sha,
+                    summary = bundle.summary,
+                    chaptersJson = json.encodeToString(bundle.chapters)
+                )
             )
         }
 

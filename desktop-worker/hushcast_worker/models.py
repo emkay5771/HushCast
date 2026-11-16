@@ -32,12 +32,20 @@ class AdSegmentDto(BaseModel):
     label: str
 
 
+class DesktopChapterDto(BaseModel):
+    startMs: int
+    title: str
+
+
 class DesktopAnalysisBundle(BaseModel):
     fileSha256: str
     episodeId: str
     durationSec: float
     wordIndexBlob: WordIndexBlobDto
     adSegments: list[AdSegmentDto]
+    summary: Optional[str] = None
+    chapters: list[DesktopChapterDto] = Field(default_factory=list)
+    whisperModel: str = ""
     analysisDurationMs: int = 0
     workerAccelerator: str = "cpu"
 
@@ -87,4 +95,26 @@ class DesktopHealthResponse(BaseModel):
     hostname: str
     accelerator: str
     modelsReady: bool
+    whisperModel: str = ""
+    chatModelReady: bool = False
     cachedEpisodes: int = Field(default=0)
+
+
+class DesktopSearchRequest(BaseModel):
+    query: str
+    topK: int = Field(default=15, ge=1, le=50)
+
+
+class DesktopSearchHit(BaseModel):
+    fileSha256: str
+    episodeId: str
+    episodeTitle: str = ""
+    startMs: int
+    endMs: int
+    text: str
+    score: float
+
+
+class DesktopSearchResponse(BaseModel):
+    query: str
+    hits: list[DesktopSearchHit]

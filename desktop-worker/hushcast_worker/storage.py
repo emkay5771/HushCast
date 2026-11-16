@@ -42,6 +42,9 @@ class WorkerCache:
     def bundle_path(self, sha256: str) -> Path:
         return self.episodes_dir / f"{sha256}.bundle.json"
 
+    def embeddings_path(self, sha256: str) -> Path:
+        return self.episodes_dir / f"{sha256}.emb.npy"
+
     def has_complete(self, sha256: str) -> bool:
         return self.audio_path(sha256).exists() and self.bundle_path(sha256).exists()
 
@@ -66,6 +69,7 @@ class WorkerCache:
         audio_url: str,
         title: str,
         content_type: str = "audio/mpeg",
+        embeddings=None,
     ) -> None:
         dest_audio = self.audio_path(sha256)
         if not dest_audio.exists():
@@ -75,6 +79,11 @@ class WorkerCache:
 
         dest_bundle = self.bundle_path(sha256)
         dest_bundle.write_text(bundle.model_dump_json(indent=2), encoding="utf-8")
+
+        if embeddings is not None:
+            import numpy as np
+
+            np.save(self.embeddings_path(sha256), np.asarray(embeddings, dtype=np.float32))
 
         self._index["by_url"][audio_url] = sha256
         self._index["by_sha"][sha256] = {
@@ -90,6 +99,48 @@ class WorkerCache:
             "createdAtMs": int(time.time() * 1000),
         }
         self._save_index()
+
+    def semantic_search(self, query_vec, top_k: int = 15):
+        import numpy as np
+        from .models import DesktopSearchHit
+
+        q = np.asarray(query_vec, dtype=np.float32).reshape(-1)
+        q_norm = float(np.linalg.norm(q))
+        if q_norm > 1e-12:
+            q = q / q_norm
+
+        hits: list[DesktopSearchHit] = []
+        for sha, meta in self._index["by_sha"].items():
+            emb_file = self.embeddings_path(sha)
+            bundle_file = self.bundle_path(sha)
+            if not emb_file.exists() or not bundle_file.exists():
+                continue
+            mat = np.load(emb_file)
+            if mat.ndim != 2 or mat.shape[0] == 0:
+                continue
+            bundle = self.get_bundle(sha)
+            if bundle is None or not bundle.wordIndexBlob.segments:
+                continue
+            scores = mat @ q
+            n = min(len(scores), len(bundle.wordIndexBlob.segments))
+            top_indices = np.argsort(scores[:n])[::-1][: min(5, n)]
+            ep_title = meta.get("title", "") or bundle.episodeId
+            for idx in top_indices:
+                seg = bundle.wordIndexBlob.segments[int(idx)]
+                hits.append(
+                    DesktopSearchHit(
+                        fileSha256=sha,
+                        episodeId=bundle.episodeId,
+                        episodeTitle=ep_title,
+                        startMs=int(round(seg.start * 1000)),
+                        endMs=int(round(seg.end * 1000)),
+                        text=seg.text.strip(),
+                        score=round(float(scores[int(idx)]), 4),
+                    )
+                )
+
+        hits.sort(key=lambda h: h.score, reverse=True)
+        return hits[:top_k]
 
     def get_content_type(self, sha256: str) -> str:
         meta = self._index["by_sha"].get(sha256, {})

@@ -105,6 +105,15 @@ data class EpisodeAnalysisStatusEntity(
     val updatedAt: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "episode_insights")
+data class EpisodeInsightsEntity(
+    @PrimaryKey val episodeId: String,
+    val fileSha256: String = "",
+    val summary: String? = null,
+    val chaptersJson: String = "[]",
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
 @Dao
 interface AutoMuteDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -220,6 +229,15 @@ interface AutoMuteDao {
 
     @Query("SELECT * FROM episode_analysis_status")
     fun observeAllStatuses(): Flow<List<EpisodeAnalysisStatusEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertInsights(insights: EpisodeInsightsEntity)
+
+    @Query("SELECT * FROM episode_insights WHERE episodeId = :episodeId LIMIT 1")
+    suspend fun getInsights(episodeId: String): EpisodeInsightsEntity?
+
+    @Query("SELECT * FROM episode_insights WHERE episodeId = :episodeId LIMIT 1")
+    fun observeInsights(episodeId: String): Flow<EpisodeInsightsEntity?>
 }
 
 @Database(
@@ -229,9 +247,10 @@ interface AutoMuteDao {
         AdSegmentEntity::class,
         MuteRuleEntity::class,
         PodcastAdPolicyEntity::class,
-        EpisodeAnalysisStatusEntity::class
+        EpisodeAnalysisStatusEntity::class,
+        EpisodeInsightsEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AutoMuteDatabase : RoomDatabase() {
@@ -241,13 +260,30 @@ abstract class AutoMuteDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: AutoMuteDatabase? = null
 
+        private val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `episode_insights` (
+                        `episodeId` TEXT NOT NULL,
+                        `fileSha256` TEXT NOT NULL,
+                        `summary` TEXT,
+                        `chaptersJson` TEXT NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`episodeId`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun getInstance(context: Context): AutoMuteDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     AutoMuteDatabase::class.java,
                     "hushcast_automute.db"
-                ).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2).build().also { INSTANCE = it }
             }
         }
     }

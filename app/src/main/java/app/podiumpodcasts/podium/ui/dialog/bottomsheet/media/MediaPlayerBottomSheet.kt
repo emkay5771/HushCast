@@ -221,10 +221,23 @@ fun MediaPlayerBottomSheet(
         }
     }
 
+    var episodeSummary by remember { mutableStateOf<String?>(null) }
+    var episodeChapters by remember {
+        mutableStateOf<List<app.hushcast.automute.desktop.DesktopChapterDto>>(emptyList())
+    }
+
     LaunchedEffect(episodeId, analysisStatus?.badge) {
         if (episodeId.isBlank()) return@LaunchedEffect
         val idx = autoMuteDb.dao().getWordIndexByEpisode(episodeId)
         transcriptBlob = idx?.let { runCatching { BlobCodec.decompress(it.compressedBlob) }.getOrNull() }
+        val insights = autoMuteDb.dao().getInsights(episodeId)
+        episodeSummary = insights?.summary
+        episodeChapters = insights?.chaptersJson?.let { raw ->
+            runCatching {
+                kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                    .decodeFromString<List<app.hushcast.automute.desktop.DesktopChapterDto>>(raw)
+            }.getOrDefault(emptyList())
+        } ?: emptyList()
     }
 
     LaunchedEffect(pendingUndo) {
@@ -413,6 +426,8 @@ fun MediaPlayerBottomSheet(
                                     adWindows = adWindows,
                                     currentPositionMs = vm.currentPosition,
                                     onSeekToMs = { ms -> vm.seek(ms) },
+                                    summary = episodeSummary,
+                                    chapters = episodeChapters,
                                     onPlayAdSegment = { ad, startMs ->
                                         HushCastEngineBridge.adSkipObserver.bypassAd(ad.startMs)
                                         vm.seek(startMs)

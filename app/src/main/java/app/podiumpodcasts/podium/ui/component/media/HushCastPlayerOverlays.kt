@@ -269,6 +269,8 @@ fun SyncedTranscriptCard(
     onToggleWordMute: (Word, Boolean) -> Unit,
     onPlayAdSegment: ((AdWindow, Long) -> Unit)? = null,
     onCopyReport: (() -> Unit)? = null,
+    summary: String? = null,
+    chapters: List<app.hushcast.automute.desktop.DesktopChapterDto> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     if (segments.isEmpty()) {
@@ -292,6 +294,7 @@ fun SyncedTranscriptCard(
     }
 
     var searchQuery by remember { mutableStateOf("") }
+    var showInsights by remember { mutableStateOf(false) }
     val filteredSegments = remember(segments, searchQuery) {
         val q = searchQuery.trim()
         if (q.isEmpty()) segments
@@ -302,6 +305,79 @@ fun SyncedTranscriptCard(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        if (!summary.isNullOrBlank() || chapters.isNotEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showInsights = !showInsights }
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = buildString {
+                                append("AI Summary")
+                                if (chapters.isNotEmpty()) append(" • ${chapters.size} Chapters")
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Text(
+                            text = if (showInsights) "Hide" else "Show",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    if (showInsights) {
+                        if (!summary.isNullOrBlank()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = summary,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                        if (chapters.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                chapters.forEach { ch ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .clickable { onSeekToMs(ch.startMs) }
+                                            .padding(vertical = 4.dp, horizontal = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text(
+                                            text = formatTranscriptTimestamp(ch.startMs),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Text(
+                                            text = ch.title,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -490,11 +566,39 @@ fun SyncedTranscriptCard(
                                 .clickable { onSeekToMs(segStartMs) }
                         ) {
                             Column(modifier = Modifier.padding(10.dp)) {
-                                Text(
-                                    text = formatTranscriptTimestamp(segStartMs),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = formatTranscriptTimestamp(segStartMs),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    seg.speaker?.let { spk ->
+                                        val speakerColors = listOf(
+                                            Color(0xFF1E88E5),
+                                            Color(0xFF8E24AA),
+                                            Color(0xFF00897B),
+                                            Color(0xFFF4511E),
+                                            Color(0xFF3949AB),
+                                            Color(0xFF6D4C41)
+                                        )
+                                        val spkColor = speakerColors[spk.coerceAtLeast(0) % speakerColors.size]
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = spkColor.copy(alpha = 0.14f)
+                                        ) {
+                                            Text(
+                                                text = "Speaker ${spk + 1}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = spkColor,
+                                                fontWeight = FontWeight.Medium,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                }
                                 Spacer(Modifier.height(4.dp))
                                 if (segWords.isNotEmpty()) {
                                     FlowRow(

@@ -16,6 +16,8 @@ from .models import (
     DesktopJobRequest,
     DesktopJobResponse,
     DesktopReadyEpisode,
+    DesktopSearchRequest,
+    DesktopSearchResponse,
     JobState,
 )
 from .pipeline import (
@@ -59,12 +61,16 @@ def create_app(
 
     @app.get("/v1/health", response_model=DesktopHealthResponse)
     async def health() -> DesktopHealthResponse:
+        whisper_name = backend.whisper_model_name() if hasattr(backend, "whisper_model_name") else ""
+        chat_ready = backend.chat_model_ready() if hasattr(backend, "chat_model_ready") else False
         return DesktopHealthResponse(
             status="ok",
             version=__version__,
             hostname=socket.gethostname(),
             accelerator=detect_accelerator(),
             modelsReady=backend.models_ready(),
+            whisperModel=whisper_name,
+            chatModelReady=chat_ready,
             cachedEpisodes=len(cache.list_ready()),
         )
 
@@ -157,15 +163,27 @@ def create_app(
                     }
                 )
 
-            bundle = await asyncio.to_thread(
-                backend.analyze,
-                audio_path=tmp_audio,
-                file_sha256=sha256,
-                episode_id=req.episodeId,
-                feed_transcript_raw=req.feedTranscriptRaw,
-                feed_transcript_mime=req.feedTranscriptMime,
-                on_progress=on_ml_progress,
-            )
+            if hasattr(backend, "analyze_with_embeddings"):
+                bundle, embeddings = await asyncio.to_thread(
+                    backend.analyze_with_embeddings,
+                    audio_path=tmp_audio,
+                    file_sha256=sha256,
+                    episode_id=req.episodeId,
+                    feed_transcript_raw=req.feedTranscriptRaw,
+                    feed_transcript_mime=req.feedTranscriptMime,
+                    on_progress=on_ml_progress,
+                )
+            else:
+                bundle = await asyncio.to_thread(
+                    backend.analyze,
+                    audio_path=tmp_audio,
+                    file_sha256=sha256,
+                    episode_id=req.episodeId,
+                    feed_transcript_raw=req.feedTranscriptRaw,
+                    feed_transcript_mime=req.feedTranscriptMime,
+                    on_progress=on_ml_progress,
+                )
+                embeddings = None
 
             cache.save_episode(
                 sha256=sha256,
@@ -174,6 +192,7 @@ def create_app(
                 audio_url=req.audioUrl,
                 title=req.title,
                 content_type=content_type,
+                embeddings=embeddings,
             )
 
             jobs[job_id] = jobs[job_id].model_copy(
@@ -237,5 +256,23 @@ def create_app(
             media_type=cache.get_content_type(sha256),
             headers={"X-HushCast-Sha256": sha256},
         )
+
+    @app.post(
+        "/v1/search",
+        response_model=DesktopSearchResponse,
+        dependencies=[Depends(verify_auth)],
+    )
+    async def semantic_search(req: DesktopSearchRequest) -> DesktopSearchResponse:
+        q = req.query.strip()
+        if not q:
+            return DesktopSearchResponse(query=req.query, hits=[])
+        if not hasattr(backend, "embed_query"):
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Backend does not support semantic search",
+            )
+        query_vec = await asyncio.to_thread(backend.embed_query, q)
+        hits = cache.semantic_search(query_vec, top_k=req.topK)
+        return DesktopSearchResponse(query=req.query, hits=hits)
 
     return app
