@@ -13,8 +13,6 @@ jobs:
   deploy:
     name: Deploy to Modal
     runs-on: ubuntu-latest
-    # Skip cleanly on forks or repos that haven't configured Modal CI secrets yet
-    if: ${{ secrets.MODAL_TOKEN_ID != '' && secrets.MODAL_TOKEN_SECRET != '' }}
     defaults:
       run:
         working-directory: desktop-worker
@@ -34,4 +32,9 @@ jobs:
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-        run: modal deploy modal_app.py
+        run: |
+          if [ -z "$MODAL_TOKEN_ID" ] || [ -z "$MODAL_TOKEN_SECRET" ]; then
+            echo "MODAL_TOKEN_ID / MODAL_TOKEN_SECRET not configured; skipping Modal deploy."
+            exit 0
+          fi
+          modal deploy modal_app.py
