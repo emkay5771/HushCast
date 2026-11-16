@@ -49,9 +49,9 @@ Java_app_hushcast_automute_nativebridge_LlamaJni_load(JNIEnv * env, jclass, jstr
     llama_context_params cp = llama_context_default_params();
     cp.embeddings = true;
     cp.pooling_type = LLAMA_POOLING_TYPE_LAST;
-    cp.n_ctx = 8192;
-    cp.n_batch = 8192;
-    cp.n_ubatch = 8192;
+    cp.n_ctx = 2048;
+    cp.n_batch = 2048;
+    cp.n_ubatch = 2048;
     cp.n_seq_max = 64;
     cp.kv_unified = true;
     cp.n_threads = threads;

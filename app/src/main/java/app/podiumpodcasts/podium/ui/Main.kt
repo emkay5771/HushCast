@@ -120,8 +120,14 @@ fun Main(
     val listDetailNavigator = rememberListDetailPaneScaffoldNavigator<DetailPaneKey>()
 
     val navigationScaffoldState = rememberNavigationSuiteScaffoldState()
-    val navigationScaffoldLayoutType =
+    val rawLayoutType =
         NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
+    val navigationScaffoldLayoutType =
+        if (rawLayoutType == NavigationSuiteType.NavigationBar) {
+            NavigationSuiteType.ShortNavigationBarCompact
+        } else {
+            rawLayoutType
+        }
 
     fun listDetailBack() {
         scope.launch {
@@ -143,7 +149,8 @@ fun Main(
     }
 
     LaunchedEffect(backStack.last(), listDetailNavigator.scaffoldValue.primary) {
-        if(navigationScaffoldLayoutType != NavigationSuiteType.NavigationBar) return@LaunchedEffect
+        if(navigationScaffoldLayoutType != NavigationSuiteType.ShortNavigationBarCompact &&
+            navigationScaffoldLayoutType != NavigationSuiteType.NavigationBar) return@LaunchedEffect
 
         val entry = backStack.last()
         if(entry is PodiumNavKey) {

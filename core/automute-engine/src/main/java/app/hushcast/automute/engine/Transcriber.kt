@@ -49,12 +49,18 @@ class Transcriber(
     private val language: String = "en",
     private val beamSize: Int = 1,
     useDtw: Boolean = true,
+    useFlashAttn: Boolean = false,
+    isTiny: Boolean = false,
 ) : AutoCloseable {
-    private var handle = WhisperJni.load(modelPath, useDtw)
+    private var handle = WhisperJni.load(modelPath, useDtw, useFlashAttn, isTiny)
 
     @Synchronized
-    fun transcribe(pcm: PcmBuffer, onProgress: ((Int) -> Unit)? = null): TranscriptionOutput {
-        return transcribeRange(pcm, 0.0, null, onProgress)
+    fun transcribe(
+        pcm: PcmBuffer,
+        vadModelPath: String? = null,
+        onProgress: ((Int) -> Unit)? = null
+    ): TranscriptionOutput {
+        return transcribeRange(pcm, 0.0, null, vadModelPath, onProgress)
     }
 
     @Synchronized
@@ -62,6 +68,7 @@ class Transcriber(
         pcm: PcmBuffer,
         startSec: Double = 0.0,
         endSec: Double? = null,
+        vadModelPath: String? = null,
         onProgress: ((Int) -> Unit)? = null
     ): TranscriptionOutput {
         check(handle != 0L) { "Transcriber closed" }
@@ -71,7 +78,9 @@ class Transcriber(
         val endSample = endSec?.let { (it * 16000.0).roundToInt().coerceIn(startSample, pcm.size) } ?: -1
 
         val cb = onProgress?.let { app.hushcast.automute.nativebridge.WhisperProgressCallback { pct -> it(pct) } }
-        val r = WhisperJni.transcribeRange(handle, pcm.handle, startSample, endSample, threads, language, beamSize, cb)
+        val r = WhisperJni.transcribeRange(
+            handle, pcm.handle, startSample, endSample, threads, language, beamSize, vadModelPath, cb
+        )
         val times = r[0] as FloatArray
         val texts = r[1] as Array<*>
 
@@ -112,7 +121,8 @@ class Transcriber(
     }
 
     companion object {
-        const val BASE_EN_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin"
+        const val BASE_EN_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin"
+        const val TINY_EN_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-q5_1.bin"
         const val SILERO_VAD_URL = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin"
     }
 }

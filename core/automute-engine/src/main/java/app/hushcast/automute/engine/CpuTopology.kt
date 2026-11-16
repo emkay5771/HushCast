@@ -1,0 +1,55 @@
+package app.hushcast.automute.engine
+
+import android.content.Context
+import android.os.Build
+import android.os.PowerManager
+import java.io.File
+import kotlin.math.max
+import kotlin.math.min
+
+/**
+ * Detects big/performance CPU cores via sysfs cpufreq so inference threads avoid slow
+ * efficiency cores that cause contention and thermal throttling.
+ */
+object CpuTopology {
+    private val cachedPerformanceCores: Int by lazy { detectPerformanceCores() }
+
+    fun performanceCoreCount(): Int = cachedPerformanceCores
+
+    private fun detectPerformanceCores(): Int {
+        val total = Runtime.getRuntime().availableProcessors()
+        val freqs = ArrayList<Long>(total)
+        for (i in 0 until total) {
+            val f = File("/sys/devices/system/cpu/cpu$i/cpufreq/cpuinfo_max_freq")
+            if (f.canRead()) {
+                runCatching { f.readText().trim().toLong() }.getOrNull()?.let { freqs.add(it) }
+            }
+        }
+        if (freqs.isEmpty()) return max(1, min(4, total))
+        val maxFreq = freqs.maxOrNull() ?: return max(1, min(4, total))
+        val threshold = (maxFreq * 0.78).toLong()
+        val fastCores = freqs.count { it >= threshold }
+        return fastCores.coerceIn(2, min(4, total.coerceAtLeast(2)))
+    }
+
+    fun isThermallyThrottled(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
+        return pm.currentThermalStatus >= PowerManager.THERMAL_STATUS_SEVERE
+    }
+
+    fun thermalStatusLabel(context: Context): String {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return "Normal"
+        val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return "Normal"
+        return when (pm.currentThermalStatus) {
+            PowerManager.THERMAL_STATUS_NONE,
+            PowerManager.THERMAL_STATUS_LIGHT -> "Normal"
+            PowerManager.THERMAL_STATUS_MODERATE -> "Warm"
+            PowerManager.THERMAL_STATUS_SEVERE -> "Hot (throttling likely)"
+            PowerManager.THERMAL_STATUS_CRITICAL,
+            PowerManager.THERMAL_STATUS_EMERGENCY,
+            PowerManager.THERMAL_STATUS_SHUTDOWN -> "Overheating (throttled)"
+            else -> "Normal"
+        }
+    }
+}

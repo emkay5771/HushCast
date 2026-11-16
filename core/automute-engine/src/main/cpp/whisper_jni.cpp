@@ -21,14 +21,16 @@ void quiet_log(ggml_log_level level, const char * text, void *) {
 
 extern "C" JNIEXPORT jlong JNICALL
 Java_app_hushcast_automute_nativebridge_WhisperJni_load(
-        JNIEnv * env, jclass, jstring jpath, jboolean useDtw) {
+        JNIEnv * env, jclass, jstring jpath, jboolean useDtw, jboolean useFlashAttn, jboolean isTiny) {
     whisper_log_set(quiet_log, nullptr);
     const char * path = env->GetStringUTFChars(jpath, nullptr);
     whisper_context_params cp = whisper_context_default_params();
     cp.use_gpu = false;
     if (useDtw) {
         cp.dtw_token_timestamps = true;
-        cp.dtw_aheads_preset = WHISPER_AHEADS_BASE_EN;
+        cp.dtw_aheads_preset = isTiny ? WHISPER_AHEADS_TINY_EN : WHISPER_AHEADS_BASE_EN;
+    } else if (useFlashAttn) {
+        cp.flash_attn = true;
     }
     whisper_context * ctx = whisper_init_from_file_with_params(path, cp);
     env->ReleaseStringUTFChars(jpath, path);
@@ -88,7 +90,7 @@ static void whisper_jni_progress(struct whisper_context *, struct whisper_state 
 extern "C" JNIEXPORT jobjectArray JNICALL
 Java_app_hushcast_automute_nativebridge_WhisperJni_transcribeRange(
         JNIEnv * env, jclass, jlong h, jlong pcm, jint startSample, jint endSample,
-        jint threads, jstring jlang, jint beam_size, jobject jcb) {
+        jint threads, jstring jlang, jint beam_size, jstring jvadPath, jobject jcb) {
     auto * ctx = reinterpret_cast<whisper_context *>(h);
     auto * audio = reinterpret_cast<std::vector<float> *>(pcm);
     const int total = (int) audio->size();
@@ -99,6 +101,7 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_transcribeRange(
     const float offset_sec = s0 / 16000.0f;
 
     const char * lang = env->GetStringUTFChars(jlang, nullptr);
+    const char * vadPath = jvadPath ? env->GetStringUTFChars(jvadPath, nullptr) : nullptr;
     whisper_full_params p = whisper_full_default_params(
         beam_size > 1 ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY);
     p.beam_search.beam_size = beam_size;
@@ -107,10 +110,20 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_transcribeRange(
     p.translate = false;
     p.no_context = true;
     p.token_timestamps = true;
+    // Disable temperature fallback retries on music/crosstalk to avoid multi-pass stalls
+    p.temperature_inc = 0.0f;
     p.print_progress = false;
     p.print_realtime = false;
     p.print_timestamps = false;
     p.print_special = false;
+
+    if (vadPath && *vadPath) {
+        p.vad = true;
+        p.vad_model_path = vadPath;
+        p.vad_params = whisper_vad_default_params();
+        p.vad_params.threshold = 0.35f;
+        p.vad_params.min_silence_duration_ms = 1000;
+    }
 
     WhisperProgressCtx pctx { env, jcb, nullptr, -1 };
     if (jcb) {
@@ -125,6 +138,7 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_transcribeRange(
 
     const int rc = whisper_full(ctx, p, samples, n_samples);
     env->ReleaseStringUTFChars(jlang, lang);
+    if (vadPath) env->ReleaseStringUTFChars(jvadPath, vadPath);
     if (rc != 0) {
         fail(env, "whisper_full failed");
         return nullptr;

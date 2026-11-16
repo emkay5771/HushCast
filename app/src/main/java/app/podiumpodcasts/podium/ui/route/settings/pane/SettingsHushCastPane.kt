@@ -123,14 +123,14 @@ fun SettingsHushCastPane(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.Download, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("On-Device AI Models (~800 MB)", style = MaterialTheme.typography.titleMedium)
+                            Text("On-Device AI Models (~455 MB)", style = MaterialTheme.typography.titleMedium)
                         }
                         Spacer(Modifier.height(4.dp))
                         Text(
                             if (modelsReady) {
                                 "All models ready ($downloadedMb MB stored locally). $0 server cost, 100% private."
                             } else {
-                                "Download Whisper base.en (148 MB), Silero VAD (2 MB), and Qwen3-Embedding (640 MB) over Wi-Fi."
+                                "Download Whisper base.en q5_1 (58 MB), Silero VAD (2 MB), and Qwen3-Embedding Q4 (395 MB) over Wi-Fi."
                             },
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -181,6 +181,131 @@ fun SettingsHushCastPane(
                                     Text("Delete")
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            // 1b. Performance & Battery Card
+            item {
+                var fastModelEnabled by remember {
+                    mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.isFastModelEnabled(context))
+                }
+                var fastAttentionEnabled by remember {
+                    mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.isFastAttentionEnabled(context))
+                }
+                var chargingOnly by remember {
+                    mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context))
+                }
+                val thermalLabel = remember {
+                    app.hushcast.automute.engine.CpuTopology.thermalStatusLabel(context)
+                }
+                val perfCores = remember {
+                    app.hushcast.automute.engine.CpuTopology.performanceCoreCount()
+                }
+                var tinyReady by remember { mutableStateOf(modelManager.isTinyModelReady()) }
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Memory, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Performance & Battery", style = MaterialTheme.typography.titleMedium)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Using $perfCores performance CPU cores • Thermal: $thermalLabel",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text("Fast transcription model (tiny.en)", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    if (tinyReady) "2–3× faster (32 MB). Slightly lower word accuracy."
+                                    else "2–3× faster (downloads 32 MB tiny.en q5_1).",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = fastModelEnabled,
+                                onCheckedChange = { enabled ->
+                                    fastModelEnabled = enabled
+                                    app.hushcast.automute.engine.HushCastPrefs.setFastModelEnabled(context, enabled)
+                                    if (enabled && !tinyReady && downloadProgress == null) {
+                                        scope.launch {
+                                            try {
+                                                withContext(Dispatchers.IO) {
+                                                    modelManager.ensureTinyModel { prog ->
+                                                        downloadProgress = prog
+                                                    }
+                                                }
+                                                tinyReady = modelManager.isTinyModelReady()
+                                                downloadedMb = (modelManager.totalDownloadedBytes() / (1024L * 1024L)).toInt()
+                                            } catch (t: Throwable) {
+                                                downloadError = t.message ?: "tiny.en download failed"
+                                            } finally {
+                                                downloadProgress = null
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text("Fast timing mode (Flash Attention)", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "1.3× faster by skipping DTW word alignment; mute timing is slightly looser.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = fastAttentionEnabled,
+                                onCheckedChange = { enabled ->
+                                    fastAttentionEnabled = enabled
+                                    app.hushcast.automute.engine.HushCastPrefs.setFastAttentionEnabled(context, enabled)
+                                }
+                            )
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text("Analyze only while charging", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "Defers episode analysis until plugged in to save battery and prevent heat.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = chargingOnly,
+                                onCheckedChange = { enabled ->
+                                    chargingOnly = enabled
+                                    app.hushcast.automute.engine.HushCastPrefs.setAnalyzeOnlyWhileCharging(context, enabled)
+                                }
+                            )
                         }
                     }
                 }

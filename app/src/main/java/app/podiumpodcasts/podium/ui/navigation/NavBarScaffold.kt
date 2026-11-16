@@ -17,7 +17,9 @@ import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 @Composable
 fun NavBarScaffold(
     layoutType: NavigationSuiteType =
-        NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo()),
+        NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo()).let {
+            if (it == NavigationSuiteType.NavigationBar) NavigationSuiteType.ShortNavigationBarCompact else it
+        },
     state: NavigationSuiteScaffoldState,
 
     currentNavKey: @Composable () -> NavKey,

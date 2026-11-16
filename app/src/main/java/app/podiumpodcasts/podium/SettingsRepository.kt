@@ -55,6 +55,7 @@ object SettingsKeys {
     val APPEARANCE_SUBSCRIPTIONS_LAYOUT = stringPreferencesKey("appearance_subscriptions_layout")
     val APPEARANCE_SUBSCRIPTIONS_SORT = stringPreferencesKey("appearance_subscriptions_sort")
     val APPEARANCE_SUBSCRIPTIONS_BADGE_MODE = stringPreferencesKey("appearance_subscriptions_badge_mode")
+    val APPEARANCE_SHOW_GRID_TITLES = booleanPreferencesKey("appearance_show_grid_titles")
 
     val BEHAVIOR_PLAYER_PLAYBACK_SPEED =
         floatPreferencesKey("behavior_player_playback_speed")
@@ -197,6 +198,15 @@ class SettingsRepository(val context: Context) {
 
         suspend fun setSubscriptionsBadgeMode(mode: SubscriptionsBadgeMode) = dataStore.edit { preferences ->
             preferences[SettingsKeys.APPEARANCE_SUBSCRIPTIONS_BADGE_MODE] = mode.name
+        }
+
+        val showGridTitles: Flow<Boolean> = dataStore.data
+            .map { preferences ->
+                preferences[SettingsKeys.APPEARANCE_SHOW_GRID_TITLES] ?: true
+            }
+
+        suspend fun setShowGridTitles(show: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_SHOW_GRID_TITLES] = show
         }
     }
 

@@ -259,7 +259,8 @@ fun PodcastEpisodeDetailView(
 
                     ContentSaveToListButton(
                         contentId = episode.id,
-                        isPodcast = false
+                        isPodcast = false,
+                        icon = true
                     )
                 }
             }

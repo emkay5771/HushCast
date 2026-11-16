@@ -16,23 +16,29 @@ fun SubscriptionCard(
     modifier: Modifier = Modifier,
     bundle: PodcastSubscriptionBundle,
     badgeMode: SubscriptionsBadgeMode = SubscriptionsBadgeMode.UNPLAYED_COUNT,
+    fillCell: Boolean = true,
+    showTitles: Boolean = true,
+    compact: Boolean = false,
     onClick: () -> Unit
 ) {
     PodcastCard(
         modifier = modifier,
         podcast = bundle.podcast,
+        fillCell = fillCell,
+        showTitles = showTitles,
+        compact = compact,
         badge = {
             if(bundle.subscription.newEpisodes > 0) {
                 when(badgeMode) {
                     SubscriptionsBadgeMode.UNPLAYED_COUNT -> Badge(
-                        Modifier.offset((-5).dp, 5.dp)
+                        Modifier.offset((-4).dp, 4.dp)
                     ) {
                         Text(
                             text = bundle.subscription.newEpisodes.toString()
                         )
                     }
                     SubscriptionsBadgeMode.LATEST_ONLY -> Badge(
-                        Modifier.offset((-6).dp, 6.dp)
+                        Modifier.offset((-5).dp, 5.dp)
                     )
                     SubscriptionsBadgeMode.OFF -> {}
                 }

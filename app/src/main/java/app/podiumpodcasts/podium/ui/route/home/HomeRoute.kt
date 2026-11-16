@@ -126,11 +126,12 @@ fun HomeRoute(
     val layout by settingsRepository.appearance.subscriptionsLayout.collectAsState(SubscriptionsLayout.LARGE_GRID)
     val sort by settingsRepository.appearance.subscriptionsSort.collectAsState(SubscriptionsSort.RECENTLY_ADDED)
     val badgeMode by settingsRepository.appearance.subscriptionsBadgeMode.collectAsState(SubscriptionsBadgeMode.UNPLAYED_COUNT)
+    val showGridTitles by settingsRepository.appearance.showGridTitles.collectAsState(true)
 
     var showOptionsSheet by remember { mutableStateOf(false) }
 
     val itemCount = subscriptionsPager.itemCount
-    val sortedSubscriptions = remember(itemCount, subscriptionsPager.itemSnapshotList.items, sort) {
+    val sortedSubscriptions = remember(itemCount, sort) {
         val list = subscriptionsPager.itemSnapshotList.items
         when(sort) {
             SubscriptionsSort.A_Z -> list.sortedBy { it.podcast.fetchTitle().lowercase() }
@@ -167,7 +168,7 @@ fun HomeRoute(
                 SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                     val options = listOf(
                         SubscriptionsLayout.LARGE_GRID to "Large Grid",
-                        SubscriptionsLayout.SMALL_GRID to "Small Grid",
+                        SubscriptionsLayout.SMALL_GRID to "Compact Grid",
                         SubscriptionsLayout.LIST to "List"
                     )
                     options.forEachIndexed { idx, (value, label) ->
@@ -211,6 +212,23 @@ fun HomeRoute(
                             onClick = { scope.launch { settingsRepository.appearance.setSubscriptionsBadgeMode(value) } },
                             shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
                         ) { Text(label) }
+                    }
+                }
+
+                if (layout == SubscriptionsLayout.LARGE_GRID) {
+                    Spacer(Modifier.height(16.dp))
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Text("Show titles in grid", style = Typography.bodyLarge)
+                        androidx.compose.material3.Switch(
+                            checked = showGridTitles,
+                            onCheckedChange = { enabled ->
+                                scope.launch { settingsRepository.appearance.setShowGridTitles(enabled) }
+                            }
+                        )
                     }
                 }
                 Spacer(Modifier.height(24.dp))
@@ -392,14 +410,16 @@ fun HomeRoute(
                             }
                         }
                     } else {
-                        val minCellSize = if(layout == SubscriptionsLayout.SMALL_GRID) 84.dp else 110.dp
+                        val isCompact = layout == SubscriptionsLayout.SMALL_GRID
+                        val columns = if (isCompact) GridCells.Fixed(4) else GridCells.Fixed(3)
+                        val gridSpacing = if (isCompact) 8.dp else 12.dp
                         LazyVerticalGrid(
                             modifier = Modifier.fillMaxSize(),
                             state = gridState,
-                            columns = GridCells.Adaptive(minCellSize),
+                            columns = columns,
                             contentPadding = PaddingValues(16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                            horizontalArrangement = Arrangement.spacedBy(gridSpacing),
+                            verticalArrangement = Arrangement.spacedBy(gridSpacing)
                         ) {
                             if(continuePlayingPager.itemCount > 0) {
                                 continuePlayingPager[0]?.let { item ->
@@ -436,6 +456,9 @@ fun HomeRoute(
                                 SubscriptionCard(
                                     bundle = bundle,
                                     badgeMode = badgeMode,
+                                    fillCell = true,
+                                    showTitles = showGridTitles,
+                                    compact = isCompact,
                                     onClick = { onClickPodcast(bundle.podcast.origin) }
                                 )
                             }

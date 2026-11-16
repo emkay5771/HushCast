@@ -375,14 +375,15 @@ class AutoMuteAnalyzer(
         parsedFeed: ParsedTranscript?,
         onWhisperProgress: ((Int) -> Unit)? = null
     ): Pair<List<Word>, List<Segment>> {
+        val vadModelStr = vadPath.takeIf { it.exists() }?.absolutePath
         if (parsedFeed == null || parsedFeed.segments.isEmpty() || !parsedFeed.hasWordLevelTimings) {
-            val out = transcriber.transcribe(pcm, onWhisperProgress)
+            val out = transcriber.transcribe(pcm, vadModelPath = vadModelStr, onProgress = onWhisperProgress)
             return out.words to out.segments
         }
 
         val dur = pcm.durationSeconds
         if (dur < 90.0) {
-            val out = transcriber.transcribe(pcm, onWhisperProgress)
+            val out = transcriber.transcribe(pcm, vadModelPath = vadModelStr, onProgress = onWhisperProgress)
             return out.words to out.segments
         }
 
@@ -405,8 +406,8 @@ class AutoMuteAnalyzer(
         }
 
         if (passed < 2) {
-            // DAI shifted timestamps or transcript mismatch -> full Whisper
-            val out = transcriber.transcribe(pcm, onWhisperProgress)
+            // DAI shifted timestamps or transcript mismatch -> full Whisper with VAD
+            val out = transcriber.transcribe(pcm, vadModelPath = vadModelStr, onProgress = onWhisperProgress)
             return out.words to out.segments
         }
 

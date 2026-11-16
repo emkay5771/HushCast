@@ -10,7 +10,7 @@ internal object WhisperJni {
     }
 
     @JvmStatic
-    external fun load(path: String, useDtw: Boolean): Long
+    external fun load(path: String, useDtw: Boolean, useFlashAttn: Boolean, isTiny: Boolean): Long
 
     @JvmStatic
     external fun transcribeRange(
@@ -21,6 +21,7 @@ internal object WhisperJni {
         threads: Int,
         language: String,
         beamSize: Int,
+        vadModelPath: String?,
         progressCallback: WhisperProgressCallback?
     ): Array<Any>
 

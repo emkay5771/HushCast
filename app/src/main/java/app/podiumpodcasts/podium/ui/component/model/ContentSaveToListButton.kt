@@ -20,7 +20,8 @@ import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 @Composable
 fun ContentSaveToListButton(
     contentId: String,
-    isPodcast: Boolean
+    isPodcast: Boolean,
+    icon: Boolean = false
 ) {
     val db = LocalDatabase.current
 
@@ -28,25 +29,39 @@ fun ContentSaveToListButton(
 
     val isSaved = db.listItems().exists(contentId).collectAsState(false)
 
-    TonalToggleButton(
-        checked = isSaved.value,
-        onCheckedChange = {
-            showBottomSheet.value = true
-        }
-    ) {
-        AnimatedContent(
-            targetState = isSaved.value
-        ) { isSaved ->
-            ButtonLabelWithIconInset(
-                icon = when(isSaved) {
-                    true -> Icons.Rounded.Bookmarks
-                    false -> Icons.Rounded.BookmarkBorder
-                },
-                label = when(isSaved) {
-                    true -> stringResource(R.string.common_saved)
-                    false -> stringResource(R.string.common_action_save)
-                }
+    if (icon) {
+        androidx.compose.material3.FilledTonalIconToggleButton(
+            checked = isSaved.value,
+            onCheckedChange = { showBottomSheet.value = true }
+        ) {
+            androidx.compose.material3.Icon(
+                imageVector = if (isSaved.value) Icons.Rounded.Bookmarks else Icons.Rounded.BookmarkBorder,
+                contentDescription = stringResource(
+                    if (isSaved.value) R.string.common_saved else R.string.common_action_save
+                )
             )
+        }
+    } else {
+        TonalToggleButton(
+            checked = isSaved.value,
+            onCheckedChange = {
+                showBottomSheet.value = true
+            }
+        ) {
+            AnimatedContent(
+                targetState = isSaved.value
+            ) { isSaved ->
+                ButtonLabelWithIconInset(
+                    icon = when(isSaved) {
+                        true -> Icons.Rounded.Bookmarks
+                        false -> Icons.Rounded.BookmarkBorder
+                    },
+                    label = when(isSaved) {
+                        true -> stringResource(R.string.common_saved)
+                        false -> stringResource(R.string.common_action_save)
+                    }
+                )
+            }
         }
     }
 

@@ -37,8 +37,8 @@ class Embedder(modelPath: String, threads: Int = defaultThreads()) : AutoCloseab
     }
 
     companion object {
-        const val MODEL_URL = "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-Q8_0.gguf"
-        const val MODEL_SHA256 = "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439"
+        const val MODEL_URL = "https://huggingface.co/dengcao/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-q4_k_m.gguf"
+        val MODEL_SHA256: String? = null
         const val MAX_CHARS = 2000
 
         fun input(text: String): String {
@@ -51,6 +51,6 @@ class Embedder(modelPath: String, threads: Int = defaultThreads()) : AutoCloseab
             return cut.ifEmpty { " " }
         }
 
-        fun defaultThreads() = max(1, min(4, Runtime.getRuntime().availableProcessors()))
+        fun defaultThreads() = CpuTopology.performanceCoreCount()
     }
 }

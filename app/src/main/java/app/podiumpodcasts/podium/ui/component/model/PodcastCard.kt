@@ -4,6 +4,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -18,7 +20,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.min
 import app.podiumpodcasts.podium.api.db.model.PodcastModel
 import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
 import app.podiumpodcasts.podium.ui.theme.Typography
@@ -28,6 +29,9 @@ import app.podiumpodcasts.podium.ui.theme.Typography
 fun PodcastCard(
     modifier: Modifier = Modifier,
     podcast: PodcastModel,
+    fillCell: Boolean = false,
+    showTitles: Boolean = true,
+    compact: Boolean = false,
     badge: @Composable () -> Unit = { },
     onClick: () -> Unit
 ) {
@@ -35,43 +39,52 @@ fun PodcastCard(
         modifier = modifier,
         contentAlignment = Alignment.Center
     ) {
-        Box {
+        Box(
+            modifier = if (fillCell) Modifier.fillMaxWidth() else Modifier
+        ) {
             Column(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .then(if (fillCell) Modifier.fillMaxWidth() else Modifier.width(112.dp))
+                    .clip(RoundedCornerShape(10.dp))
                     .clickable { onClick() }
-                    .padding(8.dp)
-                    .width(96.dp)
+                    .padding(if (compact) 2.dp else 4.dp)
             ) {
                 ShimmerAsyncImage(
-                    modifier = Modifier
-                        .size(96.dp)
-                        .clip(RoundedCornerShape(8.dp)),
-
+                    modifier = if (fillCell) {
+                        Modifier
+                            .fillMaxWidth()
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(if (compact) 8.dp else 10.dp))
+                    } else {
+                        Modifier
+                            .size(96.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                    },
                     model = podcast.imageUrl,
-                    contentDescription = null,
-
-                    contentScale = ContentScale.Crop
+                    contentDescription = podcast.fetchTitle(),
+                    contentScale = ContentScale.Crop,
+                    targetSizePx = if (compact) 192 else 256
                 )
 
-                Spacer(Modifier.height(8.dp))
+                if (showTitles && !compact) {
+                    Spacer(Modifier.height(6.dp))
 
-                Text(
-                    text = podcast.fetchTitle(),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    style = Typography.titleSmallEmphasized
-                )
+                    Text(
+                        text = podcast.fetchTitle(),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        style = Typography.titleSmallEmphasized
+                    )
 
-                Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(2.dp))
 
-                Text(
-                    text = podcast.author,
-                    minLines = 2,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    style = Typography.labelMedium
-                )
+                    Text(
+                        text = podcast.author,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = Typography.labelMedium
+                    )
+                }
             }
 
             Box(

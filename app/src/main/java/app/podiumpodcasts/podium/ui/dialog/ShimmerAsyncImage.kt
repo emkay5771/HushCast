@@ -26,10 +26,23 @@ fun ShimmerAsyncImage(
     alpha: Float = DefaultAlpha,
     colorFilter: ColorFilter? = null,
     filterQuality: FilterQuality = DefaultFilterQuality,
-    clipToBounds: Boolean = true
+    clipToBounds: Boolean = true,
+    targetSizePx: Int = 0
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val resolvedModel = androidx.compose.runtime.remember(model, targetSizePx) {
+        if (targetSizePx > 0 && model is String) {
+            coil3.request.ImageRequest.Builder(context)
+                .data(model)
+                .size(targetSizePx)
+                .precision(coil3.size.Precision.INEXACT)
+                .build()
+        } else {
+            model
+        }
+    }
     AsyncImage(
-        model = model,
+        model = resolvedModel,
         contentDescription = contentDescription,
         modifier = modifier
             .background(MaterialTheme.colorScheme.surface),
