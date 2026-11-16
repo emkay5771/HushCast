@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.WatchLater
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.RemoveDone
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.WatchLater
 import androidx.compose.material3.MaterialTheme
@@ -55,11 +56,12 @@ interface SwipeableItemActions {
     )
 
     class CheckAction(
+        isChecked: Boolean = false,
         onAction: suspend () -> SwipeableItemActionResult
     ) : SwipeableItemAction(
         style = {
             SwipeableItemActionStyle(
-                icon = Icons.Rounded.Check,
+                icon = if (isChecked) Icons.Rounded.RemoveDone else Icons.Rounded.Check,
                 backgroundColor = MaterialTheme.colorScheme.tertiaryContainer,
                 iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
                 activeBackgroundColor = MaterialTheme.colorScheme.tertiary,

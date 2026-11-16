@@ -20,6 +20,10 @@ interface PodcastEpisodeDownloadDao {
     suspend fun allPlayedByTimestamp(): List<PodcastEpisodeDownloadBundle>
 
     @Transaction
+    @Query("SELECT d.* FROM podcastEpisodeDownload d, podcastEpisodePlayState p WHERE d.episodeId = p.episodeId AND p.played AND p.lastUpdate < :maxPlayStateUpdateSec ORDER BY d.timestamp DESC")
+    suspend fun allPlayedOlderThan(maxPlayStateUpdateSec: Long): List<PodcastEpisodeDownloadBundle>
+
+    @Transaction
     @Query("SELECT * FROM podcastEpisodeDownload ORDER BY RANDOM()")
     suspend fun allRandomSync(): List<PodcastEpisodeDownloadBundle>
 

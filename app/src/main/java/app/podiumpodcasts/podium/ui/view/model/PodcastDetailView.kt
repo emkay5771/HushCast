@@ -788,6 +788,8 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                     )
                 ) {
                     val markedAsPlayed = stringResource(R.string.snackbar_marked_as_played)
+                    val markedAsUnplayed = stringResource(R.string.snackbar_marked_as_unplayed)
+                    val isCurrentlyPlayed = episodeBundle.playState?.played == true
 
                     SwipeableItem(
                         snackbarHostState = vm.snackbarHostState,
@@ -797,16 +799,29 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                             episodeId = episodeBundle.episode.id
                         ),
                         endAction = SwipeableItemActions.CheckAction(
+                            isChecked = isCurrentlyPlayed,
                             onAction = {
-                                vm.markAsPlayed(episodeBundle)
+                                if (isCurrentlyPlayed) {
+                                    vm.markAsUnplayed(episodeBundle)
 
-                                SwipeableItemActionResult(
-                                    isDismissed = false,
-                                    message = markedAsPlayed,
-                                    onUndo = {
-                                        vm.markAsUnplayed(episodeBundle)
-                                    }
-                                )
+                                    SwipeableItemActionResult(
+                                        isDismissed = false,
+                                        message = markedAsUnplayed,
+                                        onUndo = {
+                                            vm.markAsPlayed(episodeBundle)
+                                        }
+                                    )
+                                } else {
+                                    vm.markAsPlayed(episodeBundle)
+
+                                    SwipeableItemActionResult(
+                                        isDismissed = false,
+                                        message = markedAsPlayed,
+                                        onUndo = {
+                                            vm.markAsUnplayed(episodeBundle)
+                                        }
+                                    )
+                                }
                             }
                         ),
                         content = {

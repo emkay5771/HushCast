@@ -6,9 +6,9 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.DownloadForOffline
 import androidx.compose.material.icons.rounded.Downloading
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
@@ -36,13 +36,13 @@ private val stateMap = mapOf(
             to (Pair(Icons.Rounded.Download, R.string.common_action_download)),
 
     PodcastEpisodeDownloadState.NOT_DOWNLOADED.value
-            to (Pair(Icons.Rounded.DownloadForOffline, R.string.common_waiting)),
+            to (Pair(Icons.Rounded.Schedule, R.string.common_waiting)),
 
     PodcastEpisodeDownloadState.DOWNLOADING.value
             to (Pair(Icons.Rounded.Downloading, R.string.common_downloading)),
 
     PodcastEpisodeDownloadState.DOWNLOADED.value
-            to (Pair(Icons.Rounded.DownloadDone, R.string.common_downloaded))
+            to (Pair(Icons.Rounded.DownloadForOffline, R.string.common_downloaded))
 )
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

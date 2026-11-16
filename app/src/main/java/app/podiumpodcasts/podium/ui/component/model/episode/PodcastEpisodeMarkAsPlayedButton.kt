@@ -2,6 +2,7 @@ package app.podiumpodcasts.podium.ui.component.model.episode
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconToggleButton
 import androidx.compose.material3.Icon
@@ -74,7 +75,7 @@ fun PodcastEpisodeMarkAsPlayedButton(
         colors = colors
     ) {
         Icon(
-            imageVector = Icons.Rounded.Check,
+            imageVector = if (playState?.played == true) Icons.Rounded.DoneAll else Icons.Rounded.Check,
             contentDescription = stringResource(R.string.common_action_mark_as_played)
         )
     }

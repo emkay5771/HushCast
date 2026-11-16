@@ -1,3 +1,15 @@
+# HushCast v0.1.21-hushcast
+
+## What's New
+- **Distinct Listened vs Downloaded Icons**:
+  - Updated [`PodcastEpisodeDownloadButton`](app/src/main/java/app/podiumpodcasts/podium/ui/component/model/episode/PodcastEpisodeDownloadButton.kt) to use `DownloadForOffline` (circle with down arrow) for downloaded episodes and `Schedule` for queued downloads, and updated [`PodcastEpisodeMarkAsPlayedButton`](app/src/main/java/app/podiumpodcasts/podium/ui/component/model/episode/PodcastEpisodeMarkAsPlayedButton.kt) to show `DoneAll` when played, eliminating the visual overlap between `Check` and `DownloadDone`.
+- **Swipe-to-Toggle Played / Unplayed**:
+  - Swiping an already-played episode a second time in [`PodcastDetailView`](app/src/main/java/app/podiumpodcasts/podium/ui/view/model/PodcastDetailView.kt) now marks it as unplayed again (with a `RemoveDone` swipe icon and **Undo** snackbar).
+- **24-Hour Cache Lag Before Deleting Played Downloads**:
+  - [`DeletePlayedDownloadsWork`](app/src/main/java/app/podiumpodcasts/podium/background/work/DeletePlayedDownloadsWork.kt) now waits **24 hours** after an episode is marked played (`p.lastUpdate`) before removing its cached audio, protecting desktop-analyzed and recently finished episodes from immediate deletion.
+
+---
+
 # HushCast v0.1.20-hushcast
 
 ## What's New

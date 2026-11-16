@@ -211,7 +211,7 @@
     <string name="route_settings_downloads_and_storage_delete_downloads_after_value_three_days">Three days</string>
     <string name="route_settings_downloads_and_storage_delete_downloads_after_value_week">A week</string>
     <string name="route_settings_downloads_and_storage_delete_played_downloads">Delete downloads which are marked as » played «</string>
-    <string name="route_settings_downloads_and_storage_delete_played_downloads_description">Automatically delete downloads after playing them to save storage</string>
+    <string name="route_settings_downloads_and_storage_delete_played_downloads_description">Automatically delete downloads 24 hours after marking them as played to save storage</string>
     <string name="route_settings_downloads_and_storage_include_automatic_downloads">Include automatic downloads</string>
     <string name="route_settings_downloads_and_storage_include_automatic_downloads_description">By default, the settings above only apply for manual downloads. Automatic downloads will be processed on WiFi if disabled</string>
     <string name="route_settings_import_export">Import &amp; Export</string>
@@ -240,6 +240,7 @@
     <string name="snackbar_added_to_hear_later">Added to » Hear later «</string>
     <string name="snackbar_element_deleted">Element deleted</string>
     <string name="snackbar_marked_as_played">Marked as played</string>
+    <string name="snackbar_marked_as_unplayed">Marked as unplayed</string>
     <string name="snackbar_marked_as_seen">Marked as seen</string>
     <string name="snackbar_removed_from_hear_later">Removed from » Hear later «</string>
     <string name="snackbar_reset_progress">Reset progress</string>

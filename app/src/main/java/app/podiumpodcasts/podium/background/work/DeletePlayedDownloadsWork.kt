@@ -12,9 +12,16 @@ class DeletePlayedDownloadsWork(
     val settingsRepository: SettingsRepository = SettingsRepository(context)
 ) {
 
+    companion object {
+        // Keep played episodes in cache for 24 hours before auto-deleting,
+        // so desktop-analyzed or recently finished episodes aren't wiped immediately.
+        const val PLAYED_DELETE_LAG_SECONDS = 24 * 60 * 60L
+    }
+
     suspend fun doWork(): Boolean {
         if(settingsRepository.behavior.deletePlayedDownloads.first()) {
-            val bundles = db.podcastEpisodeDownloads().allPlayedByTimestamp()
+            val cutoffSec = (System.currentTimeMillis() / 1000L) - PLAYED_DELETE_LAG_SECONDS
+            val bundles = db.podcastEpisodeDownloads().allPlayedOlderThan(cutoffSec)
 
             for(bundle in bundles) {
                 if(!bundle.playState.played) continue
