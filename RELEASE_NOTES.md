@@ -1,44 +1,14 @@
-## What's New in v0.1.5-hushcast
+# HushCast `v0.1.8-hushcast`
 
-### 🐛 Critical Crash Fixes
-- **Fixed Stream-to-Download & Background Analysis Crash**: Resolved an `IllegalStateException` (`Player callback method is called from a wrong thread`) in `PlaybackService` when a download completed during playback or active AI analysis by dispatching player mutations onto `Dispatchers.Main`.
+### Performance & On-Device Analysis
+- **ARM64 NEON Resampler & C++ FFT**: Moved audio resampling (`Resampler`) and spectral analysis (`Fft`) into native C++ (`-O2` + NEON `vfmaq_f32`), eliminating the 5%–25% `AudioDecoder` bottleneck on long episodes.
+- **Faster Whisper & Smaller Models**: Disabled multi-temperature fallback retries (`temperature_inc = 0`), enabled built-in Silero VAD silence/music skipping during full transcription, switched to quantized `base.en q5_1` (58 MB) and `Qwen3-Embedding Q4_K_M` (395 MB) with `n_ctx = 2048`, and added big-core CPU thread selection + thermal status monitoring.
+- **Performance & Battery Settings**: Added **Fast transcription model (`tiny.en`, 32 MB)**, **Fast timing mode (Flash Attention)**, and **Analyze only while charging** under **Settings → HushCast AI**.
+- **Analysis Queue Control & Diagnostics**: Added a **Cancel** button on the analysis notification, a **Cancel Analysis Queue** button, and **Export HushCast Logs** (lightweight logcat + status export without needing a full Android bug report).
+- **Faster Model Downloads**: Buffered 1 MB output + 256 KB reads in `Downloads.kt`.
 
-### ⚡ Performance & APK Size (**190 MB → 72 MB**)
-- **62% Smaller APK**: Filtered native packaging to `arm64-v8a` (removing 55 MB of unused `x86`/`x86_64`/`armeabi-v7a` binaries) and enabled `--gc-sections` + `--strip-debug` for `libhushcast_llama.so` (52 MB → 5.0 MB) and `libhushcast_whisper.so` (15 MB → 1.4 MB).
-- **Faster Audio Decoding & Feature Extraction**:
-  - Vectorized `Resampler` inner loop in `Float` and reused scratch buffers to eliminate ~300k+ per-frame allocations per hour.
-  - Cascaded 24 kHz → 16 kHz resampling for Whisper and moved `FrameExtractor` (FFTs, cepstrum, K-weighting) to a concurrent worker thread.
-  - Smooth `70% → 89%` progress updates during Qwen3 sentence embedding.
-
-### 🎙️ Pocket Casts-Style Home, Playlists & Settings
-- **Home Podcasts Grid**: Replaced the single-row home carousel with a full Pocket Casts-style Podcasts Grid (**Large Grid**, **Small Grid**, **List**), **Recently Added** / **A–Z** sorting, **Count** / **Dot** / **Off** badges, a **Tune** options sheet, and a compact **Continue Playing** card at the top.
-- **Play All & Add All to Up Next**: Added **Play All** and **Add All to Up Next** actions in the top bar of **Playlists**, **New Episodes**, **Downloads**, and **Continue Playing**.
-- **Global Default Playback Speed & Storage Cleanup**: Added **Default playback speed** (`0.5x–3.0x`) in **Settings → Playback** and **Clean up downloaded episodes** in **Settings → Downloads & Storage**.
-
----
-
-## What's New in v0.1.4-hushcast
-
-### 🎙️ Pocket Casts-Inspired UX (Material 3 Expressive)
-- **Subscriptions Options**: Toggle between **Large Grid**, **Small Grid**, and **List** layouts, sort by **New Episodes** or **A–Z**, and choose unplayed badges (**Count**, **Dot**, or **Off**).
-- **Up Next Queue Management**:
-  - **Play Next** and **Play Last** dropdown on episode queue buttons and episode detail pages.
-  - **Tap Up Next to play** (on by default, configurable in **Settings → Playback**) plays the tapped episode immediately and shifts the previous episode to the top of Up Next.
-  - Visible drag handles, **Move to Top**, swipe-to-remove, **Clear Up Next** confirmation, and a direct **Up Next** button + swipe-up gesture on the mini-player.
-- **Listing & Episode Details**:
-  - Quick filter chips (**Unplayed**, **Downloaded**, **In Progress**), duration/remaining-time overlines, played dimming, and inline progress bars.
-  - Long-press multi-select mode for bulk **Play Next**, **Play Last**, **Mark Played**, and **Select All**.
-  - Per-podcast **Auto add to Up Next** (*Off*, *Play Next*, *Play Last*) and **Playback speed** (*Global*, *0.8x–2.0x*) in Podcast Settings.
-- **Full Player Enhancements**: Clickable podcast title to jump to the show, swipe-up to open Up Next, modal **Synced Transcript** sheet, and a **Player Actions** (*More*) sheet.
-
-### ⚡ Playback, OPML Import & Analysis Fixes
-- **Seamless Stream-to-Download Swap**: When a streaming episode finishes downloading, playback swaps to the local file at the exact playback position without interruption.
-- **OPML Import Fix**: Recursively flattens nested `<outline>` folders (such as Pocket Casts' `<outline text="feeds">`), pre-selects new feeds with **Select all / Deselect all**, shows import progress, and tolerates individual dead feeds.
-- **HushCast AI Analysis Feedback & Speed**:
-  - Tapping **Analyze now** on a non-downloaded episode now prompts you to **Download** it instead of failing silently.
-  - Synced Room status updates with the Live Activity notification so the player badge no longer stalls at 5%.
-  - Optimized `AudioDecoder` with bulk buffer reads and smooth 15%→34% decoding progress.
-
-### First-Time Setup
-1. Download the `HushCast-*.apk` on your Android phone (`arm64-v8a`, Android 8.0+ / API 26+) and install it.
-2. Open **Settings → HushCast** to download the on-device AI models over Wi-Fi.
+### Pocket Casts UX & Grid Enhancements
+- **Podcast Folders & Drag-and-Drop Sort**: Create folders (2×2 mini-grid cards), open/manage folders, and long-press drag-and-drop to reorder podcasts and folders in the Home grid.
+- **Compact Grid & Grid Titles Toggle**: Added 4-column **Compact Grid**, fixed **Sort by New Episodes** (sorts by latest episode `pubDate`), downsampled grid cover art for smooth scrolling, and added a **Show titles in grid** toggle.
+- **Playlists & New Episodes**: Converted Playlists/Filters to a Pocket Casts-style vertical list and fixed **New Episodes** to show unplayed episodes from subscribed podcasts.
+- **Narrow Bottom Bar & Episode Detail**: Switched to a compact bottom navigation bar with tighter mini-player spacing and fixed the squished **Save** button on Episode Detail.

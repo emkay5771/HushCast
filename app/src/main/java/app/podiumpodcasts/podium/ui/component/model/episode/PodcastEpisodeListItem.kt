@@ -172,13 +172,14 @@ fun PodcastEpisodeListItem(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     horizontalAlignment = Alignment.End
                 ) {
-                    AsyncImage(
+                    app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage(
                         modifier = Modifier
                             .size(48.dp)
                             .clip(RoundedCornerShape(14.dp)),
                         model = bundle.episode.imageUrl,
                         contentScale = ContentScale.Crop,
-                        contentDescription = stringResource(R.string.common_cover_image)
+                        contentDescription = stringResource(R.string.common_cover_image),
+                        targetSizePx = 128
                     )
 
                     trailingContent()

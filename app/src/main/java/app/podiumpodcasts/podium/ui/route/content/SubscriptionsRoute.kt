@@ -87,7 +87,7 @@ fun SubscriptionsRoute(
         val list = subscriptions.itemSnapshotList.items
         when(sort) {
             SubscriptionsSort.A_Z -> list.sortedBy { it.podcast.fetchTitle().lowercase() }
-            SubscriptionsSort.RECENTLY_ADDED -> list
+            SubscriptionsSort.RECENTLY_ADDED, SubscriptionsSort.CUSTOM -> list
         }
     }
 

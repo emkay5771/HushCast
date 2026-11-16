@@ -508,8 +508,9 @@ fun SettingsHushCastPane(
                 }
             }
 
-            // 5. On-Device Diagnostics Card (Replaces standalone Phase 0 app)
+            // 5. On-Device Diagnostics Card
             item {
+                var queueClearedMsg by remember { mutableStateOf<String?>(null) }
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
@@ -526,6 +527,46 @@ fun SettingsHushCastPane(
                                 "Models Stored: $downloadedMb MB • Sequential Unload: Enabled",
                             style = MaterialTheme.typography.bodySmall
                         )
+                        queueClearedMsg?.let { msg ->
+                            Spacer(Modifier.height(6.dp))
+                            Text(msg, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = {
+                                app.hushcast.automute.worker.EpisodeAnalysisWorker.cancelAll(context)
+                                queueClearedMsg = "Analysis queue cancelled."
+                            }) {
+                                Text("Cancel Queue")
+                            }
+                            OutlinedButton(onClick = {
+                                scope.launch {
+                                    val logText = withContext(Dispatchers.IO) {
+                                        val header = buildString {
+                                            appendLine("HushCast Diagnostics")
+                                            appendLine("Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE}, API ${android.os.Build.VERSION.SDK_INT})")
+                                            appendLine("Perf Cores: ${app.hushcast.automute.engine.CpuTopology.performanceCoreCount()} • Thermal: ${app.hushcast.automute.engine.CpuTopology.thermalStatusLabel(context)}")
+                                            appendLine("PSS: $currentPssMb MB • Models: $downloadedMb MB")
+                                            appendLine("Fast Model: ${app.hushcast.automute.engine.HushCastPrefs.isFastModelEnabled(context)} • Flash Attn: ${app.hushcast.automute.engine.HushCastPrefs.isFastAttentionEnabled(context)} • Charging Only: ${app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context)}")
+                                            appendLine("--- Recent Logcat ---")
+                                        }
+                                        val logcat = runCatching {
+                                            val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "800"))
+                                            proc.inputStream.bufferedReader().use { it.readText() }
+                                        }.getOrElse { "logcat failed: ${it.message}" }
+                                        (header + logcat).takeLast(90_000)
+                                    }
+                                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(android.content.Intent.EXTRA_SUBJECT, "HushCast Diagnostic Logs")
+                                        putExtra(android.content.Intent.EXTRA_TEXT, logText)
+                                    }
+                                    context.startActivity(android.content.Intent.createChooser(intent, "Export HushCast Logs"))
+                                }
+                            }) {
+                                Text("Export Logs")
+                            }
+                        }
                     }
                 }
             }

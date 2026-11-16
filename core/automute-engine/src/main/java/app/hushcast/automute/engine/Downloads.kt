@@ -1,5 +1,6 @@
 package app.hushcast.automute.engine
 
+import java.io.BufferedOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
@@ -11,32 +12,43 @@ object Downloads {
         if (dest.exists()) return dest
         dest.parentFile?.mkdirs()
         val part = File(dest.path + ".part")
-        val md = MessageDigest.getInstance("SHA-256")
-        var conn = URL(url).openConnection() as HttpURLConnection
-        conn.instanceFollowRedirects = true
+        val md = if (sha256 != null) MessageDigest.getInstance("SHA-256") else null
+        var currentUrl = url
+        var conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+            instanceFollowRedirects = true
+            connectTimeout = 15_000
+            readTimeout = 30_000
+        }
         // Hugging Face redirects to a CDN on another host, which HttpURLConnection won't follow on its own
         var hops = 0
         while (conn.responseCode in 300..399 && hops++ < 5) {
-            val next = URL(URL(url), conn.getHeaderField("Location"))
+            val loc = conn.getHeaderField("Location") ?: break
+            val next = URL(URL(currentUrl), loc)
             conn.disconnect()
-            conn = next.openConnection() as HttpURLConnection
+            currentUrl = next.toString()
+            conn = (next.openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = true
+                connectTimeout = 15_000
+                readTimeout = 30_000
+            }
         }
         val total = conn.contentLengthLong
         conn.inputStream.use { input ->
-            part.outputStream().use { output ->
-                val buf = ByteArray(1 shl 16)
+            BufferedOutputStream(part.outputStream(), 1 shl 20).use { output ->
+                val buf = ByteArray(1 shl 18) // 256 KB
                 var done = 0L
                 while (true) {
                     val n = input.read(buf)
                     if (n < 0) break
-                    output.write(buf, 0, n); md.update(buf, 0, n)
+                    output.write(buf, 0, n)
+                    md?.update(buf, 0, n)
                     done += n
                     progress(done, total)
                 }
             }
         }
         conn.disconnect()
-        if (sha256 != null) {
+        if (sha256 != null && md != null) {
             val got = md.digest().joinToString("") { "%02x".format(it) }
             if (!got.equals(sha256, ignoreCase = true)) {
                 part.delete()

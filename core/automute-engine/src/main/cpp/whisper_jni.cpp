@@ -241,3 +241,262 @@ extern "C" JNIEXPORT void JNICALL
 Java_app_hushcast_automute_nativebridge_WhisperJni_free(JNIEnv *, jclass, jlong h) {
     whisper_free(reinterpret_cast<whisper_context *>(h));
 }
+
+// ---------- Native NEON Polyphase Resampler ----------
+#if defined(__aarch64__) || defined(_M_ARM64)
+#include <arm_neon.h>
+#define HUSHCAST_USE_NEON 1
+#endif
+
+namespace {
+
+static int gcd_int(int a, int b) {
+    while (b != 0) { int t = a % b; a = b; b = t; }
+    return a;
+}
+
+static double bessel_i0(double x) {
+    double sum = 1.0, term = 1.0;
+    int k = 1;
+    while (term > 1e-12 * sum) {
+        double r = x / (2.0 * k);
+        term *= r * r;
+        sum += term;
+        k++;
+    }
+    return sum;
+}
+
+struct NativeResampler {
+    int in_rate;
+    int out_rate;
+    bool passthrough;
+    double fc;
+    int half;
+    int taps;
+    int g;
+    int phases;
+    double i0b;
+    std::vector<std::vector<float>> bank;
+    std::vector<float> hist;
+    int64_t hist_base = 0;
+    int64_t next_out = 0;
+    std::vector<float> out_buf;
+
+    double kernel(double d) const {
+        if (std::abs(d) >= half) return 0.0;
+        const double x = 2.0 * fc * d;
+        const double sinc = (x == 0.0) ? 1.0 : std::sin(M_PI * x) / (M_PI * x);
+        const double r = d / half;
+        return 2.0 * fc * sinc * bessel_i0(9.0 * std::sqrt(std::max(0.0, 1.0 - r * r))) / i0b;
+    }
+
+    NativeResampler(int inR, int outR)
+        : in_rate(inR), out_rate(outR), passthrough(inR == outR) {
+        fc = 0.97 * std::min(in_rate, out_rate) / (2.0 * in_rate);
+        half = (int) std::ceil(16.0 / (2.0 * fc));
+        taps = 2 * half;
+        g = gcd_int(in_rate, out_rate);
+        phases = out_rate / g;
+        i0b = bessel_i0(9.0);
+        if (!passthrough && phases <= 4096) {
+            bank.resize((size_t) phases);
+            for (int p = 0; p < phases; p++) {
+                double frac = (double) p * g / out_rate;
+                bank[p].resize((size_t) taps);
+                for (int j = 0; j < taps; j++) {
+                    bank[p][j] = (float) kernel(j - half + 1 - frac);
+                }
+            }
+        }
+        hist.reserve(1 << 16);
+        out_buf.reserve(1 << 14);
+    }
+
+    void produce(int64_t last_input) {
+        out_buf.clear();
+        const float * hptr = hist.data();
+        const int64_t hist_len = (int64_t) hist.size();
+        const bool have_bank = !bank.empty();
+        while (true) {
+            const int64_t num = next_out * in_rate;
+            const int64_t center = num / out_rate;
+            if (center >= last_input) break;
+            if (center + half >= hist_base + hist_len) break;
+            const int64_t rem = num % out_rate;
+            const int base = (int) (center - half + 1 - hist_base);
+            const int j0 = (base < 0) ? -base : 0;
+            if (have_bank) {
+                const float * b = bank[(size_t) (rem / g)].data();
+                const float * x = hptr + base;
+                int j = j0;
+                float acc = 0.0f;
+#ifdef HUSHCAST_USE_NEON
+                float32x4_t vsum = vdupq_n_f32(0.0f);
+                for (; j + 4 <= taps; j += 4) {
+                    float32x4_t vx = vld1q_f32(x + j);
+                    float32x4_t vb = vld1q_f32(b + j);
+                    vsum = vfmaq_f32(vsum, vx, vb);
+                }
+                acc = vaddvq_f32(vsum);
+#endif
+                for (; j < taps; j++) {
+                    acc += x[j] * b[j];
+                }
+                out_buf.push_back(acc);
+            } else {
+                double acc = 0.0;
+                const double frac = (double) rem / out_rate;
+                for (int j = j0; j < taps; j++) {
+                    acc += (double) hptr[base + j] * kernel(j - half + 1 - frac);
+                }
+                out_buf.push_back((float) acc);
+            }
+            next_out++;
+        }
+        const int64_t keep_from = (next_out * in_rate) / out_rate - half - 1;
+        const int64_t drop = keep_from - hist_base;
+        if (drop > 0 && drop < (int64_t) hist.size()) {
+            const size_t rem_len = hist.size() - (size_t) drop;
+            std::memmove(hist.data(), hist.data() + drop, rem_len * sizeof(float));
+            hist.resize(rem_len);
+            hist_base += drop;
+        }
+    }
+};
+
+struct NativeFft {
+    int n;
+    std::vector<double> cos_t;
+    std::vector<double> sin_t;
+    std::vector<int> rev;
+
+    explicit NativeFft(int size) : n(size) {
+        int bits = 0;
+        while ((1 << bits) < n) bits++;
+        cos_t.resize((size_t) n / 2);
+        sin_t.resize((size_t) n / 2);
+        for (int i = 0; i < n / 2; i++) {
+            double ang = 2.0 * M_PI * i / n;
+            cos_t[i] = std::cos(ang);
+            sin_t[i] = std::sin(ang);
+        }
+        rev.resize((size_t) n);
+        for (int i = 0; i < n; i++) {
+            int r = 0, v = i;
+            for (int b = 0; b < bits; b++) {
+                r = (r << 1) | (v & 1);
+                v >>= 1;
+            }
+            rev[i] = r;
+        }
+    }
+
+    void transform(double * re, double * im, bool inverse) const {
+        for (int i = 0; i < n; i++) {
+            const int j = rev[i];
+            if (j > i) {
+                std::swap(re[i], re[j]);
+                std::swap(im[i], im[j]);
+            }
+        }
+        const double sgn = inverse ? 1.0 : -1.0;
+        for (int size = 2; size <= n; size <<= 1) {
+            const int half = size >> 1;
+            const int step = n / size;
+            for (int start = 0; start < n; start += size) {
+                int k = 0;
+                for (int j = start; j < start + half; j++) {
+                    const int l = j + half;
+                    const double c = cos_t[k];
+                    const double s = sgn * sin_t[k];
+                    const double tr = re[l] * c - im[l] * s;
+                    const double ti = re[l] * s + im[l] * c;
+                    re[l] = re[j] - tr;
+                    im[l] = im[j] - ti;
+                    re[j] += tr;
+                    im[j] += ti;
+                    k += step;
+                }
+            }
+        }
+    }
+};
+
+}  // namespace
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_resamplerNew(JNIEnv *, jclass, jint inRate, jint outRate) {
+    return reinterpret_cast<jlong>(new NativeResampler(inRate, outRate));
+}
+
+extern "C" JNIEXPORT jfloatArray JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_resamplerProcess(
+        JNIEnv * env, jclass, jlong h, jfloatArray jinput, jint offset, jint count) {
+    auto * r = reinterpret_cast<NativeResampler *>(h);
+    if (r->passthrough) {
+        jfloatArray out = env->NewFloatArray(count);
+        if (count > 0) {
+            r->out_buf.resize((size_t) count);
+            env->GetFloatArrayRegion(jinput, offset, count, r->out_buf.data());
+            env->SetFloatArrayRegion(out, 0, count, r->out_buf.data());
+        }
+        return out;
+    }
+    const size_t old_sz = r->hist.size();
+    r->hist.resize(old_sz + (size_t) count);
+    if (count > 0) {
+        env->GetFloatArrayRegion(jinput, offset, count, r->hist.data() + old_sz);
+    }
+    r->produce(INT64_MAX);
+    const jsize n_out = (jsize) r->out_buf.size();
+    jfloatArray out = env->NewFloatArray(n_out);
+    if (n_out > 0) {
+        env->SetFloatArrayRegion(out, 0, n_out, r->out_buf.data());
+    }
+    return out;
+}
+
+extern "C" JNIEXPORT jfloatArray JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_resamplerFinish(JNIEnv * env, jclass, jlong h) {
+    auto * r = reinterpret_cast<NativeResampler *>(h);
+    if (r->passthrough) return env->NewFloatArray(0);
+    const int64_t end = r->hist_base + (int64_t) r->hist.size();
+    const size_t pad = (size_t) (r->half + 1);
+    r->hist.resize(r->hist.size() + pad, 0.0f);
+    r->produce(end);
+    const jsize n_out = (jsize) r->out_buf.size();
+    jfloatArray out = env->NewFloatArray(n_out);
+    if (n_out > 0) {
+        env->SetFloatArrayRegion(out, 0, n_out, r->out_buf.data());
+    }
+    return out;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_resamplerFree(JNIEnv *, jclass, jlong h) {
+    delete reinterpret_cast<NativeResampler *>(h);
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_fftNew(JNIEnv *, jclass, jint n) {
+    return reinterpret_cast<jlong>(new NativeFft(n));
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_fftTransform(
+        JNIEnv * env, jclass, jlong h, jdoubleArray jre, jdoubleArray jim, jboolean inverse) {
+    auto * f = reinterpret_cast<NativeFft *>(h);
+    jdouble * re = (jdouble *) env->GetPrimitiveArrayCritical(jre, nullptr);
+    jdouble * im = (jdouble *) env->GetPrimitiveArrayCritical(jim, nullptr);
+    if (re && im) {
+        f->transform(re, im, inverse);
+    }
+    if (im) env->ReleasePrimitiveArrayCritical(jim, im, 0);
+    if (re) env->ReleasePrimitiveArrayCritical(jre, re, 0);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_fftFree(JNIEnv *, jclass, jlong h) {
+    delete reinterpret_cast<NativeFft *>(h);
+}

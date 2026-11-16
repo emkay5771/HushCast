@@ -1,21 +1,27 @@
 package app.hushcast.automute.engine
 
+import app.hushcast.automute.nativebridge.WhisperJni
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
 /** In-place radix-2 complex FFT of a fixed power-of-two size.  Forward is e^(-2*pi*i*k*t/n), unscaled. */
-internal class Fft(private val n: Int) {
+internal class Fft(private val n: Int) : AutoCloseable {
+    private var nativeHandle: Long = if (WhisperJni.isAvailable) WhisperJni.fftNew(n) else 0L
     private val bits = Integer.numberOfTrailingZeros(n)
-    private val cosT = DoubleArray(n / 2) { cos(2.0 * PI * it / n) }
-    private val sinT = DoubleArray(n / 2) { sin(2.0 * PI * it / n) }
-    private val rev = IntArray(n) { Integer.reverse(it) ushr (32 - bits) }
+    private val cosT = if (nativeHandle == 0L) DoubleArray(n / 2) { cos(2.0 * PI * it / n) } else DoubleArray(0)
+    private val sinT = if (nativeHandle == 0L) DoubleArray(n / 2) { sin(2.0 * PI * it / n) } else DoubleArray(0)
+    private val rev = if (nativeHandle == 0L) IntArray(n) { Integer.reverse(it) ushr (32 - bits) } else IntArray(0)
 
     init {
         require(n >= 2 && n and (n - 1) == 0) { "size must be a power of two" }
     }
 
     fun transform(re: DoubleArray, im: DoubleArray, inverse: Boolean) {
+        if (nativeHandle != 0L) {
+            WhisperJni.fftTransform(nativeHandle, re, im, inverse)
+            return
+        }
         for (i in 0 until n) {
             val j = rev[i]
             if (j > i) {
@@ -43,6 +49,13 @@ internal class Fft(private val n: Int) {
                 start += size
             }
             size *= 2
+        }
+    }
+
+    override fun close() {
+        if (nativeHandle != 0L) {
+            WhisperJni.fftFree(nativeHandle)
+            nativeHandle = 0L
         }
     }
 }

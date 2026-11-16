@@ -199,6 +199,9 @@ object AudioDecoder {
             }
         } finally {
             frameThread?.interrupt()
+            toFrames?.close()
+            toFramesSide?.close()
+            toWhisper?.close()
             codec.stop(); codec.release(); ex.release()
         }
         return Info(rate, channels, duration)

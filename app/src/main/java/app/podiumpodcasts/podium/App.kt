@@ -42,8 +42,20 @@ class App : Application(), SingletonImageLoader.Factory {
 
     override fun newImageLoader(context: Context): ImageLoader {
         return ImageLoader.Builder(context)
-            .logger(DebugLogger())
-            .crossfade(true)
+            .memoryCache {
+                coil3.memory.MemoryCache.Builder()
+                    .maxSizePercent(context, 0.25)
+                    .build()
+            }
+            .diskCache {
+                coil3.disk.DiskCache.Builder()
+                    .directory(okio.Path.Companion.run {
+                        java.io.File(context.noBackupFilesDir, "artwork_cache").apply { mkdirs() }.absolutePath.toPath()
+                    })
+                    .maxSizeBytes(150L * 1024 * 1024)
+                    .build()
+            }
+            .crossfade(false)
             .build()
     }
 }

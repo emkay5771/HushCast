@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
@@ -184,34 +185,9 @@ fun Main(
         },
         currentNavKey = { backStack.last() }
     ) {
-        Scaffold(
-            floatingActionButton = {
-                FloatingMediaPlayer(
-                    hide = vm.hideFloatingMediaPlayer.value || navigationScaffoldState.isAnimating,
-                    showMediaPlayerBottomSheet = vm.showMediaPlayerBottomSheet.value,
-                    onMediaPlayerShownChange = {
-                        floatingMediaPlayerShown.value = it
-
-                        scope.launch {
-                            floatingMediaPlayerHeightAnimation.animateTo(
-                                if(it)
-                                    1f
-                                else
-                                    0f
-                            )
-                        }
-                    },
-                    onOpenQueue = {
-                        showQueueBottomSheet.value = true
-                    },
-                    onClick = {
-                        vm.showMediaPlayerBottomSheet.value = true
-                    }
-                )
-            }
-        ) {
+        androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
             CompositionLocalProvider(
-                LocalFloatingMediaPlayerHeight provides (FloatingMediaPlayerHeight + 16.dp)
+                LocalFloatingMediaPlayerHeight provides (FloatingMediaPlayerHeight + 8.dp)
                         * floatingMediaPlayerHeightAnimation.value,
                 LocalFloatingMediaPlayerShown provides floatingMediaPlayerShown.value
             ) {
@@ -302,6 +278,32 @@ fun Main(
                             ),
                             interactionSource = interactionSource
                         )
+                    }
+                )
+            }
+
+            androidx.compose.foundation.layout.Box(
+                modifier = Modifier
+                    .align(androidx.compose.ui.Alignment.BottomEnd)
+                    .padding(bottom = 8.dp, end = 16.dp)
+            ) {
+                FloatingMediaPlayer(
+                    hide = vm.hideFloatingMediaPlayer.value || navigationScaffoldState.isAnimating,
+                    showMediaPlayerBottomSheet = vm.showMediaPlayerBottomSheet.value,
+                    onMediaPlayerShownChange = {
+                        floatingMediaPlayerShown.value = it
+
+                        scope.launch {
+                            floatingMediaPlayerHeightAnimation.animateTo(
+                                if (it) 1f else 0f
+                            )
+                        }
+                    },
+                    onOpenQueue = {
+                        showQueueBottomSheet.value = true
+                    },
+                    onClick = {
+                        vm.showMediaPlayerBottomSheet.value = true
                     }
                 )
             }

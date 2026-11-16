@@ -5,8 +5,11 @@ internal fun interface WhisperProgressCallback {
 }
 
 internal object WhisperJni {
-    init {
+    val isAvailable: Boolean = try {
         System.loadLibrary("hushcast_whisper")
+        true
+    } catch (_: UnsatisfiedLinkError) {
+        false
     }
 
     @JvmStatic
@@ -48,6 +51,27 @@ internal object WhisperJni {
 
     @JvmStatic
     external fun pcmFree(pcm: Long)
+
+    @JvmStatic
+    external fun resamplerNew(inRate: Int, outRate: Int): Long
+
+    @JvmStatic
+    external fun resamplerProcess(handle: Long, input: FloatArray, offset: Int, count: Int): FloatArray
+
+    @JvmStatic
+    external fun resamplerFinish(handle: Long): FloatArray
+
+    @JvmStatic
+    external fun resamplerFree(handle: Long)
+
+    @JvmStatic
+    external fun fftNew(n: Int): Long
+
+    @JvmStatic
+    external fun fftTransform(handle: Long, re: DoubleArray, im: DoubleArray, inverse: Boolean)
+
+    @JvmStatic
+    external fun fftFree(handle: Long)
 }
 
 internal object LlamaJni {

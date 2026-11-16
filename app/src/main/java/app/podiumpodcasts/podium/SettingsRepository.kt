@@ -31,7 +31,8 @@ enum class SubscriptionsLayout {
 
 enum class SubscriptionsSort {
     A_Z,
-    RECENTLY_ADDED
+    RECENTLY_ADDED,
+    CUSTOM
 }
 
 enum class SubscriptionsBadgeMode {

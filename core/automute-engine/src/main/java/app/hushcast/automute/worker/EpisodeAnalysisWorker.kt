@@ -42,14 +42,26 @@ class EpisodeAnalysisWorker(
             MuteActionMode.valueOf(inputData.getString(KEY_ACTION_MODE) ?: MuteActionMode.HARD_SILENCE.name)
         }.getOrDefault(MuteActionMode.HARD_SILENCE)
 
+        val db = AutoMuteDatabase.getInstance(applicationContext)
         val audioFile = File(audioPath)
-        if (!audioFile.exists()) return Result.failure()
+        if (!audioFile.exists()) {
+            db.dao().upsertStatus(
+                EpisodeAnalysisStatusEntity(
+                    episodeId = episodeId,
+                    fileSha256 = knownSha256 ?: "",
+                    badge = ReadinessBadge.NOT_PROCESSED.name,
+                    progressPercent = 0,
+                    stageLabel = "Audio not downloaded",
+                    errorMessage = null
+                )
+            )
+            return Result.failure()
+        }
 
         runCatching {
             setForeground(createForegroundInfo("Analyzing episode…", 0))
         }
 
-        val db = AutoMuteDatabase.getInstance(applicationContext)
         val analyzer = AutoMuteAnalyzer(applicationContext, db)
 
         return try {
@@ -92,6 +104,7 @@ class EpisodeAnalysisWorker(
             manager.createNotificationChannel(channel)
         }
 
+        val cancelIntent = WorkManager.getInstance(applicationContext).createCancelPendingIntent(id)
         val clamped = progress.coerceIn(0, 100)
         val builder = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
             .setContentTitle("HushCast Audio Analysis")
@@ -103,6 +116,7 @@ class EpisodeAnalysisWorker(
             .setRequestPromotedOngoing(true)
             .setShortCriticalText(if (clamped > 0) "$clamped%" else "AI")
             .setProgress(100, clamped, clamped == 0)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelIntent)
 
         if (Build.VERSION.SDK_INT >= 36) {
             builder.setStyle(
@@ -207,6 +221,12 @@ class EpisodeAnalysisWorker(
                 ExistingWorkPolicy.APPEND_OR_REPLACE,
                 builder.build()
             )
+        }
+
+        fun cancelAll(context: Context) {
+            val wm = WorkManager.getInstance(context)
+            wm.cancelUniqueWork(ANALYSIS_QUEUE_NAME)
+            wm.cancelAllWorkByTag(ANALYSIS_QUEUE_NAME)
         }
 
         const val ANALYSIS_QUEUE_NAME = "hushcast_analysis_queue"

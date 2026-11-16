@@ -15,23 +15,27 @@ import kotlin.math.sqrt
  * 48 kHz in, 24 or 16 kHz out) use a precomputed polyphase bank, so it's a plain dot product
  * per output sample.
  */
-class Resampler(private val inRate: Int, private val outRate: Int) {
+class Resampler(private val inRate: Int, private val outRate: Int) : AutoCloseable {
+    private var nativeHandle: Long = if (app.hushcast.automute.nativebridge.WhisperJni.isAvailable) {
+        app.hushcast.automute.nativebridge.WhisperJni.resamplerNew(inRate, outRate)
+    } else 0L
+
     private val fc = 0.97 * min(inRate, outRate) / (2.0 * inRate)     // cutoff, cycles per input sample
     private val half = ceil(16.0 / (2.0 * fc)).toInt()                // filter half-width, input samples
     private val taps = 2 * half
     private val g = gcd(inRate, outRate)
     private val phases = outRate / g
     private val i0b = besselI0(BETA)
-    private val bank: Array<FloatArray>? = if (phases <= 4096) Array(phases) { p ->
+    private val bank: Array<FloatArray>? = if (nativeHandle == 0L && phases <= 4096) Array(phases) { p ->
         val frac = p.toDouble() * g / outRate
         FloatArray(taps) { j -> h(j - half + 1 - frac).toFloat() }
     } else null
 
-    private var hist = FloatArray(1 shl 15)
+    private var hist = if (nativeHandle == 0L) FloatArray(1 shl 15) else FloatArray(0)
     private var histLen = 0
     private var histBase = 0L            // input index of hist[0]
     private var nextOut = 0L             // index of the next output sample
-    private val outBuf = FloatList(1024)
+    private val outBuf = FloatList(if (nativeHandle == 0L) 1024 else 0)
 
     private fun h(d: Double): Double {
         if (abs(d) >= half) return 0.0
@@ -45,6 +49,9 @@ class Resampler(private val inRate: Int, private val outRate: Int) {
 
     /** Resample [count] samples of [input] from [offset]; returns whatever output is ready. */
     fun process(input: FloatArray, offset: Int = 0, count: Int = input.size - offset): FloatArray {
+        if (nativeHandle != 0L) {
+            return app.hushcast.automute.nativebridge.WhisperJni.resamplerProcess(nativeHandle, input, offset, count)
+        }
         if (passthrough) return input.copyOfRange(offset, offset + count)
         if (histLen + count > hist.size) hist = hist.copyOf(max(hist.size * 2, histLen + count))
         System.arraycopy(input, offset, hist, histLen, count)
@@ -54,6 +61,9 @@ class Resampler(private val inRate: Int, private val outRate: Int) {
 
     /** Flush the tail at the end of the stream. */
     fun finish(): FloatArray {
+        if (nativeHandle != 0L) {
+            return app.hushcast.automute.nativebridge.WhisperJni.resamplerFinish(nativeHandle)
+        }
         if (passthrough) return FloatArray(0)
         val end = histBase + histLen
         val pad = half + 1
@@ -61,6 +71,13 @@ class Resampler(private val inRate: Int, private val outRate: Int) {
         java.util.Arrays.fill(hist, histLen, histLen + pad, 0f)
         histLen += pad
         return produce(end)
+    }
+
+    override fun close() {
+        if (nativeHandle != 0L) {
+            app.hushcast.automute.nativebridge.WhisperJni.resamplerFree(nativeHandle)
+            nativeHandle = 0L
+        }
     }
 
     private fun produce(lastInput: Long): FloatArray {
