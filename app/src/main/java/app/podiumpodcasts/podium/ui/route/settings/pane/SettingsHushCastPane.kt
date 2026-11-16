@@ -98,6 +98,14 @@ fun SettingsHushCastPane(
 
     var newPattern by remember { mutableStateOf("") }
     var isRegex by remember { mutableStateOf(false) }
+    var wordListExpanded by remember { mutableStateOf(false) }
+
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    LaunchedEffect(Unit) {
+        focusManager.clearFocus(force = true)
+        keyboardController?.hide()
+    }
 
     val currentPssMb = remember {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
@@ -116,7 +124,8 @@ fun SettingsHushCastPane(
         LazyColumn(
             modifier = Modifier
                 .padding(padding)
-                .fillMaxSize(),
+                .fillMaxSize()
+                .focusTarget(),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
