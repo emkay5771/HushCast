@@ -205,7 +205,12 @@ fun OpmlImportingRoute(
                     }
 
                     is State.SelectOutlines -> {
-                        val count = state.file.body.outlines.size
+                        val outlines = state.outlines
+                        val count = outlines.size
+                        val importableCount = outlines.count { outline ->
+                            val url = outline.xmlUrl?.trim()?.takeIf { it.isNotBlank() }
+                            url != null && !vm.existingOrigins.contains(url)
+                        }
 
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
@@ -213,38 +218,65 @@ fun OpmlImportingRoute(
                             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
                         ) {
                             item {
-                                Column {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
                                     Text(
                                         modifier = Modifier.fillMaxWidth(),
-                                        text = state.file.head.title,
+                                        text = state.file.head?.title?.takeIf { it.isNotBlank() }
+                                            ?: stringResource(R.string.route_import_ompl),
                                         maxLines = 1,
                                         style = Typography.headlineMediumEmphasized,
                                         overflow = TextOverflow.Ellipsis,
                                         textAlign = TextAlign.Center
                                     )
 
-                                    state.file.head.dateCreated?.let {
+                                    state.file.head?.dateCreated?.takeIf { it.isNotBlank() }?.let { dateCreated ->
                                         Spacer(Modifier.height(8.dp))
 
                                         Text(
                                             modifier = Modifier.fillMaxWidth(),
-                                            text = state.file.head.dateCreated,
+                                            text = dateCreated,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                             textAlign = TextAlign.Center
                                         )
                                     }
 
-                                    Spacer(Modifier.height(16.dp))
+                                    Spacer(Modifier.height(12.dp))
+
+                                    if(importableCount > 0) {
+                                        val allSelected = vm.selectedOrigins.size >= importableCount
+                                        androidx.compose.material3.TextButton(
+                                            onClick = {
+                                                if(allSelected) {
+                                                    vm.deselectAll()
+                                                } else {
+                                                    vm.selectAll(outlines)
+                                                }
+                                            }
+                                        ) {
+                                            Text(
+                                                if(allSelected) {
+                                                    "Deselect all (${vm.selectedOrigins.size}/$importableCount)"
+                                                } else {
+                                                    "Select all (${vm.selectedOrigins.size}/$importableCount)"
+                                                }
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(Modifier.height(8.dp))
                                 }
                             }
 
                             items(
-                                count = state.file.body.outlines.size
+                                count = count
                             ) { index ->
-                                val outline = state.file.body.outlines[index]
+                                val outline = outlines[index]
 
-                                val xmlUrl = outline.xmlUrl?.takeIf { it.isNotBlank() }
+                                val xmlUrl = outline.xmlUrl?.trim()?.takeIf { it.isNotBlank() }
                                 val checked = xmlUrl != null && vm.selectedOrigins.contains(xmlUrl)
                                 val alreadyImported = xmlUrl == null || vm.existingOrigins.contains(xmlUrl)
 
@@ -277,10 +309,10 @@ fun OpmlImportingRoute(
                                         null
                                     },
                                     content = {
-                                        Text(outline.text)
+                                        Text(outline.displayTitle)
                                     },
                                     supportingContent = {
-                                        Text(outline.xmlUrl ?: "")
+                                        Text(xmlUrl ?: "")
                                     },
 
                                     trailingContent = {
@@ -310,6 +342,14 @@ fun OpmlImportingRoute(
                                 Text(
                                     text = stringResource(R.string.route_import_unpacking)
                                 )
+
+                                vm.importProgress.value?.let { (done, total) ->
+                                    Spacer(Modifier.height(8.dp))
+                                    Text(
+                                        text = "$done / $total",
+                                        style = Typography.labelLarge
+                                    )
+                                }
                             }
                         )
                     }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -27,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.ui.component.settings.SettingsSecondsSliderListItem
+import app.podiumpodcasts.podium.ui.component.settings.SettingsSwitchListItem
 import app.podiumpodcasts.podium.ui.custom.icons.Forward
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
@@ -101,7 +103,7 @@ fun SettingsPlaybackPane(
                     },
 
                     index = 0,
-                    count = 2
+                    count = 3
                 )
             }
 
@@ -135,7 +137,30 @@ fun SettingsPlaybackPane(
                     },
 
                     index = 1,
-                    count = 2
+                    count = 3
+                )
+            }
+
+            item {
+                val tapUpNextToPlay = vm.repository.behavior.tapUpNextToPlay.collectAsState(true)
+
+                SettingsSwitchListItem(
+                    checked = tapUpNextToPlay.value,
+                    onCheckedChange = {
+                        scope.launch {
+                            vm.repository.behavior.setTapUpNextToPlay(it)
+                        }
+                    },
+                    icon = {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.PlaylistAdd,
+                            "Tap Up Next to play"
+                        )
+                    },
+                    label = "Tap Up Next to play",
+                    description = "Tapping a queued episode plays it immediately instead of opening episode details",
+                    index = 2,
+                    count = 3
                 )
             }
         }

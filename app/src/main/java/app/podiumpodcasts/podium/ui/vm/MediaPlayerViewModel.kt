@@ -161,18 +161,29 @@ class MediaPlayerViewModel : ViewModel() {
         val playerIndex = queueIndex[queuePos]
         if(playerIndex !in 0 until controller.mediaItemCount) return
 
-        val targetIndex = if(controller.currentMediaItemIndex >= 0) {
-            (controller.currentMediaItemIndex + 1).coerceIn(0, controller.mediaItemCount - 1)
-        } else {
-            0
+        val currentIndex = controller.currentMediaItemIndex.takeIf { it in 0 until controller.mediaItemCount } ?: 0
+        if(playerIndex != currentIndex) {
+            // Moving playerIndex -> currentIndex places the selected episode in Now Playing
+            // and shifts the previously playing episode to the very top of Up Next.
+            controller.moveMediaItem(playerIndex, currentIndex)
         }
-
-        if(playerIndex != targetIndex) {
-            controller.moveMediaItem(playerIndex, targetIndex)
-        }
-        controller.seekToDefaultPosition(targetIndex)
+        controller.seekToDefaultPosition(currentIndex)
         controller.play()
         syncQueue(persist = true)
+    }
+
+    fun clearQueue() {
+        val controller = mediaController ?: return
+        val start = (controller.currentMediaItemIndex + 1).coerceAtLeast(0)
+        if(start < controller.mediaItemCount) {
+            controller.removeMediaItems(start, controller.mediaItemCount)
+            syncQueue(persist = true)
+        }
+    }
+
+    fun moveToTopOfQueue(queuePos: Int) {
+        if(queuePos <= 0 || queuePos !in queueIndex.indices) return
+        moveQueueItem(queuePos, 0)
     }
 
     fun dequeue(

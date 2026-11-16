@@ -5,6 +5,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,10 +27,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Forward10
 import androidx.compose.material.icons.rounded.Forward30
 import androidx.compose.material.icons.rounded.Forward5
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Podcasts
@@ -48,6 +53,7 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.IconButtonDefaults.IconButtonWidthOption
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
@@ -68,6 +74,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -92,6 +99,7 @@ import app.podiumpodcasts.podium.ui.component.media.CastingBypassNoticeBanner
 import app.podiumpodcasts.podium.ui.component.media.EpisodeReadinessBadge
 import app.podiumpodcasts.podium.ui.component.media.OneTapUndoAdSkipBanner
 import app.podiumpodcasts.podium.ui.component.media.SyncedTranscriptCard
+import app.podiumpodcasts.podium.ui.component.settings.SettingsListItem
 import app.podiumpodcasts.podium.ui.custom.icons.Forward
 import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
 import app.podiumpodcasts.podium.ui.formatPlayerTime
@@ -111,6 +119,7 @@ fun MediaPlayerBottomSheet(
         origin: String,
         id: String
     ) -> Unit,
+    onOpenPodcast: ((origin: String) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -159,7 +168,32 @@ fun MediaPlayerBottomSheet(
     val isCastingExternal by HushCastEngineBridge.isCastingExternal.collectAsState()
 
     var showTranscript by remember { mutableStateOf(false) }
+    var showMoreSheet by remember { mutableStateOf(false) }
+    var showNotDownloadedDialog by remember { mutableStateOf(false) }
     var transcriptBlob by remember(episodeId) { mutableStateOf<WordIndexBlob?>(null) }
+
+    fun triggerAnalyzeNow() {
+        if (episodeId.isBlank()) return
+        scope.launch {
+            val bundle = runCatching { appDb.podcastEpisodes().getSync(episodeId) }.getOrNull()
+            val audioPath = bundle?.episode?.craftDownloadFile(context)?.absolutePath
+            if (audioPath != null && java.io.File(audioPath).exists()) {
+                EpisodeAnalysisWorker.enqueueAnalyzeNow(
+                    context = context,
+                    episodeId = episodeId,
+                    audioPath = audioPath,
+                    actionMode = HushCastEngineBridge.defaultActionMode
+                )
+                android.widget.Toast.makeText(
+                    context,
+                    "Starting HushCast AI analysis…",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                showNotDownloadedDialog = true
+            }
+        }
+    }
 
     LaunchedEffect(episodeId, analysisStatus?.badge) {
         if (episodeId.isBlank()) return@LaunchedEffect
@@ -202,6 +236,19 @@ fun MediaPlayerBottomSheet(
             Column(
                 Modifier
                     .fillMaxWidth()
+                    .pointerInput(Unit) {
+                        var totalDrag = 0f
+                        detectVerticalDragGestures(
+                            onDragStart = { totalDrag = 0f },
+                            onVerticalDrag = { _, dragAmount ->
+                                totalDrag += dragAmount
+                                if(totalDrag < -60f) {
+                                    totalDrag = 0f
+                                    showQueueBottomSheet = true
+                                }
+                            }
+                        )
+                    }
                     .verticalScroll(
                         state = rememberScrollState(),
                         flingBehavior = null
@@ -325,7 +372,15 @@ fun MediaPlayerBottomSheet(
                                         text = mediaMetadata?.subtitle.toString(),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
-                                        style = Typography.bodyMedium
+                                        color = if(onOpenPodcast != null && vm.metadataOrigin != null) MaterialTheme.colorScheme.primary else Color.Unspecified,
+                                        style = Typography.bodyMedium,
+                                        modifier = if(onOpenPodcast != null && vm.metadataOrigin != null) {
+                                            Modifier.clickable {
+                                                dismissGracefully {
+                                                    onOpenPodcast(vm.metadataOrigin!!)
+                                                }
+                                            }
+                                        } else Modifier
                                     )
 
                                     Spacer(Modifier.height(6.dp))
@@ -338,20 +393,7 @@ fun MediaPlayerBottomSheet(
                                         badge = badge,
                                         progressPercent = analysisStatus?.progressPercent ?: 0,
                                         onAnalyzeNowClick = if (episodeId.isNotBlank()) {
-                                            {
-                                                scope.launch {
-                                                    val bundle = runCatching { appDb.podcastEpisodes().getSync(episodeId) }.getOrNull()
-                                                    val audioPath = bundle?.episode?.craftDownloadFile(context)?.absolutePath
-                                                    if (audioPath != null && java.io.File(audioPath).exists()) {
-                                                        EpisodeAnalysisWorker.enqueueAnalyzeNow(
-                                                            context = context,
-                                                            episodeId = episodeId,
-                                                            audioPath = audioPath,
-                                                            actionMode = HushCastEngineBridge.defaultActionMode
-                                                        )
-                                                    }
-                                                }
-                                            }
+                                            { triggerAnalyzeNow() }
                                         } else null
                                     )
                                 }
@@ -655,7 +697,7 @@ fun MediaPlayerBottomSheet(
                         contentPadding = ButtonDefaults.contentPaddingFor(size),
                         shapes = ButtonDefaults.shapesFor(size),
                         colors = if (showTranscript) ButtonDefaults.buttonColors() else colors,
-                        onClick = { showTranscript = !showTranscript }
+                        onClick = { showTranscript = true }
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
@@ -671,45 +713,184 @@ fun MediaPlayerBottomSheet(
                             )
                         }
                     }
-                }
 
-                if (showTranscript) {
-                    val muteWindows = remember(muteEntities) { muteEntities.map { it.toDomain() } }
-                    val adWindows = remember(adEntities) { adEntities.map { it.toDomain() } }
-                    SyncedTranscriptCard(
-                        segments = transcriptBlob?.segments ?: emptyList(),
-                        words = transcriptBlob?.words ?: emptyList(),
-                        muteWindows = muteWindows,
-                        adWindows = adWindows,
-                        currentPositionMs = vm.currentPosition,
-                        onSeekToMs = { ms -> vm.seek(ms) },
-                        onToggleWordMute = { word, mute ->
-                            val clean = word.text.trim().trim('.', ',', '!', '?', '"', '\'')
-                            if (clean.isNotEmpty() && episodeId.isNotBlank()) {
-                                scope.launch {
-                                    if (mute) {
-                                        autoMuteDb.dao().upsertRule(
-                                            MuteRuleEntity(
-                                                pattern = clean,
-                                                actionMode = HushCastEngineBridge.defaultActionMode.name,
-                                                category = "Transcript"
-                                            )
+                    Button(
+                        modifier = Modifier
+                            .heightIn(size)
+                            .padding(vertical = 2.dp),
+                        contentPadding = ButtonDefaults.contentPaddingFor(size),
+                        shapes = ButtonDefaults.shapesFor(size),
+                        colors = colors,
+                        onClick = { showMoreSheet = true }
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Rounded.MoreHoriz,
+                                contentDescription = "More",
+                                modifier = Modifier.size(ButtonDefaults.iconSizeFor(size))
+                            )
+                            Spacer(Modifier.size(ButtonDefaults.iconSpacingFor(size)))
+                            Text(
+                                text = "More",
+                                maxLines = 1,
+                                style = ButtonDefaults.textStyleFor(size)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showTranscript) {
+            ModalBottomSheet(
+                onDismissRequest = { showTranscript = false }
+            ) {
+                val muteWindows = remember(muteEntities) { muteEntities.map { it.toDomain() } }
+                val adWindows = remember(adEntities) { adEntities.map { it.toDomain() } }
+                SyncedTranscriptCard(
+                    segments = transcriptBlob?.segments ?: emptyList(),
+                    words = transcriptBlob?.words ?: emptyList(),
+                    muteWindows = muteWindows,
+                    adWindows = adWindows,
+                    currentPositionMs = vm.currentPosition,
+                    onSeekToMs = { ms -> vm.seek(ms) },
+                    onToggleWordMute = { word, mute ->
+                        val clean = word.text.trim().trim('.', ',', '!', '?', '"', '\'')
+                        if (clean.isNotEmpty() && episodeId.isNotBlank()) {
+                            scope.launch {
+                                if (mute) {
+                                    autoMuteDb.dao().upsertRule(
+                                        MuteRuleEntity(
+                                            pattern = clean,
+                                            actionMode = HushCastEngineBridge.defaultActionMode.name,
+                                            category = "Transcript"
                                         )
-                                    }
-                                    val sha = analysisStatus?.fileSha256?.takeIf { it.isNotBlank() }
-                                    if (sha != null) {
-                                        app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
-                                            .reevaluateMuteRules(sha, episodeId, defaultActionMode = HushCastEngineBridge.defaultActionMode)
-                                        val updated = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
-                                        HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
-                                    }
+                                    )
+                                }
+                                val sha = analysisStatus?.fileSha256?.takeIf { it.isNotBlank() }
+                                if (sha != null) {
+                                    app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
+                                        .reevaluateMuteRules(sha, episodeId, defaultActionMode = HushCastEngineBridge.defaultActionMode)
+                                    val updated = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
+                                    HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
                                 }
                             }
-                        },
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        }
+                    },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                )
+            }
+        }
+
+        if (showMoreSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showMoreSheet = false }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
+                ) {
+                    Text(
+                        text = "Player Actions",
+                        style = Typography.titleLargeEmphasized,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    if (onOpenPodcast != null && vm.metadataOrigin != null) {
+                        SettingsListItem(
+                            icon = { Icon(Icons.Rounded.Podcasts, "Go to Podcast") },
+                            label = "Go to Podcast",
+                            description = vm.mediaMetadata?.subtitle?.toString() ?: "",
+                            index = 0,
+                            count = 4,
+                            onClick = {
+                                showMoreSheet = false
+                                dismissGracefully { onOpenPodcast(vm.metadataOrigin!!) }
+                            }
+                        )
+                    }
+                    SettingsListItem(
+                        icon = { Icon(Icons.Rounded.Info, "Episode Details") },
+                        label = "Episode Details & Notes",
+                        index = if (onOpenPodcast != null && vm.metadataOrigin != null) 1 else 0,
+                        count = if (onOpenPodcast != null && vm.metadataOrigin != null) 4 else 3,
+                        onClick = {
+                            showMoreSheet = false
+                            val origin = vm.metadataOrigin
+                            val id = vm.metadataEpisodeId
+                            if (origin != null && id != null) {
+                                dismissGracefully { onOpenEpisode(origin, id) }
+                            }
+                        }
+                    )
+                    SettingsListItem(
+                        icon = { Icon(Icons.Rounded.Done, "Mark as Played") },
+                        label = "Mark as Played",
+                        index = if (onOpenPodcast != null && vm.metadataOrigin != null) 2 else 1,
+                        count = if (onOpenPodcast != null && vm.metadataOrigin != null) 4 else 3,
+                        onClick = {
+                            showMoreSheet = false
+                            if (episodeId.isNotBlank()) {
+                                scope.launch {
+                                    appDb.podcastEpisodePlayStates().savePlayed(episodeId, true)
+                                }
+                            }
+                        }
+                    )
+                    SettingsListItem(
+                        icon = { Icon(Icons.Rounded.AutoAwesome, "Re-analyze Audio") },
+                        label = "Analyze with HushCast AI",
+                        description = "Scan for muted words and sponsor segments",
+                        index = if (onOpenPodcast != null && vm.metadataOrigin != null) 3 else 2,
+                        count = if (onOpenPodcast != null && vm.metadataOrigin != null) 4 else 3,
+                        onClick = {
+                            showMoreSheet = false
+                            triggerAnalyzeNow()
+                        }
                     )
                 }
             }
+        }
+
+        if (showNotDownloadedDialog) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showNotDownloadedDialog = false },
+                title = { Text("Episode not downloaded") },
+                text = {
+                    Text("HushCast AI analyzes episodes locally on your device, so the audio file needs to be downloaded first.")
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            showNotDownloadedDialog = false
+                            if (episodeId.isNotBlank()) {
+                                scope.launch {
+                                    app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                        context,
+                                        appDb,
+                                        episodeId
+                                    )
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Downloading episode…",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
+                        }
+                    ) {
+                        Text("Download")
+                    }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = { showNotDownloadedDialog = false }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            )
         }
 
         if(showSleepTimerBottomSheet) MediaPlayerSleepTimerBottomSheet {

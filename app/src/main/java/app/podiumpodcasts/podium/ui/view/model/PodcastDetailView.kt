@@ -12,6 +12,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -33,8 +34,10 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DataUsage
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.FileDownload
@@ -47,13 +50,18 @@ import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsNone
 import androidx.compose.material.icons.rounded.RssFeed
 import androidx.compose.material.icons.rounded.SearchOff
+import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.VerticalAlignBottom
+import androidx.compose.material.icons.rounded.VerticalAlignTop
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledIconToggleButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
@@ -96,9 +104,11 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import app.podiumpodcasts.podium.AppActivity
 import app.podiumpodcasts.podium.R
+import app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesFilter
 import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeBundle
 import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeModel
 import app.podiumpodcasts.podium.api.db.model.PodcastModel
+import app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel
 import app.podiumpodcasts.podium.ui.component.DetailsList
 import app.podiumpodcasts.podium.ui.component.DetailsListItemModel
 import app.podiumpodcasts.podium.ui.component.PodiumSnackbarHost
@@ -154,9 +164,12 @@ fun PodcastDetailView(
     val vm = viewModel(key = podcast.origin) {
         PodcastDetailViewModel(db, podcast)
     }
+    val playerVm = viewModel<MediaPlayerViewModel>()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     val subscription = vm.subscription.collectAsState(null)
     val episodePager = vm.episodePager.collectAsLazyPagingItems()
+    val selectedEpisodeIds = remember(podcast.origin) { androidx.compose.runtime.mutableStateListOf<String>() }
 
     val isSubscribed = subscription.value != null
     val enableNotifications = subscription.value?.enableNotifications == true
@@ -182,27 +195,91 @@ fun PodcastDetailView(
                     PodiumSnackbarHost(vm.snackbarHostState)
                 },
                 topBar = {
-                    TopAppBar(
-                        navigationIcon = {
-                            BackButton {
-                                onBack()
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = Color.Transparent,
-                            scrolledContainerColor = Color.Transparent
-                        ),
-                        title = { },
-                        actions = {
-                            BubbleButton(
-                                icon = Icons.Rounded.Settings,
-                                contentDescription = stringResource(R.string.route_podcast_settings),
-                                onClick = {
-                                    vm.showSettingsBottomSheet.value = true
+                    if(selectedEpisodeIds.isNotEmpty()) {
+                        TopAppBar(
+                            navigationIcon = {
+                                IconButton(onClick = { selectedEpisodeIds.clear() }) {
+                                    Icon(Icons.Rounded.Close, "Clear selection")
                                 }
-                            )
-                        }
-                    )
+                            },
+                            title = {
+                                Text("${selectedEpisodeIds.size} selected")
+                            },
+                            actions = {
+                                IconButton(
+                                    onClick = {
+                                        val selectedBundles = (0 until episodePager.itemCount)
+                                            .mapNotNull { episodePager.peek(it) }
+                                            .filter { it.episode.id in selectedEpisodeIds }
+                                        selectedBundles.asReversed().forEach { playerVm.playNext(context, it) }
+                                        selectedEpisodeIds.clear()
+                                    }
+                                ) {
+                                    Icon(Icons.Rounded.VerticalAlignTop, "Play Next")
+                                }
+                                IconButton(
+                                    onClick = {
+                                        val selectedBundles = (0 until episodePager.itemCount)
+                                            .mapNotNull { episodePager.peek(it) }
+                                            .filter { it.episode.id in selectedEpisodeIds }
+                                        selectedBundles.forEach { playerVm.enqueue(context, it) }
+                                        selectedEpisodeIds.clear()
+                                    }
+                                ) {
+                                    Icon(Icons.Rounded.VerticalAlignBottom, "Play Last")
+                                }
+                                IconButton(
+                                    onClick = {
+                                        val ids = selectedEpisodeIds.toList()
+                                        scope.launch {
+                                            ids.forEach { id ->
+                                                db.podcastEpisodePlayStates().savePlayed(id, true)
+                                            }
+                                        }
+                                        selectedEpisodeIds.clear()
+                                    }
+                                ) {
+                                    Icon(Icons.Rounded.Done, "Mark Played")
+                                }
+                                IconButton(
+                                    onClick = {
+                                        val allIds = (0 until episodePager.itemCount)
+                                            .mapNotNull { episodePager.peek(it)?.episode?.id }
+                                        if(selectedEpisodeIds.size == allIds.size) {
+                                            selectedEpisodeIds.clear()
+                                        } else {
+                                            selectedEpisodeIds.clear()
+                                            selectedEpisodeIds.addAll(allIds)
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Rounded.SelectAll, "Select All")
+                                }
+                            }
+                        )
+                    } else {
+                        TopAppBar(
+                            navigationIcon = {
+                                BackButton {
+                                    onBack()
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = Color.Transparent,
+                                scrolledContainerColor = Color.Transparent
+                            ),
+                            title = { },
+                            actions = {
+                                BubbleButton(
+                                    icon = Icons.Rounded.Settings,
+                                    contentDescription = stringResource(R.string.route_podcast_settings),
+                                    onClick = {
+                                        vm.showSettingsBottomSheet.value = true
+                                    }
+                                )
+                            }
+                        )
+                    }
                 },
                 floatingActionButton = {
                     AnimatedVisibility(
@@ -542,6 +619,7 @@ fun PodcastDetailView(
                                 vm = vm,
                                 scope = scope,
                                 episodePager = episodePager,
+                                selectedEpisodeIds = selectedEpisodeIds,
                                 onClickEpisode = onClickEpisode
                             )
                         }
@@ -580,6 +658,7 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
     vm: PodcastDetailViewModel,
     scope: CoroutineScope,
     episodePager: LazyPagingItems<PodcastEpisodeBundle>,
+    selectedEpisodeIds: MutableList<String>,
     onClickEpisode: (episode: PodcastEpisodeModel) -> Unit
 ) {
     item(
@@ -596,14 +675,68 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
     item(
         key = "BAR"
     ) {
-        PodcastSearchFilterOrderBar(
-            Modifier
+        Column(
+            modifier = Modifier
                 .background(MaterialTheme.colorScheme.surfaceContainer)
-                .padding(16.dp)
                 .fillMaxWidth()
-                .animateItem(),
-            state = vm.searchFilterOrderBarState
-        )
+                .animateItem()
+        ) {
+            PodcastSearchFilterOrderBar(
+                Modifier
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .fillMaxWidth(),
+                state = vm.searchFilterOrderBarState
+            )
+
+            Row(
+                modifier = Modifier
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val hidePlayed = PodcastEpisodesFilter.PLAYED in vm.searchFilterOrderBarState.negativeFilter
+                FilterChip(
+                    selected = hidePlayed,
+                    onClick = {
+                        if(hidePlayed) {
+                            vm.searchFilterOrderBarState.negativeFilter.remove(PodcastEpisodesFilter.PLAYED)
+                        } else {
+                            vm.searchFilterOrderBarState.filter.remove(PodcastEpisodesFilter.PLAYED)
+                            vm.searchFilterOrderBarState.negativeFilter.add(PodcastEpisodesFilter.PLAYED)
+                        }
+                    },
+                    label = { Text("Unplayed") }
+                )
+
+                val onlyDownloaded = PodcastEpisodesFilter.DOWNLOADED in vm.searchFilterOrderBarState.filter
+                FilterChip(
+                    selected = onlyDownloaded,
+                    onClick = {
+                        if(onlyDownloaded) {
+                            vm.searchFilterOrderBarState.filter.remove(PodcastEpisodesFilter.DOWNLOADED)
+                        } else {
+                            vm.searchFilterOrderBarState.negativeFilter.remove(PodcastEpisodesFilter.DOWNLOADED)
+                            vm.searchFilterOrderBarState.filter.add(PodcastEpisodesFilter.DOWNLOADED)
+                        }
+                    },
+                    label = { Text("Downloaded") }
+                )
+
+                val inProgress = PodcastEpisodesFilter.PAUSED in vm.searchFilterOrderBarState.filter
+                FilterChip(
+                    selected = inProgress,
+                    onClick = {
+                        if(inProgress) {
+                            vm.searchFilterOrderBarState.filter.remove(PodcastEpisodesFilter.PAUSED)
+                        } else {
+                            vm.searchFilterOrderBarState.negativeFilter.remove(PodcastEpisodesFilter.PAUSED)
+                            vm.searchFilterOrderBarState.filter.add(PodcastEpisodesFilter.PAUSED)
+                        }
+                    },
+                    label = { Text("In Progress") }
+                )
+            }
+        }
     }
 
     item {
@@ -645,6 +778,7 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
             color = MaterialTheme.colorScheme.surfaceContainer
         ) {
             episodePager[it]?.let { episodeBundle ->
+                val isSelected = episodeBundle.episode.id in selectedEpisodeIds
                 Box(
                     Modifier.padding(
                         top = 2.dp,
@@ -680,8 +814,24 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                                 bundle = episodeBundle,
                                 index = it,
                                 count = episodePager.itemCount,
+                                isSelected = isSelected,
+                                onLongClick = {
+                                    if(isSelected) {
+                                        selectedEpisodeIds.remove(episodeBundle.episode.id)
+                                    } else {
+                                        selectedEpisodeIds.add(episodeBundle.episode.id)
+                                    }
+                                },
                                 onClick = {
-                                    onClickEpisode(episodeBundle.episode)
+                                    if(selectedEpisodeIds.isNotEmpty()) {
+                                        if(isSelected) {
+                                            selectedEpisodeIds.remove(episodeBundle.episode.id)
+                                        } else {
+                                            selectedEpisodeIds.add(episodeBundle.episode.id)
+                                        }
+                                    } else {
+                                        onClickEpisode(episodeBundle.episode)
+                                    }
                                 }
                             )
                         },

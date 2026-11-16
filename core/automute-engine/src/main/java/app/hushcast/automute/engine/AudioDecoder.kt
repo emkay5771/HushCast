@@ -13,7 +13,12 @@ import java.nio.ByteOrder
 object AudioDecoder {
     data class Info(val sampleRate: Int, val channels: Int, val durationUs: Long)
 
-    fun decode(path: String, frames: FrameExtractor? = null, pcm16k: PcmBuffer? = null): Info {
+    fun decode(
+        path: String,
+        frames: FrameExtractor? = null,
+        pcm16k: PcmBuffer? = null,
+        onProgress: ((Float) -> Unit)? = null
+    ): Info {
         val ex = MediaExtractor()
         ex.setDataSource(path)
         val track = (0 until ex.trackCount).firstOrNull {
@@ -44,6 +49,9 @@ object AudioDecoder {
         val info = MediaCodec.BufferInfo()
         var inputDone = false
         var outputDone = false
+        var floatScratch = FloatArray(0)
+        var shortScratch = ShortArray(0)
+        var lastReportedFraction = -1f
         try {
             while (!outputDone) {
                 if (!inputDone) {
@@ -78,25 +86,52 @@ object AudioDecoder {
                     val count = if (encoding == AudioFormat.ENCODING_PCM_FLOAT) info.size / 4 / channels else info.size / 2 / channels
                     if (count > 0) {
                         started = true
+                        val totalSamples = count * channels
                         val mid = FloatArray(count)
                         val side = if (stereo) FloatArray(count) else null
                         if (encoding == AudioFormat.ENCODING_PCM_FLOAT) {
-                            val fb = buf.asFloatBuffer()
-                            for (k in 0 until count) {
-                                val l = fb.get(k * channels)
-                                if (stereo) { val r = fb.get(k * channels + 1); mid[k] = (l + r) * 0.5f; side!![k] = (l - r) * 0.5f } else mid[k] = l
+                            if (floatScratch.size < totalSamples) floatScratch = FloatArray(totalSamples)
+                            buf.asFloatBuffer().get(floatScratch, 0, totalSamples)
+                            if (stereo) {
+                                for (k in 0 until count) {
+                                    val idx = k * channels
+                                    val l = floatScratch[idx]
+                                    val r = floatScratch[idx + 1]
+                                    mid[k] = (l + r) * 0.5f
+                                    side!![k] = (l - r) * 0.5f
+                                }
+                            } else if (channels == 1) {
+                                System.arraycopy(floatScratch, 0, mid, 0, count)
+                            } else {
+                                for (k in 0 until count) mid[k] = floatScratch[k * channels]
                             }
                         } else {
-                            val sb = buf.asShortBuffer()
-                            for (k in 0 until count) {
-                                val l = sb.get(k * channels) / 32768f
-                                if (stereo) { val r = sb.get(k * channels + 1) / 32768f; mid[k] = (l + r) * 0.5f; side!![k] = (l - r) * 0.5f } else mid[k] = l
+                            if (shortScratch.size < totalSamples) shortScratch = ShortArray(totalSamples)
+                            buf.asShortBuffer().get(shortScratch, 0, totalSamples)
+                            if (stereo) {
+                                for (k in 0 until count) {
+                                    val idx = k * channels
+                                    val l = shortScratch[idx] / 32768f
+                                    val r = shortScratch[idx + 1] / 32768f
+                                    mid[k] = (l + r) * 0.5f
+                                    side!![k] = (l - r) * 0.5f
+                                }
+                            } else {
+                                for (k in 0 until count) mid[k] = shortScratch[k * channels] / 32768f
                             }
                         }
                         if (frames != null) {
                             feed(frames, toFrames.process(mid), side?.let { toFramesSide.process(it) })
                         }
                         pcm16k?.append(toWhisper.process(mid))
+
+                        if (onProgress != null && duration > 0L) {
+                            val fraction = (info.presentationTimeUs.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+                            if (fraction - lastReportedFraction >= 0.03f) {
+                                lastReportedFraction = fraction
+                                onProgress(fraction)
+                            }
+                        }
                     }
                     codec.releaseOutputBuffer(o, false)
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) outputDone = true

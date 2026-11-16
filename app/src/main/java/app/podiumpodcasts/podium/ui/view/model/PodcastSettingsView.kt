@@ -11,17 +11,20 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Label
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -29,15 +32,20 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -45,6 +53,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.podiumpodcasts.podium.AutoAddUpNextMode
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.api.db.model.PodcastModel
 import app.podiumpodcasts.podium.ui.component.common.BackButton
@@ -53,8 +62,10 @@ import app.podiumpodcasts.podium.ui.component.settings.SettingsListItem
 import app.podiumpodcasts.podium.ui.component.settings.SettingsSecondsSliderListItem
 import app.podiumpodcasts.podium.ui.component.settings.SettingsSwitchListItem
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
+import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 import app.podiumpodcasts.podium.ui.vm.PodcastSettingsViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -63,11 +74,21 @@ fun PodcastSettingsView(
     onBack: () -> Unit
 ) {
     val db = LocalDatabase.current
+    val settingsRepository = LocalSettingsRepository.current
+    val scope = rememberCoroutineScope()
 
     val vm = viewModel<PodcastSettingsViewModel>()
 
     val subscription = remember { db.podcastSubscriptions().get(podcast.origin) }
         .collectAsState(null)
+
+    val autoAddMode by remember(podcast.origin) {
+        settingsRepository.behavior.podcastAutoAddToUpNext(podcast.origin)
+    }.collectAsState(initial = AutoAddUpNextMode.OFF)
+
+    val podcastSpeed by remember(podcast.origin) {
+        settingsRepository.behavior.podcastPlaybackSpeed(podcast.origin)
+    }.collectAsState(initial = 0f)
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
@@ -205,7 +226,7 @@ fun PodcastSettingsView(
                         description = stringResource(R.string.view_podcast_settings_subscription_enable_automatic_downloads_description),
 
                         index = 0,
-                        count = 2
+                        count = 3
                     )
                 }
 
@@ -226,7 +247,50 @@ fun PodcastSettingsView(
                         description = stringResource(R.string.view_podcast_settings_subscription_enable_notifications_description),
 
                         index = 1,
-                        count = 2
+                        count = 3
+                    )
+                }
+
+                item {
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.PlaylistAdd,
+                                "Auto add to Up Next"
+                            )
+                        },
+                        label = "Auto add to Up Next",
+                        supportingContent = {
+                            Column {
+                                Text("Automatically queue new episodes when downloaded or refreshed")
+                                Spacer(Modifier.height(12.dp))
+                                val modes = listOf(
+                                    AutoAddUpNextMode.OFF to "Off",
+                                    AutoAddUpNextMode.PLAY_NEXT to "Play Next",
+                                    AutoAddUpNextMode.PLAY_LAST to "Play Last"
+                                )
+                                SingleChoiceSegmentedButtonRow(
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    modes.forEachIndexed { idx, (mode, title) ->
+                                        SegmentedButton(
+                                            selected = autoAddMode == mode,
+                                            onClick = {
+                                                scope.launch {
+                                                    settingsRepository.behavior.setPodcastAutoAddToUpNext(podcast.origin, mode)
+                                                }
+                                            },
+                                            shape = SegmentedButtonDefaults.itemShape(idx, modes.size)
+                                        ) {
+                                            Text(title, maxLines = 1)
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        index = 2,
+                        count = 3,
+                        onClick = { }
                     )
                 }
 
@@ -264,7 +328,7 @@ fun PodcastSettingsView(
                     },
 
                     index = 0,
-                    count = 2
+                    count = 3
                 )
             }
 
@@ -291,7 +355,53 @@ fun PodcastSettingsView(
                     },
 
                     index = 1,
-                    count = 2
+                    count = 3
+                )
+            }
+
+            item {
+                SettingsListItem(
+                    icon = {
+                        Icon(
+                            Icons.Rounded.Speed,
+                            "Playback speed"
+                        )
+                    },
+                    label = "Playback speed",
+                    supportingContent = {
+                        Column {
+                            Text("Override the global playback speed for this podcast")
+                            Spacer(Modifier.height(12.dp))
+                            val speeds = listOf(
+                                0f to "Global",
+                                0.8f to "0.8x",
+                                1.0f to "1.0x",
+                                1.2f to "1.2x",
+                                1.5f to "1.5x",
+                                2.0f to "2.0x"
+                            )
+                            SingleChoiceSegmentedButtonRow(
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                speeds.forEachIndexed { idx, (speedVal, label) ->
+                                    SegmentedButton(
+                                        selected = kotlin.math.abs(podcastSpeed - speedVal) < 0.01f,
+                                        onClick = {
+                                            scope.launch {
+                                                settingsRepository.behavior.setPodcastPlaybackSpeed(podcast.origin, speedVal)
+                                            }
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(idx, speeds.size)
+                                    ) {
+                                        Text(label, maxLines = 1)
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    index = 2,
+                    count = 3,
+                    onClick = { }
                 )
             }
         }

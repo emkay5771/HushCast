@@ -79,24 +79,26 @@ class AutoMuteAnalyzer(
     ): AnalysisResult {
         val startTime = System.currentTimeMillis()
         var peakRssMb = currentRssMb()
+        var currentSha = knownSha256?.takeIf { it.isNotBlank() } ?: ""
 
-        fun report(pct: Int, stage: String, badge: ReadinessBadge = ReadinessBadge.ANALYZING) {
+        suspend fun report(pct: Int, stage: String, badge: ReadinessBadge = ReadinessBadge.ANALYZING) {
             peakRssMb = maxOf(peakRssMb, currentRssMb())
             onProgress(AnalysisProgress(pct, stage, badge))
+            dao.upsertStatus(
+                EpisodeAnalysisStatusEntity(
+                    episodeId = episodeId,
+                    fileSha256 = currentSha,
+                    badge = badge.name,
+                    progressPercent = pct,
+                    stageLabel = stage,
+                    peakRssMb = peakRssMb
+                )
+            )
         }
 
         report(5, "Verifying audio file hash")
         val sha256 = knownSha256?.takeIf { it.isNotBlank() } ?: StreamingSha256.hashFile(audioFile)
-
-        dao.upsertStatus(
-            EpisodeAnalysisStatusEntity(
-                episodeId = episodeId,
-                fileSha256 = sha256,
-                badge = ReadinessBadge.ANALYZING.name,
-                progressPercent = 5,
-                stageLabel = "Preparing"
-            )
-        )
+        currentSha = sha256
 
         // Check if already indexed for this exact SHA-256
         val existingIndex = dao.getWordIndex(sha256)
@@ -119,7 +121,26 @@ class AutoMuteAnalyzer(
             val extractor = if (!quickWordMuteOnly) FrameExtractor() else null
             val pcm = PcmBuffer()
             try {
-                AudioDecoder.decode(audioFile.absolutePath, extractor, pcm)
+                var lastDecodePct = 15
+                AudioDecoder.decode(audioFile.absolutePath, extractor, pcm) { fraction ->
+                    val pct = (15 + (fraction * 19f).toInt()).coerceIn(15, 34)
+                    if (pct > lastDecodePct) {
+                        lastDecodePct = pct
+                        onProgress(AnalysisProgress(pct, "Decoding audio ($pct%)", ReadinessBadge.ANALYZING))
+                        kotlinx.coroutines.runBlocking {
+                            dao.upsertStatus(
+                                EpisodeAnalysisStatusEntity(
+                                    episodeId = episodeId,
+                                    fileSha256 = currentSha,
+                                    badge = ReadinessBadge.ANALYZING.name,
+                                    progressPercent = pct,
+                                    stageLabel = "Decoding audio",
+                                    peakRssMb = peakRssMb
+                                )
+                            )
+                        }
+                    }
+                }
                 frames = extractor?.finish()
                 peakRssMb = maxOf(peakRssMb, currentRssMb())
 

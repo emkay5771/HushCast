@@ -133,12 +133,7 @@ fun HomeRoute(
                 CenterAlignedTopAppBar(
                     scrollBehavior = scrollBehavior,
                     title = {
-                        Text(
-                            when(useAlternativeBranding.value) {
-                                false -> stringResource(R.string.app_name)
-                                true -> stringResource(R.string.app_name_alternative)
-                            }
-                        )
+                        Text(stringResource(R.string.app_name))
                     },
                     actions = {
                         FilledIconButton(

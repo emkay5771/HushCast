@@ -60,6 +60,8 @@ class PodcastEpisodeDownloadWork(
                 db.podcastEpisodeDownloads()
                     .registerDownload(episodeId, file.absolutePath)
 
+                app.podiumpodcasts.podium.background.PlaybackService.notifyEpisodeDownloaded(episodeId)
+
                 // Compute SHA-256 and enqueue background charging analysis (DAI-resilient)
                 val sha256 = withContext(Dispatchers.IO) {
                     app.hushcast.automute.hash.StreamingSha256.hashFile(file)

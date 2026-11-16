@@ -29,6 +29,7 @@ import app.hushcast.automute.storage.AutoMuteDatabase
 import app.hushcast.automute.storage.toDomain
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.SettingsRepository
+import app.podiumpodcasts.podium.api.db.model.MediaMetadataExtra
 import app.podiumpodcasts.podium.background.notification.NewPodcastEpisodeNotification
 import app.podiumpodcasts.podium.background.worker.sync.PartialSynchronizationWorker
 import app.podiumpodcasts.podium.manager.DatabaseManager
@@ -198,7 +199,46 @@ class PlaybackService : MediaLibraryService() {
             }
         }
 
+        scope.launch {
+            downloadedEpisodeEvents.collect { downloadedId ->
+                val p = mediaSession?.player ?: return@collect
+                val currentIdx = p.currentMediaItemIndex
+                for(i in 0 until p.mediaItemCount) {
+                    val item = p.getMediaItemAt(i)
+                    val extras = item.mediaMetadata.extras
+                    val epId = extras?.getString(MediaMetadataExtra.EPISODE_ID.name)
+                    val isAlreadyDownload = extras?.getBoolean(MediaMetadataExtra.IS_DOWNLOAD.name) ?: false
+                    if(epId == downloadedId && !isAlreadyDownload) {
+                        val bundle = withContext(Dispatchers.IO) {
+                            runCatching { db.podcastEpisodes().getSync(downloadedId) }.getOrNull()
+                        } ?: continue
+                        val localItem = bundle.createMediaItem(this@PlaybackService)
+                        if(i == currentIdx) {
+                            val posMs = p.currentPosition.coerceAtLeast(0L)
+                            val wasPlaying = p.playWhenReady
+                            p.replaceMediaItem(i, localItem)
+                            p.seekTo(i, posMs)
+                            p.prepare()
+                            p.playWhenReady = wasPlaying
+                        } else {
+                            p.replaceMediaItem(i, localItem)
+                        }
+                    }
+                }
+            }
+        }
+
         registerPlayStateListener()
+    }
+
+    companion object {
+        private val downloadedEpisodeEvents = kotlinx.coroutines.flow.MutableSharedFlow<String>(
+            extraBufferCapacity = 16
+        )
+
+        fun notifyEpisodeDownloaded(episodeId: String) {
+            downloadedEpisodeEvents.tryEmit(episodeId)
+        }
     }
 
     fun buildMediaButtons(

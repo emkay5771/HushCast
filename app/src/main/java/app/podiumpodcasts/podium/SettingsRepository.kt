@@ -23,15 +23,43 @@ enum class AppThemeMode {
     DARK
 }
 
+enum class SubscriptionsLayout {
+    LARGE_GRID,
+    SMALL_GRID,
+    LIST
+}
+
+enum class SubscriptionsSort {
+    A_Z,
+    RECENTLY_ADDED
+}
+
+enum class SubscriptionsBadgeMode {
+    UNPLAYED_COUNT,
+    LATEST_ONLY,
+    OFF
+}
+
+enum class AutoAddUpNextMode {
+    OFF,
+    PLAY_NEXT,
+    PLAY_LAST
+}
+
 object SettingsKeys {
     val APPEARANCE_THEME_MODE = stringPreferencesKey("appearance_theme_mode")
     val APPEARANCE_ENABLE_ARTWORK_COLORS = booleanPreferencesKey("appearance_enable_artwork_colors")
     val APPEARANCE_ENABLE_DYNAMIC_COLORS = booleanPreferencesKey("appearance_enable_dynamic_colors")
     val APPEARANCE_USE_ALTERNATIVE_BRANDING =
         booleanPreferencesKey("appearance_use_alternative_branding")
+    val APPEARANCE_SUBSCRIPTIONS_LAYOUT = stringPreferencesKey("appearance_subscriptions_layout")
+    val APPEARANCE_SUBSCRIPTIONS_SORT = stringPreferencesKey("appearance_subscriptions_sort")
+    val APPEARANCE_SUBSCRIPTIONS_BADGE_MODE = stringPreferencesKey("appearance_subscriptions_badge_mode")
 
     val BEHAVIOR_PLAYER_PLAYBACK_SPEED =
         floatPreferencesKey("behavior_player_playback_speed")
+    val BEHAVIOR_TAP_UP_NEXT_TO_PLAY =
+        booleanPreferencesKey("behavior_tap_up_next_to_play")
     val BEHAVIOR_DISCOVER_COUNTRY_CODE =
         stringPreferencesKey("behavior_discover_country_code")
     val BEHAVIOR_PLAYER_SEEK_BACK_INCREMENT =
@@ -137,6 +165,39 @@ class SettingsRepository(val context: Context) {
                 preferences[SettingsKeys.APPEARANCE_USE_ALTERNATIVE_BRANDING] = enable
             }
         }
+
+        val subscriptionsLayout: Flow<SubscriptionsLayout> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.APPEARANCE_SUBSCRIPTIONS_LAYOUT]
+                runCatching { raw?.let { SubscriptionsLayout.valueOf(it) } }.getOrNull()
+                    ?: SubscriptionsLayout.LARGE_GRID
+            }
+
+        suspend fun setSubscriptionsLayout(layout: SubscriptionsLayout) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_SUBSCRIPTIONS_LAYOUT] = layout.name
+        }
+
+        val subscriptionsSort: Flow<SubscriptionsSort> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.APPEARANCE_SUBSCRIPTIONS_SORT]
+                runCatching { raw?.let { SubscriptionsSort.valueOf(it) } }.getOrNull()
+                    ?: SubscriptionsSort.RECENTLY_ADDED
+            }
+
+        suspend fun setSubscriptionsSort(sort: SubscriptionsSort) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_SUBSCRIPTIONS_SORT] = sort.name
+        }
+
+        val subscriptionsBadgeMode: Flow<SubscriptionsBadgeMode> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.APPEARANCE_SUBSCRIPTIONS_BADGE_MODE]
+                runCatching { raw?.let { SubscriptionsBadgeMode.valueOf(it) } }.getOrNull()
+                    ?: SubscriptionsBadgeMode.UNPLAYED_COUNT
+            }
+
+        suspend fun setSubscriptionsBadgeMode(mode: SubscriptionsBadgeMode) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_SUBSCRIPTIONS_BADGE_MODE] = mode.name
+        }
     }
 
     inner class Behavior {
@@ -147,6 +208,45 @@ class SettingsRepository(val context: Context) {
 
         suspend fun setPlayerPlaybackSpeed(speed: Float) = dataStore.edit { preferences ->
             preferences[SettingsKeys.BEHAVIOR_PLAYER_PLAYBACK_SPEED] = speed
+        }
+
+        val tapUpNextToPlay: Flow<Boolean> = dataStore.data
+            .map { preferences ->
+                preferences[SettingsKeys.BEHAVIOR_TAP_UP_NEXT_TO_PLAY] ?: true
+            }
+
+        suspend fun setTapUpNextToPlay(enable: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_TAP_UP_NEXT_TO_PLAY] = enable
+        }
+
+        fun podcastAutoAddToUpNext(origin: String): Flow<AutoAddUpNextMode> {
+            val key = stringPreferencesKey("podcast_auto_upnext_${origin.hashCode()}")
+            return dataStore.data.map { preferences ->
+                val raw = preferences[key]
+                runCatching { raw?.let { AutoAddUpNextMode.valueOf(it) } }.getOrNull()
+                    ?: AutoAddUpNextMode.OFF
+            }
+        }
+
+        suspend fun setPodcastAutoAddToUpNext(origin: String, mode: AutoAddUpNextMode) {
+            val key = stringPreferencesKey("podcast_auto_upnext_${origin.hashCode()}")
+            dataStore.edit { preferences ->
+                preferences[key] = mode.name
+            }
+        }
+
+        fun podcastPlaybackSpeed(origin: String): Flow<Float> {
+            val key = floatPreferencesKey("podcast_speed_${origin.hashCode()}")
+            return dataStore.data.map { preferences ->
+                preferences[key] ?: 0f
+            }
+        }
+
+        suspend fun setPodcastPlaybackSpeed(origin: String, speed: Float) {
+            val key = floatPreferencesKey("podcast_speed_${origin.hashCode()}")
+            dataStore.edit { preferences ->
+                preferences[key] = speed
+            }
         }
 
         fun getDiscoverCountryCode(default: String): Flow<String> {

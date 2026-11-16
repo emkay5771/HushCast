@@ -52,6 +52,7 @@ import app.podiumpodcasts.podium.ui.component.media.FloatingMediaPlayerHeight
 import app.podiumpodcasts.podium.ui.component.media.LocalFloatingMediaPlayerHeight
 import app.podiumpodcasts.podium.ui.component.media.LocalFloatingMediaPlayerShown
 import app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.MediaPlayerBottomSheet
+import app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.MediaPlayerQueueBottomSheet
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 import app.podiumpodcasts.podium.ui.navigation.Home
@@ -165,6 +166,7 @@ fun Main(
 
     val floatingMediaPlayerShown = remember { mutableStateOf(false) }
     val floatingMediaPlayerHeightAnimation = remember { Animatable(0f) }
+    val showQueueBottomSheet = remember { mutableStateOf(false) }
 
     NavBarScaffold(
         layoutType = navigationScaffoldLayoutType,
@@ -191,6 +193,9 @@ fun Main(
                                     0f
                             )
                         }
+                    },
+                    onOpenQueue = {
+                        showQueueBottomSheet.value = true
                     },
                     onClick = {
                         vm.showMediaPlayerBottomSheet.value = true
@@ -309,7 +314,36 @@ fun Main(
                     )
                 }
             },
+            onOpenPodcast = { origin ->
+                vm.showMediaPlayerBottomSheet.value = false
+
+                scope.launch {
+                    listDetailNavigator.navigateTo(
+                        pane = ThreePaneScaffoldRole.Primary,
+                        contentKey = DetailPaneKey.PodcastKey(
+                            origin = origin
+                        )
+                    )
+                }
+            },
             onDismiss = { vm.showMediaPlayerBottomSheet.value = false }
+        )
+
+        if(showQueueBottomSheet.value) MediaPlayerQueueBottomSheet(
+            onOpenEpisode = { origin, id ->
+                showQueueBottomSheet.value = false
+
+                scope.launch {
+                    listDetailNavigator.navigateTo(
+                        pane = ThreePaneScaffoldRole.Primary,
+                        contentKey = DetailPaneKey.EpisodeKey(
+                            episodeOrigin = origin,
+                            episodeId = id
+                        )
+                    )
+                }
+            },
+            onDismiss = { showQueueBottomSheet.value = false }
         )
     }
 }

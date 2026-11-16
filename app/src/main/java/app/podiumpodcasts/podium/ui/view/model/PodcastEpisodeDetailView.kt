@@ -265,6 +265,12 @@ fun PodcastEpisodeDetailView(
                                 )
                             )
 
+                            Spacer(Modifier.width(4.dp))
+
+                            app.podiumpodcasts.podium.ui.component.model.episode.PodcastEpisodeQueueButton(
+                                bundle = bundle
+                            )
+
                             Spacer(Modifier.width(8.dp))
 
                             VerticalDivider(

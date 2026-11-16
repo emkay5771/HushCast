@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.CardDefaults
@@ -30,6 +32,7 @@ import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalIconToggleButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -43,6 +46,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -67,6 +71,7 @@ fun FloatingMediaPlayer(
     hide: Boolean = false,
     showMediaPlayerBottomSheet: Boolean = false,
     onMediaPlayerShownChange: (shown: Boolean) -> Unit,
+    onOpenQueue: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     val settingsRepository = LocalSettingsRepository.current
@@ -104,7 +109,20 @@ fun FloatingMediaPlayer(
                             .padding(start = 32.dp)
                             .widthIn(min = 50.dp, max = FloatingMediaPlayerMaxWidth)
                             .height(FloatingMediaPlayerHeight)
-                            .border(1.dp, MaterialTheme.colorScheme.primary, CircleShape),
+                            .border(1.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                            .pointerInput(Unit) {
+                                var totalDrag = 0f
+                                detectVerticalDragGestures(
+                                    onDragStart = { totalDrag = 0f },
+                                    onVerticalDrag = { _, dragAmount ->
+                                        totalDrag += dragAmount
+                                        if(totalDrag < -40f) {
+                                            totalDrag = 0f
+                                            onClick()
+                                        }
+                                    }
+                                )
+                            },
                         shape = CircleShape,
                         colors = CardDefaults.elevatedCardColors(
                             containerColor = MaterialTheme.colorScheme.background,
@@ -144,7 +162,7 @@ fun FloatingMediaPlayer(
                                 }
                             }
 
-                            Spacer(Modifier.width(16.dp))
+                            Spacer(Modifier.width(12.dp))
 
                             Column(
                                 Modifier
@@ -179,7 +197,16 @@ fun FloatingMediaPlayer(
                                 )
                             }
 
-                            Spacer(Modifier.width(16.dp))
+                            Spacer(Modifier.width(8.dp))
+
+                            onOpenQueue?.let { openQueue ->
+                                IconButton(onClick = openQueue) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                                        contentDescription = "Up Next"
+                                    )
+                                }
+                            }
 
                             FilledTonalIconToggleButton(
                                 checked = vm.isPlaying,
