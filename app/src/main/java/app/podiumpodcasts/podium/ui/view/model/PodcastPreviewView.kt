@@ -98,6 +98,7 @@ fun PodcastPreviewView(
 
     DynamicMaterialExpressiveTheme(
         seedColor = vm.seedColor ?: MaterialTheme.colorScheme.primary,
+        isDark = app.podiumpodcasts.podium.ui.theme.LocalDarkTheme.current,
         animate = true
     ) {
         Surface(

@@ -22,6 +22,7 @@ import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import app.podiumpodcasts.podium.SettingsRepository
 import app.podiumpodcasts.podium.api.db.AppDatabase
 import app.podiumpodcasts.podium.api.db.model.MediaMetadataExtra
 import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeBundle
@@ -29,12 +30,14 @@ import app.podiumpodcasts.podium.background.COMMAND_SET_SEEK_BACK_INCREMENT
 import app.podiumpodcasts.podium.background.COMMAND_SET_SEEK_FORWARD_INCREMENT
 import app.podiumpodcasts.podium.background.COMMAND_SLEEP_TIMER_GET
 import app.podiumpodcasts.podium.background.COMMAND_SLEEP_TIMER_SET
+import app.podiumpodcasts.podium.manager.DownloadManager
 import app.podiumpodcasts.podium.utils.getEpisodeId
 import app.podiumpodcasts.podium.utils.getImageSeedColor
 import app.podiumpodcasts.podium.utils.getOrigin
 import app.podiumpodcasts.podium.utils.isDownload
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
@@ -113,6 +116,7 @@ class MediaPlayerViewModel : ViewModel() {
 
         mediaController?.addMediaItem(mediaItem)
         syncQueue(persist = true)
+        autoDownloadIfEnabled(context, bundle)
     }
 
     fun playNext(
@@ -125,6 +129,49 @@ class MediaPlayerViewModel : ViewModel() {
         else (controller.currentMediaItemIndex + 1).coerceIn(0, controller.mediaItemCount)
 
         controller.addMediaItem(insertIndex, mediaItem)
+        syncQueue(persist = true)
+        autoDownloadIfEnabled(context, bundle)
+    }
+
+    private fun autoDownloadIfEnabled(
+        context: Context,
+        bundle: PodcastEpisodeBundle
+    ) {
+        if(!::db.isInitialized) return
+        val appCtx = context.applicationContext
+        if(bundle.episode.craftDownloadFile(appCtx).exists()) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val enabled = SettingsRepository(appCtx).behavior.autoDownloadQueue.first()
+            if(enabled) {
+                DownloadManager.downloadEpisode(
+                    context = appCtx,
+                    db = db,
+                    episodeId = bundle.episode.id,
+                    auto = true
+                )
+            }
+        }
+    }
+
+    fun playFromQueue(queuePos: Int) {
+        val controller = mediaController ?: return
+        if(queuePos !in queueIndex.indices) return
+
+        val playerIndex = queueIndex[queuePos]
+        if(playerIndex !in 0 until controller.mediaItemCount) return
+
+        val targetIndex = if(controller.currentMediaItemIndex >= 0) {
+            (controller.currentMediaItemIndex + 1).coerceIn(0, controller.mediaItemCount - 1)
+        } else {
+            0
+        }
+
+        if(playerIndex != targetIndex) {
+            controller.moveMediaItem(playerIndex, targetIndex)
+        }
+        controller.seekToDefaultPosition(targetIndex)
+        controller.play()
         syncQueue(persist = true)
     }
 

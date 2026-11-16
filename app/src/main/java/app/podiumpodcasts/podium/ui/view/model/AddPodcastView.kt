@@ -247,7 +247,8 @@ fun AddPodcastView(
 
                     DynamicMaterialExpressiveTheme(
                         seedColor = vm.seedColor
-                            ?: MaterialTheme.colorScheme.primary
+                            ?: MaterialTheme.colorScheme.primary,
+                        isDark = app.podiumpodcasts.podium.ui.theme.LocalDarkTheme.current
                     ) {
                         FilledIconButton(
                             onClick = { vm.addPodcast() },

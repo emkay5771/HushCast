@@ -4,10 +4,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.PlaylistRemove
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.SegmentedListItem
 import androidx.compose.material3.Text
@@ -31,6 +33,7 @@ fun MediaItemListItem(
     mediaItem: MediaItem,
     index: Int = 0,
     count: Int = 0,
+    onOpenDetails: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     val vm = viewModel<MediaPlayerViewModel>()
@@ -63,6 +66,14 @@ fun MediaItemListItem(
         },
         trailingContent = {
             Row {
+                onOpenDetails?.let { openDetails ->
+                    IconButton(onClick = openDetails) {
+                        Icon(
+                            imageVector = Icons.Rounded.Info,
+                            contentDescription = stringResource(R.string.common_info)
+                        )
+                    }
+                }
                 FilledIconButton(
                     onClick = {
                         vm.dequeue(mediaItem.getEpisodeId())

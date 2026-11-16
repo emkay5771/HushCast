@@ -92,19 +92,19 @@ fun Navigation(
         backStack = backStack,
         onBack = onBack,
         transitionSpec = {
-            (fadeIn(animationSpec = tween(220, delayMillis = 90)) +
-                    scaleIn(initialScale = 0.92f, animationSpec = tween(220, delayMillis = 90)))
-                .togetherWith(fadeOut(animationSpec = tween(90)))
+            (fadeIn(animationSpec = tween(180)) +
+                    scaleIn(initialScale = 0.96f, animationSpec = tween(180)))
+                .togetherWith(fadeOut(animationSpec = tween(150)))
         },
         popTransitionSpec = {
-            (fadeIn(animationSpec = tween(220, delayMillis = 90)) +
-                    scaleIn(initialScale = 0.92f, animationSpec = tween(220, delayMillis = 90)))
-                .togetherWith(fadeOut(animationSpec = tween(90)))
+            (fadeIn(animationSpec = tween(180)) +
+                    scaleIn(initialScale = 0.96f, animationSpec = tween(180)))
+                .togetherWith(fadeOut(animationSpec = tween(150)))
         },
         predictivePopTransitionSpec = {
-            (fadeIn(animationSpec = tween(220, delayMillis = 90)) +
-                    scaleIn(initialScale = 0.92f, animationSpec = tween(220, delayMillis = 90)))
-                .togetherWith(fadeOut(animationSpec = tween(90)))
+            (fadeIn(animationSpec = tween(180)) +
+                    scaleIn(initialScale = 0.96f, animationSpec = tween(180)))
+                .togetherWith(fadeOut(animationSpec = tween(150)))
         },
         entryProvider = { key ->
             when(key) {

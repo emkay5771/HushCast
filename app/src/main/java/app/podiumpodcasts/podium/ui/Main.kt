@@ -9,10 +9,12 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.VerticalDragHandle
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
@@ -87,10 +89,10 @@ open class DetailPaneKey : Parcelable {
     ) : DetailPaneKey()
 }
 
-val enterSpec = fadeIn(animationSpec = tween(220, delayMillis = 90)) +
-        scaleIn(initialScale = 0.92f, animationSpec = tween(220, delayMillis = 90))
+val enterSpec = fadeIn(animationSpec = tween(180)) +
+        scaleIn(initialScale = 0.96f, animationSpec = tween(180))
 
-val exitSpec = fadeOut(animationSpec = tween(90))
+val exitSpec = fadeOut(animationSpec = tween(150))
 
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
@@ -354,68 +356,72 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
                 val podcast = vm.fetchPodcast(contentKey.origin)
                     .collectAsState(null)
 
-                podcast.value?.let { podcast ->
-                    AnimatedPane(
-                        enterTransition = enterSpec,
-                        exitTransition = exitSpec
+                AnimatedPane(
+                    enterTransition = enterSpec,
+                    exitTransition = exitSpec
+                ) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize()
                     ) {
-                        SwitchableDynamicMaterialExpressiveTheme(
-                            enable = enableArtworkColors.value,
-                            seedColor = Color(podcast.imageSeedColor)
-                        ) {
-                            val displayBundle = remember { mutableStateOf(false) }
-                            val episodeId = remember { mutableStateOf<String?>(null) }
+                        podcast.value?.let { podcast ->
+                            SwitchableDynamicMaterialExpressiveTheme(
+                                enable = enableArtworkColors.value,
+                                seedColor = Color(podcast.imageSeedColor)
+                            ) {
+                                val displayBundle = remember { mutableStateOf(false) }
+                                val episodeId = remember { mutableStateOf<String?>(null) }
 
-                            val bundle = episodeId.value?.let {
-                                vm.fetchEpisode(it)
-                                    .collectAsState(null)
-                            }
+                                val bundle = episodeId.value?.let {
+                                    vm.fetchEpisode(it)
+                                        .collectAsState(null)
+                                }
 
-                            LaunchedEffect(contentKey, bundle?.value) {
-                                if(contentKey is DetailPaneKey.PodcastEpisodeKey)
-                                    episodeId.value = contentKey.episodeId
+                                LaunchedEffect(contentKey, bundle?.value) {
+                                    if(contentKey is DetailPaneKey.PodcastEpisodeKey)
+                                        episodeId.value = contentKey.episodeId
 
-                                displayBundle.value = bundle?.value != null
-                                        && contentKey is DetailPaneKey.PodcastEpisodeKey
-                            }
+                                    displayBundle.value = bundle?.value != null
+                                            && contentKey is DetailPaneKey.PodcastEpisodeKey
+                                }
 
-                            AnimatedContent(
-                                targetState = displayBundle.value
-                            ) { isBundle ->
-                                when(isBundle) {
-                                    false -> PodcastDetailView(
-                                        podcast = podcast,
-                                        onBack = {
-                                            scope.launch {
-                                                scaffoldNavigator.navigateBack(
-                                                    backNavigationBehavior = BackNavigationBehavior.PopLatest
-                                                )
-                                            }
-                                        },
-                                        onClickEpisode = { episode ->
-                                            scope.launch {
-                                                scaffoldNavigator.navigateTo(
-                                                    pane = ThreePaneScaffoldRole.Primary,
-                                                    contentKey = DetailPaneKey.PodcastEpisodeKey(
-                                                        episodeOrigin = podcast.origin,
-                                                        episodeId = episode.id
+                                AnimatedContent(
+                                    targetState = displayBundle.value
+                                ) { isBundle ->
+                                    when(isBundle) {
+                                        false -> PodcastDetailView(
+                                            podcast = podcast,
+                                            onBack = {
+                                                scope.launch {
+                                                    scaffoldNavigator.navigateBack(
+                                                        backNavigationBehavior = BackNavigationBehavior.PopLatest
                                                     )
-                                                )
+                                                }
+                                            },
+                                            onClickEpisode = { episode ->
+                                                scope.launch {
+                                                    scaffoldNavigator.navigateTo(
+                                                        pane = ThreePaneScaffoldRole.Primary,
+                                                        contentKey = DetailPaneKey.PodcastEpisodeKey(
+                                                            episodeOrigin = podcast.origin,
+                                                            episodeId = episode.id
+                                                        )
+                                                    )
+                                                }
                                             }
-                                        }
-                                    )
+                                        )
 
-                                    true -> PodcastEpisodeDetailView(
-                                        bundle = bundle!!.value!!,
-                                        parent = podcast,
-                                        onBack = {
-                                            scope.launch {
-                                                scaffoldNavigator.navigateBack(
-                                                    backNavigationBehavior = BackNavigationBehavior.PopLatest
-                                                )
+                                        true -> PodcastEpisodeDetailView(
+                                            bundle = bundle!!.value!!,
+                                            parent = podcast,
+                                            onBack = {
+                                                scope.launch {
+                                                    scaffoldNavigator.navigateBack(
+                                                        backNavigationBehavior = BackNavigationBehavior.PopLatest
+                                                    )
+                                                }
                                             }
-                                        }
-                                    )
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -430,37 +436,41 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
                 val podcast = vm.fetchPodcast(contentKey.episodeOrigin)
                     .collectAsState(null)
 
-                bundle.value?.let { bundle ->
-                    AnimatedPane(
-                        enterTransition = enterSpec,
-                        exitTransition = exitSpec
+                AnimatedPane(
+                    enterTransition = enterSpec,
+                    exitTransition = exitSpec
+                ) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize()
                     ) {
-                        SwitchableDynamicMaterialExpressiveTheme(
-                            enable = enableArtworkColors.value,
-                            seedColor = Color(bundle.episode.imageSeedColor)
-                        ) {
-                            PodcastEpisodeDetailView(
-                                bundle = bundle,
-                                parent = podcast.value,
-                                showParentLink = true,
-                                onShowParent = {
-                                    scope.launch {
-                                        scaffoldNavigator.navigateTo(
-                                            pane = ThreePaneScaffoldRole.Primary,
-                                            contentKey = DetailPaneKey.PodcastKey(
-                                                origin = contentKey.episodeOrigin
+                        bundle.value?.let { bundle ->
+                            SwitchableDynamicMaterialExpressiveTheme(
+                                enable = enableArtworkColors.value,
+                                seedColor = Color(bundle.episode.imageSeedColor)
+                            ) {
+                                PodcastEpisodeDetailView(
+                                    bundle = bundle,
+                                    parent = podcast.value,
+                                    showParentLink = true,
+                                    onShowParent = {
+                                        scope.launch {
+                                            scaffoldNavigator.navigateTo(
+                                                pane = ThreePaneScaffoldRole.Primary,
+                                                contentKey = DetailPaneKey.PodcastKey(
+                                                    origin = contentKey.episodeOrigin
+                                                )
                                             )
-                                        )
+                                        }
+                                    },
+                                    onBack = {
+                                        scope.launch {
+                                            scaffoldNavigator.navigateBack(
+                                                backNavigationBehavior = BackNavigationBehavior.PopLatest
+                                            )
+                                        }
                                     }
-                                },
-                                onBack = {
-                                    scope.launch {
-                                        scaffoldNavigator.navigateBack(
-                                            backNavigationBehavior = BackNavigationBehavior.PopLatest
-                                        )
-                                    }
-                                }
-                            )
+                                )
+                            }
                         }
                     }
                 }

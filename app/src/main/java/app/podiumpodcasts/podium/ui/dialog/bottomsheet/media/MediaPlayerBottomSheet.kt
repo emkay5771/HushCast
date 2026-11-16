@@ -208,7 +208,7 @@ fun MediaPlayerBottomSheet(
                     )
             ) {
                 Column(
-                    Modifier.padding(16.dp),
+                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     AnimatedContent(
@@ -222,7 +222,7 @@ fun MediaPlayerBottomSheet(
                                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                                 ) {
                                     Row(
-                                        Modifier.padding(8.dp),
+                                        Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
@@ -248,7 +248,7 @@ fun MediaPlayerBottomSheet(
                                     contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                                 ) {
                                     Row(
-                                        Modifier.padding(8.dp),
+                                        Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Icon(
@@ -280,7 +280,7 @@ fun MediaPlayerBottomSheet(
                                     )
                                 }
                             }
-                            .padding(16.dp),
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         if(!compactLayout) {
@@ -289,7 +289,7 @@ fun MediaPlayerBottomSheet(
                                 compactLayout = false
                             )
 
-                            Spacer(Modifier.height(32.dp))
+                            Spacer(Modifier.height(16.dp))
                         }
 
                         AnimatedContent(vm.mediaMetadata) { mediaMetadata ->
@@ -360,7 +360,7 @@ fun MediaPlayerBottomSheet(
                     }
 
                     Column(
-                        Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                        Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         if (isCastingExternal) {
@@ -428,7 +428,7 @@ fun MediaPlayerBottomSheet(
                             )
                         }
 
-                        Spacer(Modifier.height(32.dp))
+                        Spacer(Modifier.height(16.dp))
 
                         ButtonGroup(
                             horizontalArrangement = Arrangement.Center
@@ -624,7 +624,7 @@ fun MediaPlayerBottomSheet(
                     if(vm.queue.isNotEmpty()) Button(
                         modifier = Modifier
                             .heightIn(size)
-                            .padding(4.dp),
+                            .padding(vertical = 2.dp),
                         contentPadding = ButtonDefaults.contentPaddingFor(size),
                         shapes = ButtonDefaults.shapesFor(size),
                         colors = colors,
@@ -643,6 +643,7 @@ fun MediaPlayerBottomSheet(
 
                             Text(
                                 text = stringResource(R.string.common_queue),
+                                maxLines = 1,
                                 style = ButtonDefaults.textStyleFor(size)
                             )
                         }
@@ -650,7 +651,7 @@ fun MediaPlayerBottomSheet(
                     Button(
                         modifier = Modifier
                             .heightIn(size)
-                            .padding(4.dp),
+                            .padding(vertical = 2.dp),
                         contentPadding = ButtonDefaults.contentPaddingFor(size),
                         shapes = ButtonDefaults.shapesFor(size),
                         colors = if (showTranscript) ButtonDefaults.buttonColors() else colors,
@@ -663,7 +664,11 @@ fun MediaPlayerBottomSheet(
                                 modifier = Modifier.size(ButtonDefaults.iconSizeFor(size))
                             )
                             Spacer(Modifier.size(ButtonDefaults.iconSpacingFor(size)))
-                            Text("Transcript", style = ButtonDefaults.textStyleFor(size))
+                            Text(
+                                text = "Transcript",
+                                maxLines = 1,
+                                style = ButtonDefaults.textStyleFor(size)
+                            )
                         }
                     }
                 }
@@ -735,7 +740,7 @@ private fun Image(
 ) {
     val size = when(compactLayout) {
         true -> 96.dp
-        false -> 256.dp
+        false -> 196.dp
     }
 
     AnimatedContent(mediaPlayerViewModel.isLoading) { isLoading ->

@@ -118,7 +118,7 @@ fun MediaPlayerQueueBottomSheet(
                                 mediaItem = mediaItem,
                                 index = queueIndexIndex,
                                 count = vm.queueIndex.size,
-                                onClick = {
+                                onOpenDetails = {
                                     scope.launch {
                                         sheetState.hide()
                                         onDismiss()
@@ -126,6 +126,13 @@ fun MediaPlayerQueueBottomSheet(
                                             mediaItem.getOrigin(),
                                             mediaItem.getEpisodeId()
                                         )
+                                    }
+                                },
+                                onClick = {
+                                    vm.playFromQueue(queueIndexIndex)
+                                    scope.launch {
+                                        sheetState.hide()
+                                        onDismiss()
                                     }
                                 }
                             )

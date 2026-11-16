@@ -163,7 +163,33 @@ fun SettingsDownloadsAndStoragePane(
                     description = stringResource(R.string.route_settings_downloads_and_storage_include_automatic_downloads_description),
 
                     index = 2,
-                    count = 3
+                    count = 4
+                )
+            }
+
+            item {
+                val autoDownloadQueue =
+                    vm.repository.behavior.autoDownloadQueue.collectAsState(false)
+
+                SettingsSwitchListItem(
+                    checked = autoDownloadQueue.value,
+                    onCheckedChange = {
+                        scope.launch {
+                            vm.repository.behavior.setAutoDownloadQueue(it)
+                        }
+                    },
+
+                    icon = {
+                        Icon(
+                            Icons.Rounded.FileDownload,
+                            "Auto-download queued episodes"
+                        )
+                    },
+                    label = "Auto-download queued episodes",
+                    description = "Automatically download episodes when added to the playback queue",
+
+                    index = 3,
+                    count = 4
                 )
             }
 

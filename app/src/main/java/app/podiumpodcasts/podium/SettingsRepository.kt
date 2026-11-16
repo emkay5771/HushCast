@@ -46,6 +46,8 @@ object SettingsKeys {
     val BEHAVIOR_DOWNLOAD_IN_ROAMING = booleanPreferencesKey("behavior_download_in_roaming")
     val BEHAVIOR_AUTO_DOWNLOADS_APPLY_SETTINGS =
         booleanPreferencesKey("behavior_auto_downloads_apply_settings")
+    val BEHAVIOR_AUTO_DOWNLOAD_QUEUE =
+        booleanPreferencesKey("behavior_auto_download_queue")
     val BEHAVIOR_DELETE_PLAYED_DOWNLOADS = booleanPreferencesKey("behavior_delete_played_downloads")
     val BEHAVIOR_DELETE_DOWNLOADS_AFTER_SECONDS =
         intPreferencesKey("behavior_delete_downloads_after_seconds")
@@ -214,6 +216,16 @@ class SettingsRepository(val context: Context) {
         suspend fun setApplySettingsForAutoDownloads(enable: Boolean) =
             dataStore.edit { preferences ->
                 preferences[SettingsKeys.BEHAVIOR_AUTO_DOWNLOADS_APPLY_SETTINGS] = enable
+            }
+
+        val autoDownloadQueue: Flow<Boolean> = dataStore.data
+            .map { preferences ->
+                preferences[SettingsKeys.BEHAVIOR_AUTO_DOWNLOAD_QUEUE] ?: false
+            }
+
+        suspend fun setAutoDownloadQueue(enable: Boolean) =
+            dataStore.edit { preferences ->
+                preferences[SettingsKeys.BEHAVIOR_AUTO_DOWNLOAD_QUEUE] = enable
             }
 
         val deletePlayedDownloads: Flow<Boolean> = dataStore.data
