@@ -57,7 +57,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -f RELEASE_NOTES.md ]; then
-            cp RELEASE_NOTES.md /tmp/release_notes.md
+            awk '/^---$/{exit} {print}' RELEASE_NOTES.md > /tmp/release_notes.md
           else
             cat <<'EOF' > /tmp/release_notes.md
           HushCast Android APK (`arm64-v8a`, Android 8.0+ / API 26+).

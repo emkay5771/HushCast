@@ -1,6 +1,7 @@
 package app.podiumpodcasts.podium.ui.component.model
 
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Badge
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Text
@@ -38,7 +39,9 @@ fun SubscriptionCard(
                         )
                     }
                     SubscriptionsBadgeMode.LATEST_ONLY -> Badge(
-                        Modifier.offset((-5).dp, 5.dp)
+                        Modifier
+                            .offset((-6).dp, 6.dp)
+                            .size(10.dp)
                     )
                     SubscriptionsBadgeMode.OFF -> {}
                 }

@@ -153,7 +153,9 @@ fun FolderCard(
                             Text(totalUnread.toString())
                         }
                         SubscriptionsBadgeMode.LATEST_ONLY -> Badge(
-                            Modifier.offset((-5).dp, 5.dp)
+                            Modifier
+                                .offset((-6).dp, 6.dp)
+                                .size(10.dp)
                         )
                         SubscriptionsBadgeMode.OFF -> {}
                     }

@@ -1,3 +1,21 @@
+# HushCast v0.1.15-hushcast
+
+## What's New
+- **Episode & Queue AI Analysis Status + One-Tap Analyze**:
+  - Episode list items (`PodcastEpisodeListItem`) and Up Next queue rows (`MediaItemListItem`) now display HushCast readiness badges (`AI Ready`, `Word-Mute`, or live `%` progress) and a one-tap **Analyze** (`AutoAwesome`) button so you can analyze downloaded episodes without queueing them.
+- **Miniplayer Seek Controls (M3E)**:
+  - Added Pocket Casts-style fast-forward and rewind buttons flanking the Play/Pause control in `FloatingMediaPlayer`, styled with Material 3 Expressive sizing and dynamic seek increments.
+- **Cleaner Folder Editing UI**:
+  - Replaced the per-item `× Remove` text buttons in `FolderBottomSheet` with a header `Edit` / `Done` toggle and subtle top-right `×` badges on tiles in edit mode.
+- **Home Grid Badges, Layout & Add Button Polish**:
+  - Recalculated unplayed episode counts on Home load and enlarged the `LATEST_ONLY` dot badge so grid count and dot badges update reliably.
+  - Removed the redundant "Continue Playing" carousel from Home now that the miniplayer persists across restarts.
+  - Replaced the oversized extended Add FAB on Home with a compact `SmallFloatingActionButton`.
+- **Single-Version GitHub Release Notes**:
+  - Updated `release-apk.yml` so GitHub Releases only include the latest release section above the first `---` separator.
+
+---
+
 # HushCast v0.1.14-hushcast
 
 ## What's New

@@ -38,13 +38,11 @@ import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MediumExtendedFloatingActionButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -57,7 +55,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -89,7 +86,6 @@ import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 import app.podiumpodcasts.podium.ui.helper.PagerScaffold
 import app.podiumpodcasts.podium.ui.theme.Typography
-import app.podiumpodcasts.podium.ui.vm.home.ContinuePlayingViewModel
 import app.podiumpodcasts.podium.ui.vm.home.SubscriptionsViewModel
 import kotlinx.coroutines.launch
 
@@ -118,16 +114,15 @@ fun HomeRoute(
     val settingsRepository = LocalSettingsRepository.current
 
     val subscriptionsVm = viewModel { SubscriptionsViewModel(db) }
-    val continuePlayingVm = viewModel { ContinuePlayingViewModel(db) }
 
     val subscriptionsPager = subscriptionsVm.subscriptions.collectAsLazyPagingItems()
-    val continuePlayingPager = continuePlayingVm.continuePlaying.collectAsLazyPagingItems()
 
     val context = androidx.compose.ui.platform.LocalContext.current
     androidx.compose.runtime.LaunchedEffect(Unit) {
         app.podiumpodcasts.podium.PodcastGridOrganization.init(context)
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             db.podcastSubscriptions().subscribeAllExistingPodcasts()
+            db.podcastSubscriptions().recalculateAllNewEpisodesCounts()
         }
     }
 
@@ -197,16 +192,6 @@ fun HomeRoute(
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val gridState = rememberLazyGridState()
     val listState = rememberLazyListState()
-
-    val expandedFab by remember {
-        derivedStateOf {
-            if(layout == SubscriptionsLayout.LIST) {
-                listState.firstVisibleItemIndex == 0
-            } else {
-                gridState.firstVisibleItemIndex == 0
-            }
-        }
-    }
 
     if (showCreateFolderDialog) {
         CreateFolderDialog(
@@ -375,26 +360,22 @@ fun HomeRoute(
                 )
             },
             floatingActionButton = {
-                MediumExtendedFloatingActionButton(
+                androidx.compose.material3.SmallFloatingActionButton(
                     modifier = Modifier.padding(
                         bottom = if(maxWidth <= FloatingMediaPlayerBreakpoint)
                             LocalFloatingMediaPlayerHeight.current
                         else
                             0.dp
                     ),
-                    expanded = expandedFab,
-                    text = {
-                        Text(stringResource(R.string.common_action_add))
-                    },
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Add,
-                            contentDescription = stringResource(R.string.common_action_add),
-                            modifier = Modifier.size(FloatingActionButtonDefaults.MediumIconSize),
-                        )
-                    },
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     onClick = onClickAddPodcast
-                )
+                ) {
+                    Icon(
+                        Icons.Rounded.Add,
+                        contentDescription = stringResource(R.string.common_action_add)
+                    )
+                }
             }
         ) { inset ->
             Box(
@@ -615,32 +596,6 @@ fun HomeRoute(
                             horizontalArrangement = Arrangement.spacedBy(gridSpacing),
                             verticalArrangement = Arrangement.spacedBy(gridSpacing)
                         ) {
-                            if(continuePlayingPager.itemCount > 0) {
-                                continuePlayingPager[0]?.let { item ->
-                                    item(
-                                        key = "CONTINUE_PLAYING",
-                                        span = { GridItemSpan(maxLineSpan) },
-                                        contentType = "continue"
-                                    ) {
-                                        Column(Modifier.padding(bottom = 4.dp)) {
-                                            TextButton(onClick = onClickContinuePlaying) {
-                                                Text(stringResource(R.string.route_continue_playing))
-                                            }
-                                            PodcastEpisodeListItem(
-                                                bundle = item.toPodcastEpisodeBundle(),
-                                                descriptionText = item.episode.podcastTitle,
-                                                index = 0,
-                                                count = 1,
-                                                colors = ListItemDefaults.segmentedColors(
-                                                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
-                                                ),
-                                                onClick = { onClickEpisode(item.episode) }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
                             items(
                                 count = gridEntries.size,
                                 key = { gridEntries[it].first },

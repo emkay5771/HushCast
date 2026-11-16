@@ -1,5 +1,6 @@
 package app.podiumpodcasts.podium.ui.component.model.episode
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -18,16 +19,23 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItemColors
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedListItem
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -39,8 +47,12 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.fromHtml
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.hushcast.automute.dsp.ReadinessBadge
+import app.hushcast.automute.storage.AutoMuteDatabase
+import app.hushcast.automute.worker.EpisodeAnalysisWorker
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeBundle
+import app.podiumpodcasts.podium.background.HushCastEngineBridge
 import app.podiumpodcasts.podium.ui.formatPubDate
 import app.podiumpodcasts.podium.ui.theme.Typography
 import coil3.compose.AsyncImage
@@ -67,6 +79,15 @@ fun PodcastEpisodeListItem(
     colors: ListItemColors = ListItemDefaults.segmentedColors(),
     onClick: () -> Unit
 ) {
+    val context = LocalContext.current
+    val autoMuteDb = remember(context) { AutoMuteDatabase.getInstance(context) }
+    val analysisStatus by autoMuteDb.dao().observeStatus(bundle.episode.id).collectAsState(initial = null)
+    val readinessBadge = remember(analysisStatus?.badge) {
+        runCatching {
+            analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) }
+        }.getOrNull() ?: ReadinessBadge.NOT_PROCESSED
+    }
+
     val isPlayed = bundle.playState?.played == true
     val durationSec = bundle.episode.duration
     val progressSec = bundle.playState?.state ?: 0
@@ -120,14 +141,17 @@ fun PodcastEpisodeListItem(
         } else leadingContent,
         supportingContent = supportingContent,
         overlineContent = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
                 AnimatedVisibility(
                     visible = bundle.episode.new && !isPlayed,
                     enter = fadeIn() + slideInHorizontally { -it },
                     exit = fadeOut() + slideOutHorizontally { -it }
                 ) {
                     Text(
-                        modifier = Modifier.padding(end = 8.dp),
+                        modifier = Modifier.padding(end = 2.dp),
                         text = stringResource(R.string.common_new_uppercase),
                         style = Typography.labelSmallEmphasized,
                         color = MaterialTheme.colorScheme.primary
@@ -135,10 +159,41 @@ fun PodcastEpisodeListItem(
                 }
 
                 Text(
+                    modifier = Modifier.weight(1f, fill = false),
                     text = formattedOverline,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+
+                val badgeLabel = when (readinessBadge) {
+                    ReadinessBadge.READY -> "AI Ready"
+                    ReadinessBadge.WORD_MUTE_READY -> "Word-Mute"
+                    ReadinessBadge.ANALYZING -> "${analysisStatus?.progressPercent ?: 0}%"
+                    ReadinessBadge.NOT_PROCESSED -> null
+                }
+                if (badgeLabel != null) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = when (readinessBadge) {
+                            ReadinessBadge.READY -> MaterialTheme.colorScheme.primaryContainer
+                            ReadinessBadge.WORD_MUTE_READY -> MaterialTheme.colorScheme.secondaryContainer
+                            ReadinessBadge.ANALYZING -> MaterialTheme.colorScheme.tertiaryContainer
+                            ReadinessBadge.NOT_PROCESSED -> MaterialTheme.colorScheme.surfaceVariant
+                        }
+                    ) {
+                        Text(
+                            text = badgeLabel,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = Typography.labelSmall,
+                            color = when (readinessBadge) {
+                                ReadinessBadge.READY -> MaterialTheme.colorScheme.onPrimaryContainer
+                                ReadinessBadge.WORD_MUTE_READY -> MaterialTheme.colorScheme.onSecondaryContainer
+                                ReadinessBadge.ANALYZING -> MaterialTheme.colorScheme.onTertiaryContainer
+                                ReadinessBadge.NOT_PROCESSED -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+                }
             }
         }
     ) {
@@ -222,6 +277,51 @@ fun PodcastEpisodeListItem(
                     Row(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        when (readinessBadge) {
+                            ReadinessBadge.ANALYZING -> {
+                                CircularProgressIndicator(
+                                    modifier = Modifier
+                                        .padding(horizontal = 10.dp)
+                                        .size(18.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                            ReadinessBadge.READY -> Unit
+                            ReadinessBadge.WORD_MUTE_READY,
+                            ReadinessBadge.NOT_PROCESSED -> {
+                                IconButton(
+                                    onClick = {
+                                        val audioFile = bundle.episode.craftDownloadFile(context)
+                                        if (audioFile.exists()) {
+                                            EpisodeAnalysisWorker.enqueueAnalyzeNow(
+                                                context = context,
+                                                episodeId = bundle.episode.id,
+                                                audioPath = audioFile.absolutePath,
+                                                actionMode = HushCastEngineBridge.defaultActionMode,
+                                                episodeTitle = bundle.episode.title
+                                            )
+                                            Toast.makeText(
+                                                context,
+                                                "Starting HushCast AI analysis…",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        } else {
+                                            Toast.makeText(
+                                                context,
+                                                "Download episode first to analyze",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.AutoAwesome,
+                                        contentDescription = "Analyze with HushCast AI"
+                                    )
+                                }
+                            }
+                        }
+
                         PodcastEpisodeDownloadButton(
                             icon = true,
                             bundle = bundle

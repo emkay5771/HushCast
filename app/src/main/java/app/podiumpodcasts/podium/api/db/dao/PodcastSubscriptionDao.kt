@@ -65,6 +65,21 @@ interface PodcastSubscriptionDao {
     @Query("INSERT OR IGNORE INTO podcastSubscription (origin, enableNotifications, enableAutoDownload, lastUpdate, newEpisodes, cacheETag, cacheLastModified, cacheContentLength) SELECT origin, 0, 0, 0, 0, '', '', '' FROM podcast")
     suspend fun subscribeAllExistingPodcasts()
 
+    @Query(
+        """
+        UPDATE podcastSubscription
+        SET newEpisodes = (
+            SELECT COUNT(*)
+            FROM podcastEpisode
+            LEFT JOIN podcastEpisodePlayState ON podcastEpisodePlayState.episodeId = podcastEpisode.id
+            WHERE podcastEpisode.origin = podcastSubscription.origin
+            AND podcastEpisode.new = 1
+            AND COALESCE(podcastEpisodePlayState.played, 0) = 0
+        )
+        """
+    )
+    suspend fun recalculateAllNewEpisodesCounts()
+
     @Query("DELETE FROM podcastSubscription WHERE origin=:origin")
     suspend fun unsubscribe(origin: String)
 

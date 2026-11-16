@@ -160,6 +160,7 @@ fun FolderBottomSheet(
     val context = LocalContext.current
     var showRenameDialog by remember { mutableStateOf(false) }
     var showAddPodcastsDialog by remember { mutableStateOf(false) }
+    var isEditing by remember { mutableStateOf(false) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -178,6 +179,11 @@ fun FolderBottomSheet(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                if (folderSubscriptions.isNotEmpty()) {
+                    TextButton(onClick = { isEditing = !isEditing }) {
+                        Text(if (isEditing) "Done" else "Edit")
+                    }
+                }
                 IconButton(onClick = { showAddPodcastsDialog = true }) {
                     Icon(Icons.Rounded.Add, contentDescription = "Add podcasts")
                 }
@@ -211,29 +217,54 @@ fun FolderBottomSheet(
                 ) {
                     items(folderSubscriptions.size, key = { folderSubscriptions[it].podcast.origin }) { idx ->
                         val bundle = folderSubscriptions[idx]
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        androidx.compose.foundation.layout.Box(
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             SubscriptionCard(
                                 bundle = bundle,
-                                badgeMode = badgeMode,
+                                badgeMode = if (isEditing) SubscriptionsBadgeMode.OFF else badgeMode,
                                 fillCell = true,
                                 showTitles = true,
                                 onClick = {
-                                    onDismiss()
-                                    onClickPodcast(bundle.podcast.origin)
+                                    if (isEditing) {
+                                        PodcastGridOrganization.removePodcastFromFolder(
+                                            context,
+                                            bundle.podcast.origin,
+                                            folder.id
+                                        )
+                                    } else {
+                                        onDismiss()
+                                        onClickPodcast(bundle.podcast.origin)
+                                    }
                                 }
                             )
-                            TextButton(
-                                onClick = {
-                                    PodcastGridOrganization.removePodcastFromFolder(
-                                        context,
-                                        bundle.podcast.origin,
-                                        folder.id
-                                    )
+                            if (isEditing) {
+                                androidx.compose.material3.Surface(
+                                    onClick = {
+                                        PodcastGridOrganization.removePodcastFromFolder(
+                                            context,
+                                            bundle.podcast.origin,
+                                            folder.id
+                                        )
+                                    },
+                                    shape = androidx.compose.foundation.shape.CircleShape,
+                                    color = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                                    shadowElevation = 2.dp,
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .size(26.dp)
+                                ) {
+                                    androidx.compose.foundation.layout.Box(
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Close,
+                                            contentDescription = "Remove from folder",
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
                                 }
-                            ) {
-                                Icon(Icons.Rounded.Close, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Remove", style = Typography.labelSmall)
                             }
                         }
                     }

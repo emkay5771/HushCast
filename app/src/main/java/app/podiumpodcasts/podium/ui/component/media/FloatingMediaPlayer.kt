@@ -24,8 +24,16 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Forward
+import androidx.compose.material.icons.rounded.Forward10
+import androidx.compose.material.icons.rounded.Forward30
+import androidx.compose.material.icons.rounded.Forward5
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.Replay10
+import androidx.compose.material.icons.rounded.Replay30
+import androidx.compose.material.icons.rounded.Replay5
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ContainedLoadingIndicator
 import androidx.compose.material3.ElevatedCard
@@ -48,10 +56,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.ui.component.common.SwitchableDynamicMaterialExpressiveTheme
 import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
@@ -106,7 +116,7 @@ fun FloatingMediaPlayer(
                 ) {
                     ElevatedCard(
                         modifier = Modifier
-                            .padding(start = 32.dp)
+                            .padding(start = 16.dp)
                             .widthIn(min = 50.dp, max = FloatingMediaPlayerMaxWidth)
                             .height(FloatingMediaPlayerHeight)
                             .border(1.dp, MaterialTheme.colorScheme.primary, CircleShape)
@@ -132,7 +142,7 @@ fun FloatingMediaPlayer(
                     ) {
                         Row(
                             Modifier
-                                .padding(8.dp)
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
                                 .fillMaxSize(),
                             horizontalArrangement = Arrangement.Absolute.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
@@ -141,7 +151,7 @@ fun FloatingMediaPlayer(
                                 when(isLoading) {
                                     true -> {
                                         ContainedLoadingIndicator(
-                                            Modifier.size(54.dp)
+                                            Modifier.size(46.dp)
                                         )
                                     }
 
@@ -149,7 +159,7 @@ fun FloatingMediaPlayer(
                                         AnimatedContent(vm.mediaMetadata) { mediaMetadata ->
                                             ShimmerAsyncImage(
                                                 modifier = Modifier
-                                                    .size(54.dp)
+                                                    .size(46.dp)
                                                     .clip(CircleShape),
 
                                                 model = mediaMetadata?.artworkUri,
@@ -162,7 +172,7 @@ fun FloatingMediaPlayer(
                                 }
                             }
 
-                            Spacer(Modifier.width(12.dp))
+                            Spacer(Modifier.width(10.dp))
 
                             Column(
                                 Modifier
@@ -197,35 +207,77 @@ fun FloatingMediaPlayer(
                                 )
                             }
 
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(4.dp))
 
-                            onOpenQueue?.let { openQueue ->
-                                IconButton(onClick = openQueue) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                IconButton(
+                                    modifier = Modifier.size(34.dp),
+                                    onClick = { vm.seekBack() }
+                                ) {
                                     Icon(
-                                        imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
-                                        contentDescription = "Up Next"
+                                        modifier = Modifier.size(20.dp),
+                                        imageVector = when(vm.seekBackIncrement) {
+                                            5000L -> Icons.Rounded.Replay5
+                                            10000L -> Icons.Rounded.Replay10
+                                            30000L -> Icons.Rounded.Replay30
+                                            else -> Icons.Rounded.Replay
+                                        },
+                                        contentDescription = stringResource(R.string.common_action_seek_back)
                                     )
                                 }
-                            }
 
-                            FilledTonalIconToggleButton(
-                                checked = vm.isPlaying,
-                                onCheckedChange = {
-                                    if(vm.isPlaying) {
-                                        vm.pause()
-                                    } else {
-                                        vm.play()
+                                FilledTonalIconToggleButton(
+                                    modifier = Modifier.size(40.dp),
+                                    checked = vm.isPlaying,
+                                    onCheckedChange = {
+                                        if(vm.isPlaying) {
+                                            vm.pause()
+                                        } else {
+                                            vm.play()
+                                        }
+                                    }
+                                ) {
+                                    AnimatedContent(vm.isPlaying) {
+                                        Icon(
+                                            imageVector = when(it) {
+                                                true -> Icons.Rounded.Pause
+                                                false -> Icons.Rounded.PlayArrow
+                                            },
+                                            contentDescription = null
+                                        )
                                     }
                                 }
-                            ) {
-                                AnimatedContent(vm.isPlaying) {
+
+                                IconButton(
+                                    modifier = Modifier.size(34.dp),
+                                    onClick = { vm.seekForward() }
+                                ) {
                                     Icon(
-                                        imageVector = when(it) {
-                                            true -> Icons.Rounded.Pause
-                                            false -> Icons.Rounded.PlayArrow
+                                        modifier = Modifier.size(20.dp),
+                                        imageVector = when(vm.seekForwardIncrement) {
+                                            5000L -> Icons.Rounded.Forward5
+                                            10000L -> Icons.Rounded.Forward10
+                                            30000L -> Icons.Rounded.Forward30
+                                            else -> Icons.Rounded.Forward
                                         },
-                                        contentDescription = null
+                                        contentDescription = stringResource(R.string.common_action_seek_forward)
                                     )
+                                }
+
+                                onOpenQueue?.let { openQueue ->
+                                    IconButton(
+                                        modifier = Modifier.size(34.dp),
+                                        onClick = openQueue
+                                    ) {
+                                        Icon(
+                                            modifier = Modifier.size(20.dp),
+                                            imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                                            contentDescription = "Up Next"
+                                        )
+                                    }
                                 }
                             }
                         }
