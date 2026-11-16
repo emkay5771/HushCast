@@ -131,13 +131,13 @@ def setup_models() -> None:
 @modal.concurrent(max_inputs=10)
 @modal.asgi_app()
 def fastapi_app():
-    from hushcast_worker.pipeline import DesktopMlBackend
+    from hushcast_worker.pipeline import LocalMlBackend
     from hushcast_worker.server import create_app
     from hushcast_worker.storage import WorkerCache
 
     _ensure_models()
     cache = WorkerCache(CACHE_DIR)
-    backend = DesktopMlBackend(MODELS_DIR)
+    backend = LocalMlBackend(MODELS_DIR)
     token = os.environ.get("HUSHCAST_WORKER_TOKEN") or None
     return create_app(cache=cache, backend=backend, token=token)
 
