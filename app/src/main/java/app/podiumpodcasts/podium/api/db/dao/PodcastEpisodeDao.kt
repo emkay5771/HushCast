@@ -94,6 +94,7 @@ interface PodcastEpisodeDao {
     @Query("SELECT * FROM podcastEpisode WHERE origin=:origin ORDER BY pubDate DESC")
     suspend fun allSync(origin: String): List<PodcastEpisodeBundle>
 
+    @Transaction
     @Query("SELECT * FROM podcastEpisode WHERE origin=:origin ORDER BY pubDate DESC LIMIT :limit OFFSET :offset")
     suspend fun get(origin: String, limit: Int, offset: Int): List<PodcastEpisodeBundle>
 
@@ -109,6 +110,7 @@ interface PodcastEpisodeDao {
     )
     fun allNew(): PagingSource<Int, PodcastEpisodeBundle>
 
+    @Transaction
     @Query(
         """
         SELECT e.* FROM podcastEpisode e
@@ -124,15 +126,19 @@ interface PodcastEpisodeDao {
     @Query("SELECT id FROM podcastEpisode WHERE origin=:origin")
     suspend fun getEpisodeIds(origin: String): List<String>
 
+    @Transaction
     @Query("SELECT * FROM podcastEpisode WHERE id=:id")
     fun get(id: String): Flow<PodcastEpisodeBundle>
 
+    @Transaction
     @Query("SELECT * FROM podcastEpisode WHERE id=:id")
     suspend fun getSync(id: String): PodcastEpisodeBundle
 
+    @Transaction
     @Query("SELECT * FROM podcastEpisode WHERE origin=:origin AND audioUrl=:audioUrl")
     suspend fun getSyncByOriginAndAudioUrl(origin: String, audioUrl: String): PodcastEpisodeBundle?
 
+    @Transaction
     @Query(
         """
         SELECT * FROM podcastEpisode 

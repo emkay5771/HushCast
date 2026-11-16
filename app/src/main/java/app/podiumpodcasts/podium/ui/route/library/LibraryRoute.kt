@@ -11,13 +11,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.NewReleases
 import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.PlaylistPlay
 import androidx.compose.material3.Badge
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -177,7 +177,7 @@ fun LibraryRoute(
                     systemLists[idx]?.let { list ->
                         PlaylistRow(
                             title = list.name,
-                            icon = Icons.Rounded.PlaylistPlay,
+                            icon = Icons.AutoMirrored.Rounded.PlaylistPlay,
                             count = null,
                             index = idx,
                             total = allListsCount,
@@ -190,7 +190,7 @@ fun LibraryRoute(
                     nonSystemLists[idx]?.let { list ->
                         PlaylistRow(
                             title = list.name,
-                            icon = Icons.Rounded.PlaylistPlay,
+                            icon = Icons.AutoMirrored.Rounded.PlaylistPlay,
                             count = null,
                             index = systemLists.itemCount + idx,
                             total = allListsCount,

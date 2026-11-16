@@ -632,6 +632,7 @@ fun MediaPlayerBottomSheet(
                         Spacer(Modifier.height(16.dp))
 
                         ButtonGroup(
+                            overflowIndicator = {},
                             horizontalArrangement = Arrangement.Center
                         ) {
                             Row(

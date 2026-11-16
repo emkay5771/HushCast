@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface ListItemDao {
 
+    @Transaction
     @Query("SELECT * FROM listItem WHERE listId = :listId ORDER BY position ASC")
     fun all(listId: Int): PagingSource<Int, ListItemModelBundle>
 
@@ -115,6 +116,7 @@ interface ListItemDao {
     @Query("SELECT id FROM listItem WHERE listId = :listId AND position = :position LIMIT 1")
     suspend fun _getItemIdAtPosition(listId: Int, position: Int): Int?
 
+    @Transaction
     @Query("SELECT * FROM listItem WHERE listId = :listId ORDER BY position LIMIT 4")
     suspend fun _getCoverItems(listId: Int): List<ListItemModelBundle>
 
