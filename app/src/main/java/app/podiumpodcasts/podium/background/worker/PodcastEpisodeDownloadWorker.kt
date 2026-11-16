@@ -44,7 +44,7 @@ class PodcastEpisodeDownloadWorker(
             val isAuto = inputData.getBoolean(KEY_IS_AUTO, false)
 
             runCatching {
-                setForeground(createDownloadForegroundInfo("Downloading episode…", 0))
+                setForeground(createDownloadForegroundInfo("Downloading episode…", "Preparing download…", 0))
             }
 
             val worker = PodcastEpisodeDownloadWork(applicationContext, db)

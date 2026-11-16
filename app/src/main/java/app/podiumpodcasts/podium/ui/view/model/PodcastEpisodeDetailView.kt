@@ -276,11 +276,12 @@ fun PodcastEpisodeDetailView(
                         app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(downloadContext).isNotBlank()
                     }
                     if (showSaveToList) {
-                        app.podiumpodcasts.podium.ui.dialog.bottomsheet.AddToListBottomSheet(
+                        app.podiumpodcasts.podium.ui.dialog.bottomsheet.SaveToListBottomSheet(
                             contentId = episode.id,
-                            isPodcast = false,
-                            onDismissRequest = { showSaveToList = false }
-                        )
+                            isPodcast = false
+                        ) {
+                            showSaveToList = false
+                        }
                     }
                     Box {
                         IconButton(onClick = { showMoreMenu = true }) {
