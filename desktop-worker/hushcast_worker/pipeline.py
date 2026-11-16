@@ -778,22 +778,66 @@ def _name_chapter_from_tfidf(
     return " • ".join(picked)
 
 
+def _extract_embedded_chapters(audio_path: Optional[Path]) -> list[DesktopChapterDto]:
+    if audio_path is None or not audio_path.exists():
+        return []
+    import json
+    import shutil
+    import subprocess
+
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return []
+    try:
+        proc = subprocess.run(
+            [ffprobe, "-v", "quiet", "-print_format", "json", "-show_chapters", str(audio_path)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return []
+        data = json.loads(proc.stdout)
+        raw_chapters = data.get("chapters") or []
+        out: list[DesktopChapterDto] = []
+        for idx, ch in enumerate(raw_chapters):
+            start_sec = float(ch.get("start_time", 0.0) or 0.0)
+            tags = ch.get("tags") or {}
+            title = str(tags.get("title") or tags.get("TITLE") or f"Chapter {idx + 1}").strip()[:80]
+            if not title:
+                title = f"Chapter {idx + 1}"
+            out.append(
+                DesktopChapterDto(
+                    startMs=max(0, int(round(start_sec * 1000.0))),
+                    title=title,
+                    source="podcast",
+                )
+            )
+        return out
+    except Exception:
+        return []
+
+
 def _generate_chapters_and_summary(
     *,
     segments: list[SegmentDto],
     embeddings,
     ad_segments: list[AdSegmentDto],
     chat_model_path: Optional[Path] = None,
+    audio_path: Optional[Path] = None,
 ) -> tuple[Optional[str], list[DesktopChapterDto]]:
     import json
     import numpy as np
+
+    embedded_chapters = _extract_embedded_chapters(audio_path)
 
     non_ad_indices = [
         i for i, s in enumerate(segments)
         if not _is_inside_ad(s.start, s.end, ad_segments) and len(s.text.split()) >= 3
     ]
     if len(non_ad_indices) < 4:
-        return None, []
+        return None, embedded_chapters
 
     # Optional local chat GGUF upgrade when user drops an instruct GGUF in models_dir
     if chat_model_path is not None and chat_model_path.exists():
@@ -829,12 +873,14 @@ def _generate_chapters_and_summary(
                     DesktopChapterDto(
                         startMs=max(0, int(float(c.get("startSec", 0)) * 1000)),
                         title=str(c.get("title", "Chapter")).strip()[:80],
+                        source="auto",
                     )
                     for c in (parsed.get("chapters") or [])
                     if str(c.get("title", "")).strip()
                 ]
-                if llm_summary and llm_chapters:
-                    return llm_summary, llm_chapters
+                final_chapters = embedded_chapters if len(embedded_chapters) >= 2 else llm_chapters
+                if llm_summary and final_chapters:
+                    return llm_summary, final_chapters
         except Exception:
             pass
 
