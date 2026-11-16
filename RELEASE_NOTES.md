@@ -1,3 +1,18 @@
+# HushCast v0.1.17-hushcast
+
+## What's New
+- **Desktop-Class AI Upgrades (Companion Worker)**:
+  - **Larger Whisper Model Auto-Selection**: Automatically selects the best available Whisper model in `~/.hushcast-worker/models/` (e.g. `ggml-large-v3-turbo.bin`, `medium.en`, `small.en`, or `HUSHCAST_WHISPER_MODEL`) and reports it in worker health & Settings.
+  - **Acoustic Speaker Diarization**: Clusters speakers per turn on 16 kHz PCM, feeds speaker changes into `ad_tagger.onnx`, and displays color-coded `Speaker 1`, `Speaker 2`, … badges in the transcript.
+  - **Auto-Generated Chapters & Episode TL;DR**: Generates an episode summary and tap-to-seek chapters using Qwen3 embeddings (or a local Instruct GGUF if present), persisted in Room (`AutoMuteDatabase` v2) and shown in a collapsible **AI Summary & Chapters** card.
+  - **Cross-Episode Semantic Search (`POST /v1/search`)**: Saves per-episode Qwen3 sentence embeddings on the desktop worker so you can search concepts across all analyzed episodes from **Settings → HushCast**.
+- **Transcript & Live Activity Polish**:
+  - **Smart Sponsor Grouping**: Merges adjacent ad chunks into collapsible sponsor cards with auto-extracted sponsor names (e.g., `Sponsor: Jira`) and expandable transcript lines.
+  - **Live Activity for Desktop Offload**: Desktop downloads and GPU analysis now update `EpisodeAnalysisStatusEntity` in real time, matching on-device Live Activity progress.
+  - **Catch Up to Live**: Scrolling away from the active speaker in the transcript reveals a floating **Catch up to live** button to snap back to auto-scroll.
+
+---
+
 # HushCast v0.1.16-hushcast
 
 ## What's New
