@@ -19,7 +19,14 @@ import app.hushcast.automute.dsp.ReadinessBadge
 import app.hushcast.automute.engine.Segment
 import app.hushcast.automute.engine.Word
 import app.hushcast.automute.matcher.MuteRule
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -255,6 +262,16 @@ interface AutoMuteDao {
 )
 abstract class AutoMuteDatabase : RoomDatabase() {
     abstract fun dao(): AutoMuteDao
+
+    val statusMapFlow: StateFlow<Map<String, EpisodeAnalysisStatusEntity>> by lazy {
+        dao().observeAllStatuses()
+            .map { list -> list.associateBy { it.episodeId } }
+            .stateIn(
+                CoroutineScope(SupervisorJob() + Dispatchers.IO),
+                SharingStarted.WhileSubscribed(5_000L),
+                emptyMap()
+            )
+    }
 
     companion object {
         @Volatile

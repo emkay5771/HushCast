@@ -1,3 +1,17 @@
+# HushCast v0.1.18-hushcast
+
+## What's New
+- **Performance & Fluidity**:
+  - Pre-grouped transcript words per segment in a single $O(S+W)$ pass and binary-searched mute windows in [`SyncedTranscriptCard`](app/src/main/java/app/podiumpodcasts/podium/ui/component/media/HushCastPlayerOverlays.kt), eliminating playback scroll jank.
+  - Isolated [`PlayerSeekBarSection`](app/src/main/java/app/podiumpodcasts/podium/ui/dialog/bottomsheet/media/MediaPlayerBottomSheet.kt) and [`LiveSyncedTranscriptCard`](app/src/main/java/app/podiumpodcasts/podium/ui/dialog/bottomsheet/media/MediaPlayerBottomSheet.kt) so 60fps seekbar animations and playback ticks no longer recompose the entire player sheet.
+  - Offloaded transcript blob decompression and chapter JSON parsing to `Dispatchers.Default`.
+  - Replaced per-row Room `Flow` subscriptions in episode and queue lists with a single shared `statusMapFlow` on `AutoMuteDatabase`.
+- **UI Simplification**:
+  - Added a clickable **Active Chapter** pill in the player header that jumps directly to the Transcript & Chapters tab.
+  - Organized **Settings → HushCast** with section headers and auto-collapsed local model cards when Desktop Companion is enabled.
+
+---
+
 # HushCast v0.1.17-hushcast
 
 ## What's New

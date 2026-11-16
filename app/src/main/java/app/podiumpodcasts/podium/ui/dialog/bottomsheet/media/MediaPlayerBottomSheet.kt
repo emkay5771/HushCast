@@ -150,23 +150,6 @@ fun MediaPlayerBottomSheet(
 
     val enableArtworkColors = settingsRepository.appearance.enableArtworkColors.collectAsState(true)
 
-    var blockSliderUpdate by remember { mutableStateOf(false) }
-
-    var sliderState by remember { mutableFloatStateOf(0f) }
-
-    val animateSliderState = remember { Animatable(0f) }
-    LaunchedEffect(animateSliderState.value) {
-        if(blockSliderUpdate) return@LaunchedEffect
-        sliderState = animateSliderState.value
-    }
-
-    val progressState = vm.getProgressState()
-    LaunchedEffect(progressState.value) {
-        if(blockSliderUpdate) return@LaunchedEffect
-        animateSliderState.snapTo(sliderState)
-        animateSliderState.animateTo(progressState.value, tween(100))
-    }
-
     LaunchedEffect(vm.isPlayerVisible) {
         if(vm.isPlayerVisible) return@LaunchedEffect
         onDismiss()
@@ -229,15 +212,20 @@ fun MediaPlayerBottomSheet(
     LaunchedEffect(episodeId, analysisStatus?.badge) {
         if (episodeId.isBlank()) return@LaunchedEffect
         val idx = autoMuteDb.dao().getWordIndexByEpisode(episodeId)
-        transcriptBlob = idx?.let { runCatching { BlobCodec.decompress(it.compressedBlob) }.getOrNull() }
         val insights = autoMuteDb.dao().getInsights(episodeId)
+        val (decodedBlob, decodedChapters) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val blob = idx?.let { runCatching { BlobCodec.decompress(it.compressedBlob) }.getOrNull() }
+            val chapters = insights?.chaptersJson?.let { raw ->
+                runCatching {
+                    kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                        .decodeFromString<List<app.hushcast.automute.desktop.DesktopChapterDto>>(raw)
+                }.getOrDefault(emptyList())
+            } ?: emptyList()
+            blob to chapters
+        }
+        transcriptBlob = decodedBlob
         episodeSummary = insights?.summary
-        episodeChapters = insights?.chaptersJson?.let { raw ->
-            runCatching {
-                kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-                    .decodeFromString<List<app.hushcast.automute.desktop.DesktopChapterDto>>(raw)
-            }.getOrDefault(emptyList())
-        } ?: emptyList()
+        episodeChapters = decodedChapters
     }
 
     LaunchedEffect(pendingUndo) {
@@ -418,13 +406,13 @@ fun MediaPlayerBottomSheet(
                                     }
                                 }
                             } else {
-                                SyncedTranscriptCard(
+                                LiveSyncedTranscriptCard(
                                     modifier = Modifier.weight(1f),
+                                    vm = vm,
                                     segments = transcriptBlob?.segments ?: emptyList(),
                                     words = transcriptBlob?.words ?: emptyList(),
                                     muteWindows = muteWindows,
                                     adWindows = adWindows,
-                                    currentPositionMs = vm.currentPosition,
                                     onSeekToMs = { ms -> vm.seek(ms) },
                                     summary = episodeSummary,
                                     chapters = episodeChapters,
@@ -641,6 +629,15 @@ fun MediaPlayerBottomSheet(
                                             { triggerAnalyzeNow() }
                                         } else null
                                     )
+
+                                    if (episodeChapters.isNotEmpty()) {
+                                        Spacer(Modifier.height(6.dp))
+                                        ActiveChapterPill(
+                                            vm = vm,
+                                            chapters = episodeChapters,
+                                            onClick = { selectedTab = MediaPlayerTab.TRANSCRIPT }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -670,46 +667,11 @@ fun MediaPlayerBottomSheet(
                         val muteWindows = remember(muteEntities) { muteEntities.map { it.toDomain() } }
                         val adWindows = remember(adEntities) { adEntities.map { it.toDomain() } }
 
-                        app.podiumpodcasts.podium.ui.component.media.AnnotatedPlaybackSlider(
-                            value = sliderState,
-                            durationMs = vm.currentDuration,
+                        PlayerSeekBarSection(
+                            vm = vm,
                             muteWindows = muteWindows,
-                            adWindows = adWindows,
-                            onValueChange = {
-                                sliderState = it
-                                blockSliderUpdate = true
-                            },
-                            onValueChangeFinished = {
-                                blockSliderUpdate = true
-                                vm.seek((sliderState * vm.currentDuration).toLong())
-
-                                // don't animate slider after seeking
-                                scope.launch {
-                                    delay(500)
-                                    blockSliderUpdate = false
-                                }
-                            }
+                            adWindows = adWindows
                         )
-
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = formatPlayerTime(
-                                    time = (sliderState * vm.currentDuration).toLong(),
-                                    duration = vm.currentDuration
-                                ),
-                                style = Typography.labelMediumEmphasized
-                            )
-
-                            Text(
-                                text = formatPlayerTime(
-                                    time = vm.currentDuration
-                                ),
-                                style = Typography.labelMediumEmphasized
-                            )
-                        }
 
                         Spacer(Modifier.height(16.dp))
 
@@ -1037,7 +999,7 @@ private fun Image(
                 }
             }
 
-            false -> {
+                    false -> {
                 AnimatedContent(mediaPlayerViewModel.mediaMetadata) { mediaMetadata ->
                     ShimmerAsyncImage(
                         modifier = Modifier
@@ -1052,5 +1014,127 @@ private fun Image(
                 }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun PlayerSeekBarSection(
+    vm: MediaPlayerViewModel,
+    muteWindows: List<app.hushcast.automute.dsp.MuteWindow>,
+    adWindows: List<app.hushcast.automute.dsp.AdWindow>
+) {
+    val scope = rememberCoroutineScope()
+    var blockSliderUpdate by remember { mutableStateOf(false) }
+    var sliderState by remember { mutableFloatStateOf(0f) }
+    val animateSliderState = remember { Animatable(0f) }
+
+    LaunchedEffect(animateSliderState.value) {
+        if (blockSliderUpdate) return@LaunchedEffect
+        sliderState = animateSliderState.value
+    }
+
+    val progressState = vm.getProgressState()
+    LaunchedEffect(progressState.value) {
+        if (blockSliderUpdate) return@LaunchedEffect
+        animateSliderState.snapTo(sliderState)
+        animateSliderState.animateTo(progressState.value, tween(100))
+    }
+
+    app.podiumpodcasts.podium.ui.component.media.AnnotatedPlaybackSlider(
+        value = sliderState,
+        durationMs = vm.currentDuration,
+        muteWindows = muteWindows,
+        adWindows = adWindows,
+        onValueChange = {
+            sliderState = it
+            blockSliderUpdate = true
+        },
+        onValueChangeFinished = {
+            blockSliderUpdate = true
+            vm.seek((sliderState * vm.currentDuration).toLong())
+            scope.launch {
+                delay(500)
+                blockSliderUpdate = false
+            }
+        }
+    )
+
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = formatPlayerTime(
+                time = (sliderState * vm.currentDuration).toLong(),
+                duration = vm.currentDuration
+            ),
+            style = Typography.labelMediumEmphasized
+        )
+
+        Text(
+            text = formatPlayerTime(
+                time = vm.currentDuration
+            ),
+            style = Typography.labelMediumEmphasized
+        )
+    }
+}
+
+@Composable
+private fun LiveSyncedTranscriptCard(
+    vm: MediaPlayerViewModel,
+    segments: List<app.hushcast.automute.engine.Segment>,
+    words: List<app.hushcast.automute.engine.Word>,
+    muteWindows: List<app.hushcast.automute.dsp.MuteWindow>,
+    adWindows: List<app.hushcast.automute.dsp.AdWindow>,
+    onSeekToMs: (Long) -> Unit,
+    onToggleWordMute: (app.hushcast.automute.engine.Word, Boolean) -> Unit,
+    onPlayAdSegment: ((app.hushcast.automute.dsp.AdWindow, Long) -> Unit)? = null,
+    onCopyReport: (() -> Unit)? = null,
+    summary: String? = null,
+    chapters: List<app.hushcast.automute.desktop.DesktopChapterDto> = emptyList(),
+    modifier: Modifier = Modifier
+) {
+    SyncedTranscriptCard(
+        modifier = modifier,
+        segments = segments,
+        words = words,
+        muteWindows = muteWindows,
+        adWindows = adWindows,
+        currentPositionMs = vm.currentPosition,
+        onSeekToMs = onSeekToMs,
+        onToggleWordMute = onToggleWordMute,
+        onPlayAdSegment = onPlayAdSegment,
+        onCopyReport = onCopyReport,
+        summary = summary,
+        chapters = chapters
+    )
+}
+
+@Composable
+private fun ActiveChapterPill(
+    vm: MediaPlayerViewModel,
+    chapters: List<app.hushcast.automute.desktop.DesktopChapterDto>,
+    onClick: () -> Unit
+) {
+    val posMs = vm.currentPosition
+    val activeChapter = remember(chapters, posMs) {
+        chapters.lastOrNull { it.startMs <= posMs } ?: chapters.firstOrNull()
+    } ?: return
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Text(
+            text = "Ch: ${activeChapter.title}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+        )
     }
 }

@@ -132,19 +132,52 @@ fun SettingsHushCastPane(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // 1. On-Device AI Models Card
             item {
+                Text(
+                    text = "PROCESSING",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            // 1. On-Device AI Models Card (collapsible when Desktop Companion is active)
+            item {
+                var showLocalModels by remember {
+                    mutableStateOf(!app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context))
+                }
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Download, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("On-Device AI Models (~455 MB)", style = MaterialTheme.typography.titleMedium)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Rounded.Download, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("On-Device AI Models (~455 MB)", style = MaterialTheme.typography.titleMedium)
+                            }
+                            IconButton(onClick = { showLocalModels = !showLocalModels }) {
+                                Icon(
+                                    imageVector = if (showLocalModels) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                    contentDescription = if (showLocalModels) "Collapse" else "Expand"
+                                )
+                            }
                         }
-                        Spacer(Modifier.height(4.dp))
+                        if (!showLocalModels) {
+                            Text(
+                                text = if (modelsReady) "Ready ($downloadedMb MB local). Tap to manage." else "Tap to download or manage on-device models.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Spacer(Modifier.height(4.dp))
                         Text(
                             if (modelsReady) {
                                 "All models ready ($downloadedMb MB stored locally). $0 server cost, 100% private."
@@ -200,6 +233,7 @@ fun SettingsHushCastPane(
                                     Text("Delete")
                                 }
                             }
+                        }
                         }
                     }
                 }

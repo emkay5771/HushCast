@@ -498,7 +498,7 @@ fun SyncedTranscriptCard(
 
         Text(
             text = if (searchQuery.isBlank()) {
-                "Tap any line or word to jump • Long-press a word to mute/unmute"
+                "Tap to jump • Long-press word to mute"
             } else {
                 "${filteredSegments.size} matching ${if (filteredSegments.size == 1) "line" else "lines"} • Tap to jump"
             },

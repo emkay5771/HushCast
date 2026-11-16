@@ -70,7 +70,8 @@ fun MediaItemListItem(
     val scope = rememberCoroutineScope()
     val episodeId = remember(mediaItem) { mediaItem.getEpisodeId() }
     val autoMuteDb = remember(context) { AutoMuteDatabase.getInstance(context) }
-    val analysisStatus by autoMuteDb.dao().observeStatus(episodeId).collectAsState(initial = null)
+    val statusMap by autoMuteDb.statusMapFlow.collectAsState()
+    val analysisStatus = statusMap[episodeId]
     val readinessBadge = remember(analysisStatus?.badge) {
         runCatching {
             analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) }

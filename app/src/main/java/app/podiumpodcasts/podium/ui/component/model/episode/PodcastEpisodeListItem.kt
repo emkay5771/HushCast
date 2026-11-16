@@ -85,7 +85,8 @@ fun PodcastEpisodeListItem(
 ) {
     val context = LocalContext.current
     val autoMuteDb = remember(context) { AutoMuteDatabase.getInstance(context) }
-    val analysisStatus by autoMuteDb.dao().observeStatus(bundle.episode.id).collectAsState(initial = null)
+    val statusMap by autoMuteDb.statusMapFlow.collectAsState()
+    val analysisStatus = statusMap[bundle.episode.id]
     val readinessBadge = remember(analysisStatus?.badge) {
         runCatching {
             analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) }
