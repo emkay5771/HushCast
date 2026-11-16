@@ -403,11 +403,14 @@ fun MediaPlayerBottomSheet(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             } else {
+                                val parsedNotes = remember(episodeId, desc) {
+                                    AnnotatedString.fromHtml(
+                                        htmlString = desc.replace("\n", "<br>")
+                                    )
+                                }
                                 SelectionContainer {
                                     Text(
-                                        text = AnnotatedString.fromHtml(
-                                            htmlString = desc.replace("\n", "<br>")
-                                        ),
+                                        text = parsedNotes,
                                         style = Typography.bodyMedium
                                     )
                                 }

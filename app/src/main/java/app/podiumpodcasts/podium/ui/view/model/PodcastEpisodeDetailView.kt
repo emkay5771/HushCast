@@ -374,11 +374,14 @@ fun PodcastEpisodeDetailView(
                     color = MaterialTheme.colorScheme.surface,
                     contentColor = MaterialTheme.colorScheme.onSurface
                 ) {
+                    val parsedDesc = remember(episode.id, episode.description) {
+                        AnnotatedString.fromHtml(
+                            htmlString = episode.description.replace("\n", "<br>")
+                        )
+                    }
                     SelectionContainer(Modifier.padding(16.dp)) {
                         Text(
-                            text = AnnotatedString.fromHtml(
-                                htmlString = episode.description.replace("\n", "<br>")
-                            ),
+                            text = parsedDesc,
                             style = Typography.bodyMedium
                         )
                     }

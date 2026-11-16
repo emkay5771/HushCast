@@ -68,11 +68,12 @@ fun ListLibraryItem(
                                             .clip(RoundedCornerShape(8.dp))
                                     ) {
                                         list.getImageUrls().getOrNull(index)?.let { url ->
-                                            AsyncImage(
+                                            app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage(
                                                 modifier = Modifier.fillMaxSize(),
                                                 model = url,
                                                 contentScale = ContentScale.Crop,
-                                                contentDescription = ""
+                                                contentDescription = "",
+                                                targetSizePx = 128
                                             )
                                         }
                                     }

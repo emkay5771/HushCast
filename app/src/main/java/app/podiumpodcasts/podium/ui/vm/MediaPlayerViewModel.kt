@@ -321,17 +321,16 @@ class MediaPlayerViewModel : ViewModel() {
     fun getProgressState(): MutableState<Float> {
         val progressState = remember { mutableFloatStateOf(0f) }
 
-        LaunchedEffect(lastProgressUpdate) {
-            while(true) {
+        LaunchedEffect(lastProgressUpdate, isPlaying, currentDuration) {
+            val dur = currentDuration.coerceAtLeast(1L).toFloat()
+            if (!isPlaying) {
+                progressState.value = (currentPosition.toFloat() / dur).coerceIn(0f, 1f)
+                return@LaunchedEffect
+            }
+            while (true) {
                 val difference = System.currentTimeMillis() - lastProgressUpdate
-                val realCurrentPosition = if(isPlaying) {
-                    currentPosition + (difference * speed)
-                } else {
-                    currentPosition
-                }
-
-                progressState.value = realCurrentPosition.toFloat() / currentDuration
-
+                val realCurrentPosition = currentPosition + (difference * speed)
+                progressState.value = (realCurrentPosition.toFloat() / dur).coerceIn(0f, 1f)
                 delay(100)
             }
         }

@@ -1,3 +1,15 @@
+# HushCast v0.1.27-hushcast
+
+## What's New
+- **Pocket Casts-Style Episode Rows**:
+  - Redesigned [`PodcastEpisodeListItem`](app/src/main/java/app/podiumpodcasts/podium/ui/component/model/episode/PodcastEpisodeListItem.kt) across podcast pages, playlists, New Releases, Continue Playing, Downloads, and History to match Pocket Casts: crisp square artwork, uppercase date added + AI badge, 2-line title, Up Next & green download status icons, compact duration (`1h 13m` / `24m left`), thin progress bar, and a circular outlined Play/Pause button.
+- **App-Wide Smoothness & Performance Optimizations**:
+  - Eliminated main-thread HTML parsing (`AnnotatedString.fromHtml`) and nested `LazyRow` subcomposition from every episode row during fast scroll, and cached parsed HTML with `remember(...)` in [`PodcastListItem`](app/src/main/java/app/podiumpodcasts/podium/ui/component/model/PodcastListItem.kt), [`MediaPlayerBottomSheet`](app/src/main/java/app/podiumpodcasts/podium/ui/dialog/bottomsheet/media/MediaPlayerBottomSheet.kt), [`PodcastDetailView`](app/src/main/java/app/podiumpodcasts/podium/ui/view/model/PodcastDetailView.kt), and [`PodcastEpisodeDetailView`](app/src/main/java/app/podiumpodcasts/podium/ui/view/model/PodcastEpisodeDetailView.kt).
+  - Downsampled queue & playlist artwork thumbnails (`targetSizePx = 128`) in [`MediaItemListItem`](app/src/main/java/app/podiumpodcasts/podium/ui/component/media/MediaItemListItem.kt), [`ListLibraryItem`](app/src/main/java/app/podiumpodcasts/podium/ui/component/model/list/ListLibraryItem.kt), and [`PodcastListItem`](app/src/main/java/app/podiumpodcasts/podium/ui/component/model/PodcastListItem.kt) to cut memory & decode jitter.
+  - Stopped the 100ms progress polling loop in [`MediaPlayerViewModel.getProgressState`](app/src/main/java/app/podiumpodcasts/podium/ui/vm/MediaPlayerViewModel.kt) when playback is paused.
+
+---
+
 # HushCast v0.1.26-hushcast
 
 ## What's New

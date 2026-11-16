@@ -96,12 +96,14 @@ fun MediaItemListItem(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = dragModifier.size(24.dp)
                 )
-                AsyncImage(
+                app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage(
                     modifier = Modifier
                         .size(48.dp)
                         .clip(RoundedCornerShape(12.dp)),
                     model = mediaItem.mediaMetadata.artworkUri ?: mediaItem.mediaMetadata.artworkData,
-                    contentDescription = ""
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    contentDescription = "",
+                    targetSizePx = 128
                 )
             }
         },

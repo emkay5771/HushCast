@@ -48,21 +48,24 @@ fun PodcastListItem(
         colors = colors,
 
         leadingContent = {
-            AsyncImage(
+            app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(RoundedCornerShape(16.dp)),
                 model = podcast.imageUrl,
                 contentScale = ContentScale.Crop,
-                contentDescription = stringResource(R.string.common_cover_image)
+                contentDescription = stringResource(R.string.common_cover_image),
+                targetSizePx = 128
             )
         },
         supportingContent = {
+            val parsedDesc = androidx.compose.runtime.remember(podcast.origin, podcast.description) {
+                AnnotatedString.fromHtml(
+                    htmlString = podcast.description.replace("\n", "<br>")
+                )
+            }
             Text(
-                text = AnnotatedString.fromHtml(
-                    htmlString = podcast.description
-                        .replace("\n", "<br>")
-                ),
+                text = parsedDesc,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )

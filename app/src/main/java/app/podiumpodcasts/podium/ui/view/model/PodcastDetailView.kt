@@ -828,6 +828,7 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                                 index = it,
                                 count = episodePager.itemCount,
                                 isSelected = isSelected,
+                                showArtwork = false,
                                 onLongClick = {
                                     if(isSelected) {
                                         selectedEpisodeIds.remove(episodeBundle.episode.id)
@@ -888,14 +889,16 @@ fun LazyListScope.podcastDetailViewInfoDestination(
                     color = MaterialTheme.colorScheme.surface,
                     contentColor = MaterialTheme.colorScheme.onSurface
                 ) {
+                    val parsedDesc = remember(podcast.origin, podcast.description) {
+                        AnnotatedString.fromHtml(
+                            htmlString = podcast.description.replace("\n", "<br>")
+                        )
+                    }
                     SelectionContainer {
                         Text(
                             modifier = Modifier
                                 .padding(16.dp),
-                            text = AnnotatedString.fromHtml(
-                                htmlString = podcast.description
-                                    .replace("\n", "<br>")
-                            )
+                            text = parsedDesc
                         )
                     }
                 }
