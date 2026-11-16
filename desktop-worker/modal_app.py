@@ -32,6 +32,10 @@ QWEN_URL = (
     "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/main/"
     "Qwen3-Embedding-0.6B-Q8_0.gguf"
 )
+CHAT_URL = (
+    "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/"
+    "qwen2.5-1.5b-instruct-q4_k_m.gguf"
+)
 
 app = modal.App("hushcast-worker")
 volume = modal.Volume.from_name("hushcast-data", create_if_missing=True)
@@ -97,6 +101,7 @@ def _ensure_models() -> None:
     downloads = [
         (MODELS_DIR / "ggml-large-v3-turbo.bin", WHISPER_URL),
         (MODELS_DIR / "Qwen3-Embedding-0.6B-Q8_0.gguf", QWEN_URL),
+        (MODELS_DIR / "qwen2.5-1.5b-instruct-q4_k_m.gguf", CHAT_URL),
     ]
     if not ad_dest.exists():
         downloads.append((ad_dest, _AD_TAGGER_URL))

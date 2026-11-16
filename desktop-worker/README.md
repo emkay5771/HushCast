@@ -72,7 +72,7 @@ uv run modal secret create hushcast-token HUSHCAST_WORKER_TOKEN="$TOKEN"
 
 ### 4. Download Models into Persistent Modal Storage (One-Time)
 
-This downloads `ggml-large-v3-turbo.bin` (~1.55 GB), `Qwen3-Embedding-0.6B-Q8_0.gguf` (~610 MB), and `ad_tagger.onnx` into a persistent Modal Volume named `hushcast-data`:
+This downloads `ggml-large-v3-turbo.bin` (~1.55 GB), `Qwen3-Embedding-0.6B-Q8_0.gguf` (~610 MB), `qwen2.5-1.5b-instruct-q4_k_m.gguf` (~1.04 GB, for LLM chapters & summaries), and `ad_tagger.onnx` into a persistent Modal Volume named `hushcast-data`:
 
 ```bash
 uv run modal run modal_app.py::setup_models
