@@ -52,7 +52,10 @@ _base_image = (
         "nvidia/cuda:12.4.1-devel-ubuntu22.04", add_python="3.11"
     )
     .apt_install("ffmpeg", "cmake", "build-essential", "git", "curl")
-    .env({"CMAKE_ARGS": "-DGGML_CUDA=1"})
+    .env({
+        "GGML_CUDA": "1",
+        "CMAKE_ARGS": "-DGGML_CUDA=1 -DCMAKE_CUDA_ARCHITECTURES=75;80;86;89",
+    })
     .pip_install(
         "fastapi>=0.115.0",
         "uvicorn[standard]>=0.30.0",
@@ -62,7 +65,10 @@ _base_image = (
         "numpy>=1.26.0",
         "onnxruntime-gpu>=1.19.0",
         "av>=12.0.0",
+    )
+    .pip_install(
         "pywhispercpp>=1.2.0",
+        extra_options="--no-binary pywhispercpp",
     )
     .pip_install(
         "llama-cpp-python>=0.3.0",
