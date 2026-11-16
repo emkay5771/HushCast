@@ -39,11 +39,12 @@ fun PodcastEpisodeQueueButton(
     val context = LocalContext.current
     val vm = viewModel<MediaPlayerViewModel>()
 
+    val isCurrentlyPlaying = vm.metadataEpisodeId == bundle.episode.id
     val inQueue = vm.queue.contains(bundle.episode.id)
     var showMenu by remember { mutableStateOf(false) }
 
     AnimatedVisibility(
-        visible = vm.isPlayerVisible,
+        visible = vm.isPlayerVisible && !isCurrentlyPlaying,
         enter = fadeIn() + expandIn(expandFrom = Alignment.Center),
         exit = fadeOut() + shrinkOut(shrinkTowards = Alignment.Center)
     ) {

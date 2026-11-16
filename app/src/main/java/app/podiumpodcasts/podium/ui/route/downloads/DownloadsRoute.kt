@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -44,6 +45,7 @@ import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.PagerScaffold
 import app.podiumpodcasts.podium.ui.theme.Typography
 import app.podiumpodcasts.podium.ui.vm.DownloadsViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -95,6 +97,32 @@ fun DownloadsRoute(
                                 .forEach {
                                     playerVm.enqueue(context, PodcastEpisodeBundle(it.episode, it.playState, it.download))
                                 }
+                        }
+                        val playedDownloads = pager.itemSnapshotList.items.filter {
+                            it.download.state == PodcastEpisodeDownloadState.DOWNLOADED.value &&
+                                it.playState?.played == true
+                        }
+                        if (playedDownloads.isNotEmpty()) {
+                            val scope = androidx.compose.runtime.rememberCoroutineScope()
+                            app.podiumpodcasts.podium.ui.component.common.BubbleButton(
+                                icon = androidx.compose.material.icons.Icons.Rounded.Delete,
+                                contentDescription = "Remove played downloads"
+                            ) {
+                                scope.launch {
+                                    playedDownloads.forEach {
+                                        app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
+                                            context = context,
+                                            db = db,
+                                            episode = it.episode
+                                        )
+                                    }
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "Removed ${playedDownloads.size} played download(s)",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            }
                         }
                     }
                     if(totalSize.value > 0L) Surface(

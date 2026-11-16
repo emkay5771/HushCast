@@ -112,6 +112,7 @@ class MediaPlayerViewModel : ViewModel() {
         context: Context,
         bundle: PodcastEpisodeBundle
     ) {
+        if (bundle.episode.id == metadataEpisodeId || queue.contains(bundle.episode.id)) return
         val mediaItem = bundle.createMediaItem(context)
 
         mediaController?.addMediaItem(mediaItem)
@@ -123,6 +124,7 @@ class MediaPlayerViewModel : ViewModel() {
         context: Context,
         bundle: PodcastEpisodeBundle
     ) {
+        if (bundle.episode.id == metadataEpisodeId || queue.contains(bundle.episode.id)) return
         val controller = mediaController ?: return
         val mediaItem = bundle.createMediaItem(context)
         val insertIndex = if(controller.mediaItemCount == 0) 0

@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Explore
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Podcasts
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Tune
@@ -137,6 +138,7 @@ fun HomeRoute(
     var showOptionsSheet by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var openFolderId by remember { mutableStateOf<String?>(null) }
+    var moveToFolderTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
 
     val itemCount = subscriptionsPager.itemCount
     val allSubscriptions = remember(itemCount) {
@@ -209,6 +211,15 @@ fun HomeRoute(
             allSubscriptions = allSubscriptions,
             onDismiss = { showCreateFolderDialog = false },
             onCreated = { showCreateFolderDialog = false }
+        )
+    }
+
+    moveToFolderTarget?.let { (origin, title) ->
+        MoveToFolderDialog(
+            podcastOrigin = origin,
+            podcastTitle = title,
+            folders = gridOrgState.folders,
+            onDismiss = { moveToFolderTarget = null }
         )
     }
 
@@ -487,13 +498,29 @@ fun HomeRoute(
                                         )
                                     },
                                     trailingContent = {
-                                        if(bundle.subscription.newEpisodes > 0 && badgeMode != SubscriptionsBadgeMode.OFF) {
-                                            Badge(
-                                                containerColor = MaterialTheme.colorScheme.primary
-                                            ) {
-                                                if(badgeMode == SubscriptionsBadgeMode.UNPLAYED_COUNT) {
-                                                    Text(bundle.subscription.newEpisodes.toString())
+                                        androidx.compose.foundation.layout.Row(
+                                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            if(bundle.subscription.newEpisodes > 0 && badgeMode != SubscriptionsBadgeMode.OFF) {
+                                                Badge(
+                                                    containerColor = MaterialTheme.colorScheme.primary
+                                                ) {
+                                                    if(badgeMode == SubscriptionsBadgeMode.UNPLAYED_COUNT) {
+                                                        Text(bundle.subscription.newEpisodes.toString())
+                                                    }
                                                 }
+                                            }
+                                            IconButton(
+                                                onClick = {
+                                                    moveToFolderTarget = bundle.podcast.origin to bundle.podcast.fetchTitle()
+                                                }
+                                            ) {
+                                                Icon(
+                                                    imageVector = androidx.compose.material.icons.Icons.Rounded.MoreVert,
+                                                    contentDescription = "Move to folder",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
                                             }
                                         }
                                     },

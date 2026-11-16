@@ -36,6 +36,7 @@ class EpisodeAnalysisWorker(
     override suspend fun doWork(): Result {
         val episodeId = inputData.getString(KEY_EPISODE_ID) ?: return Result.failure()
         val audioPath = inputData.getString(KEY_AUDIO_PATH) ?: return Result.failure()
+        val episodeTitle = inputData.getString(KEY_EPISODE_TITLE).orEmpty()
         val knownSha256 = inputData.getString(KEY_KNOWN_SHA256)
         val quickMode = inputData.getBoolean(KEY_QUICK_MODE, false)
         val actionMode = runCatching {
@@ -44,6 +45,8 @@ class EpisodeAnalysisWorker(
 
         val db = AutoMuteDatabase.getInstance(applicationContext)
         val audioFile = File(audioPath)
+        val displayTitle = episodeTitle.ifBlank { audioFile.nameWithoutExtension }
+
         if (!audioFile.exists()) {
             db.dao().upsertStatus(
                 EpisodeAnalysisStatusEntity(
@@ -55,15 +58,18 @@ class EpisodeAnalysisWorker(
                     errorMessage = null
                 )
             )
+            onEpisodeFinished(applicationContext, id)
             return Result.failure()
         }
 
+        val (currentIndex, totalCount) = beginEpisodeProgress(applicationContext)
+
         runCatching {
-            setForeground(createForegroundInfo("Analyzing episode…", 0))
+            setForeground(createForegroundInfo(displayTitle, currentIndex, totalCount, "Analyzing episode…", 0))
         }
 
         val analyzer = AutoMuteAnalyzer(applicationContext, db)
-        android.util.Log.i("HushCastPerf", "Worker start: ep=$episodeId quick=$quickMode file=${audioFile.name} (${audioFile.length() / 1024} KB)")
+        android.util.Log.i("HushCastPerf", "Worker start ($currentIndex/$totalCount): ep=$episodeId title=\"$displayTitle\" quick=$quickMode file=${audioFile.name} (${audioFile.length() / 1024} KB)")
 
         return try {
             analyzer.analyzeEpisode(
@@ -74,14 +80,14 @@ class EpisodeAnalysisWorker(
                 defaultActionMode = actionMode,
                 onProgress = { p ->
                     runCatching {
-                        setForegroundAsync(createForegroundInfo(p.stage, p.percent))
+                        setForegroundAsync(createForegroundInfo(displayTitle, currentIndex, totalCount, p.stage, p.percent))
                     }
                 }
             )
-            android.util.Log.i("HushCastPerf", "Worker success: ep=$episodeId")
+            android.util.Log.i("HushCastPerf", "Worker success ($currentIndex/$totalCount): ep=$episodeId")
             Result.success()
         } catch (t: Throwable) {
-            android.util.Log.e("HushCastPerf", "Worker failed: ep=$episodeId ${t.javaClass.simpleName}: ${t.message}", t)
+            android.util.Log.e("HushCastPerf", "Worker failed ($currentIndex/$totalCount): ep=$episodeId ${t.javaClass.simpleName}: ${t.message}", t)
             db.dao().upsertStatus(
                 EpisodeAnalysisStatusEntity(
                     episodeId = episodeId,
@@ -93,10 +99,18 @@ class EpisodeAnalysisWorker(
                 )
             )
             Result.failure()
+        } finally {
+            onEpisodeFinished(applicationContext, id)
         }
     }
 
-    private fun createForegroundInfo(stage: String, progress: Int): ForegroundInfo {
+    private fun createForegroundInfo(
+        episodeTitle: String,
+        currentIndex: Int,
+        totalCount: Int,
+        stage: String,
+        progress: Int
+    ): ForegroundInfo {
         val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -109,15 +123,20 @@ class EpisodeAnalysisWorker(
 
         val cancelIntent = WorkManager.getInstance(applicationContext).createCancelPendingIntent(id)
         val clamped = progress.coerceIn(0, 100)
+        val titleText = episodeTitle.ifBlank { "HushCast Audio Analysis" }
+        val countLabel = "$currentIndex of $totalCount"
+        val chipText = if (clamped > 0) "$currentIndex/$totalCount $clamped%" else "$currentIndex/$totalCount"
+
         val builder = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setContentTitle("HushCast Audio Analysis")
-            .setContentText(stage)
+            .setContentTitle(titleText)
+            .setSubText(countLabel)
+            .setContentText("$countLabel • $stage")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setRequestPromotedOngoing(true)
-            .setShortCriticalText(if (clamped > 0) "$clamped%" else "AI")
+            .setShortCriticalText(chipText)
             .setProgress(100, clamped, clamped == 0)
             .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelIntent)
 
@@ -151,9 +170,95 @@ class EpisodeAnalysisWorker(
         const val CHANNEL_ID = "hushcast_analysis"
         const val KEY_EPISODE_ID = "episode_id"
         const val KEY_AUDIO_PATH = "audio_path"
+        const val KEY_EPISODE_TITLE = "episode_title"
         const val KEY_KNOWN_SHA256 = "known_sha256"
         const val KEY_QUICK_MODE = "quick_mode"
         const val KEY_ACTION_MODE = "action_mode"
+
+        private const val BATCH_PREFS = "hushcast_analysis_batch"
+        private const val KEY_BATCH_TOTAL = "batch_total"
+        private const val KEY_BATCH_COMPLETED = "batch_completed"
+        private val batchLock = Any()
+
+        private fun recordEnqueued(context: Context) {
+            synchronized(batchLock) {
+                val prefs = context.getSharedPreferences(BATCH_PREFS, Context.MODE_PRIVATE)
+                val completed = prefs.getInt(KEY_BATCH_COMPLETED, 0)
+                val total = prefs.getInt(KEY_BATCH_TOTAL, 0)
+                val (newCompleted, newTotal) = if (total <= 0 || completed >= total) {
+                    0 to 1
+                } else {
+                    completed to (total + 1)
+                }
+                prefs.edit()
+                    .putInt(KEY_BATCH_COMPLETED, newCompleted)
+                    .putInt(KEY_BATCH_TOTAL, newTotal)
+                    .apply()
+            }
+        }
+
+        private fun beginEpisodeProgress(context: Context): Pair<Int, Int> {
+            val activeCount = runCatching {
+                val infos = WorkManager.getInstance(context)
+                    .getWorkInfosForUniqueWork(ANALYSIS_QUEUE_NAME)
+                    .get()
+                infos.count {
+                    it.state == androidx.work.WorkInfo.State.RUNNING ||
+                        it.state == androidx.work.WorkInfo.State.ENQUEUED ||
+                        it.state == androidx.work.WorkInfo.State.BLOCKED
+                }
+            }.getOrDefault(1).coerceAtLeast(1)
+
+            synchronized(batchLock) {
+                val prefs = context.getSharedPreferences(BATCH_PREFS, Context.MODE_PRIVATE)
+                val completed = prefs.getInt(KEY_BATCH_COMPLETED, 0)
+                val storedTotal = prefs.getInt(KEY_BATCH_TOTAL, 0)
+                val currentIndex = (completed + 1).coerceAtLeast(1)
+                val total = maxOf(storedTotal, currentIndex + activeCount - 1)
+                if (total != storedTotal) {
+                    prefs.edit().putInt(KEY_BATCH_TOTAL, total).apply()
+                }
+                return currentIndex to total
+            }
+        }
+
+        private fun onEpisodeFinished(context: Context, currentWorkId: java.util.UUID) {
+            val hasMorePending = runCatching {
+                val infos = WorkManager.getInstance(context)
+                    .getWorkInfosForUniqueWork(ANALYSIS_QUEUE_NAME)
+                    .get()
+                infos.any {
+                    it.id != currentWorkId && (
+                        it.state == androidx.work.WorkInfo.State.ENQUEUED ||
+                            it.state == androidx.work.WorkInfo.State.BLOCKED ||
+                            it.state == androidx.work.WorkInfo.State.RUNNING
+                        )
+                }
+            }.getOrDefault(false)
+
+            synchronized(batchLock) {
+                val prefs = context.getSharedPreferences(BATCH_PREFS, Context.MODE_PRIVATE)
+                if (!hasMorePending) {
+                    prefs.edit()
+                        .putInt(KEY_BATCH_COMPLETED, 0)
+                        .putInt(KEY_BATCH_TOTAL, 0)
+                        .apply()
+                } else {
+                    val completed = prefs.getInt(KEY_BATCH_COMPLETED, 0) + 1
+                    prefs.edit().putInt(KEY_BATCH_COMPLETED, completed).apply()
+                }
+            }
+        }
+
+        private fun resetBatch(context: Context) {
+            synchronized(batchLock) {
+                context.getSharedPreferences(BATCH_PREFS, Context.MODE_PRIVATE)
+                    .edit()
+                    .putInt(KEY_BATCH_COMPLETED, 0)
+                    .putInt(KEY_BATCH_TOTAL, 0)
+                    .apply()
+            }
+        }
 
         fun enqueueBackgroundCharging(
             context: Context,
@@ -161,18 +266,23 @@ class EpisodeAnalysisWorker(
             audioPath: String,
             knownSha256: String? = null,
             quickMode: Boolean = false,
-            actionMode: MuteActionMode = MuteActionMode.HARD_SILENCE
+            actionMode: MuteActionMode = MuteActionMode.HARD_SILENCE,
+            episodeTitle: String? = null
         ) {
+            recordEnqueued(context)
             val constraints = Constraints.Builder()
                 .setRequiresCharging(true)
                 .build()
 
             val request = OneTimeWorkRequestBuilder<EpisodeAnalysisWorker>()
+                .addTag(ANALYSIS_QUEUE_NAME)
+                .addTag("episode:$episodeId")
                 .setConstraints(constraints)
                 .setInputData(
                     workDataOf(
                         KEY_EPISODE_ID to episodeId,
                         KEY_AUDIO_PATH to audioPath,
+                        KEY_EPISODE_TITLE to episodeTitle,
                         KEY_KNOWN_SHA256 to knownSha256,
                         KEY_QUICK_MODE to quickMode,
                         KEY_ACTION_MODE to actionMode.name
@@ -193,8 +303,10 @@ class EpisodeAnalysisWorker(
             audioPath: String,
             knownSha256: String? = null,
             quickMode: Boolean = false,
-            actionMode: MuteActionMode = MuteActionMode.HARD_SILENCE
+            actionMode: MuteActionMode = MuteActionMode.HARD_SILENCE,
+            episodeTitle: String? = null
         ) {
+            recordEnqueued(context)
             val chargingOnly = app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context)
             val builder = OneTimeWorkRequestBuilder<EpisodeAnalysisWorker>()
                 .addTag(ANALYSIS_QUEUE_NAME)
@@ -203,6 +315,7 @@ class EpisodeAnalysisWorker(
                     workDataOf(
                         KEY_EPISODE_ID to episodeId,
                         KEY_AUDIO_PATH to audioPath,
+                        KEY_EPISODE_TITLE to episodeTitle,
                         KEY_KNOWN_SHA256 to knownSha256,
                         KEY_QUICK_MODE to quickMode,
                         KEY_ACTION_MODE to actionMode.name
@@ -227,6 +340,7 @@ class EpisodeAnalysisWorker(
         }
 
         fun cancelAll(context: Context) {
+            resetBatch(context)
             val wm = WorkManager.getInstance(context)
             wm.cancelUniqueWork(ANALYSIS_QUEUE_NAME)
             wm.cancelAllWorkByTag(ANALYSIS_QUEUE_NAME)

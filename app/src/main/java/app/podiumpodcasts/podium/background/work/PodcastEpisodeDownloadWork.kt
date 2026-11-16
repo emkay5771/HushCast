@@ -75,7 +75,8 @@ class PodcastEpisodeDownloadWork(
                     context = context,
                     episodeId = episodeId,
                     audioPath = file.absolutePath,
-                    knownSha256 = sha256
+                    knownSha256 = sha256,
+                    episodeTitle = episode.title
                 )
                 return true
             }

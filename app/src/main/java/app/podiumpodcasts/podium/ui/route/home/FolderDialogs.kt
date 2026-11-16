@@ -320,3 +320,116 @@ fun FolderBottomSheet(
         )
     }
 }
+
+@Composable
+fun MoveToFolderDialog(
+    podcastOrigin: String,
+    podcastTitle: String,
+    folders: List<PodcastFolder>,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val currentFolder = folders.firstOrNull { podcastOrigin in it.origins }
+    var newFolderName by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Move \"$podcastTitle\"",
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        text = {
+            Column(Modifier.fillMaxWidth()) {
+                if (currentFolder != null) {
+                    TextButton(
+                        onClick = {
+                            PodcastGridOrganization.removePodcastFromFolder(
+                                context,
+                                podcastOrigin,
+                                currentFolder.id
+                            )
+                            onDismiss()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Remove from \"${currentFolder.name}\"")
+                    }
+                }
+                if (folders.isNotEmpty()) {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 220.dp)
+                    ) {
+                        items(folders, key = { it.id }) { folder ->
+                            val isHere = folder.id == currentFolder?.id
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(enabled = !isHere) {
+                                        PodcastGridOrganization.addPodcastToFolder(
+                                            context,
+                                            podcastOrigin,
+                                            folder.id
+                                        )
+                                        onDismiss()
+                                    }
+                                    .padding(vertical = 10.dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = folder.name,
+                                    style = Typography.bodyLarge,
+                                    color = if (isHere) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                )
+                                if (isHere) {
+                                    Text(
+                                        text = "Current",
+                                        style = Typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = newFolderName,
+                        onValueChange = { newFolderName = it },
+                        label = { Text("New folder") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        enabled = newFolderName.isNotBlank(),
+                        onClick = {
+                            PodcastGridOrganization.createFolder(
+                                context = context,
+                                name = newFolderName.trim(),
+                                colorIndex = (System.currentTimeMillis() % 6).toInt(),
+                                initialOrigins = listOf(podcastOrigin)
+                            )
+                            onDismiss()
+                        }
+                    ) {
+                        Text("Create")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        }
+    )
+}
+

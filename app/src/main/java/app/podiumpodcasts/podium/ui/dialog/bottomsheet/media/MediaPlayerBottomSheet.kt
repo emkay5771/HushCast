@@ -22,12 +22,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Forward10
@@ -56,8 +58,10 @@ import androidx.compose.material3.IconButtonDefaults.IconButtonWidthOption
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -77,6 +81,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.fromHtml
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -84,6 +90,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.ui.platform.LocalContext
+import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeBundle
 import app.hushcast.automute.dsp.ReadinessBadge
 import app.hushcast.automute.storage.AutoMuteDatabase
 import app.hushcast.automute.storage.BlobCodec
@@ -111,6 +118,12 @@ import app.podiumpodcasts.podium.ui.vm.SourceTypeState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
+
+private enum class MediaPlayerTab(val label: String) {
+    PLAYER("Player"),
+    NOTES("Notes"),
+    TRANSCRIPT("Transcript")
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -167,22 +180,30 @@ fun MediaPlayerBottomSheet(
     val pendingUndo by HushCastEngineBridge.pendingUndoEvent.collectAsState()
     val isCastingExternal by HushCastEngineBridge.isCastingExternal.collectAsState()
 
-    var showTranscript by remember { mutableStateOf(false) }
+    var selectedTab by remember { mutableStateOf(MediaPlayerTab.PLAYER) }
+    var currentEpisodeBundle by remember(episodeId) { mutableStateOf<PodcastEpisodeBundle?>(null) }
     var showMoreSheet by remember { mutableStateOf(false) }
     var showNotDownloadedDialog by remember { mutableStateOf(false) }
     var transcriptBlob by remember(episodeId) { mutableStateOf<WordIndexBlob?>(null) }
 
+    LaunchedEffect(episodeId) {
+        currentEpisodeBundle = if (episodeId.isNotBlank()) {
+            runCatching { appDb.podcastEpisodes().getSync(episodeId) }.getOrNull()
+        } else null
+    }
+
     fun triggerAnalyzeNow() {
         if (episodeId.isBlank()) return
         scope.launch {
-            val bundle = runCatching { appDb.podcastEpisodes().getSync(episodeId) }.getOrNull()
+            val bundle = currentEpisodeBundle ?: runCatching { appDb.podcastEpisodes().getSync(episodeId) }.getOrNull()
             val audioPath = bundle?.episode?.craftDownloadFile(context)?.absolutePath
             if (audioPath != null && java.io.File(audioPath).exists()) {
                 EpisodeAnalysisWorker.enqueueAnalyzeNow(
                     context = context,
                     episodeId = episodeId,
                     audioPath = audioPath,
-                    actionMode = HushCastEngineBridge.defaultActionMode
+                    actionMode = HushCastEngineBridge.defaultActionMode,
+                    episodeTitle = bundle.episode.title
                 )
                 android.widget.Toast.makeText(
                     context,
@@ -249,15 +270,154 @@ fun MediaPlayerBottomSheet(
                             }
                         )
                     }
-                    .verticalScroll(
-                        state = rememberScrollState(),
-                        flingBehavior = null
-                    )
             ) {
-                Column(
-                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                PrimaryTabRow(
+                    selectedTabIndex = selectedTab.ordinal,
+                    containerColor = Color.Transparent
                 ) {
+                    MediaPlayerTab.entries.forEach { tab ->
+                        Tab(
+                            selected = selectedTab == tab,
+                            onClick = { selectedTab = tab },
+                            text = { Text(tab.label) }
+                        )
+                    }
+                }
+
+                when (selectedTab) {
+                    MediaPlayerTab.NOTES -> {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 320.dp, max = 520.dp)
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 20.dp, vertical = 16.dp)
+                        ) {
+                            Text(
+                                text = currentEpisodeBundle?.episode?.title
+                                    ?: vm.mediaMetadata?.title?.toString()
+                                    ?: "",
+                                style = Typography.titleLargeEmphasized
+                            )
+                            val sub = currentEpisodeBundle?.episode?.podcastTitle
+                                ?: vm.mediaMetadata?.subtitle?.toString()
+                                ?: ""
+                            if (sub.isNotBlank()) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = sub,
+                                    style = Typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Spacer(Modifier.height(16.dp))
+                            val desc = currentEpisodeBundle?.episode?.description.orEmpty()
+                            if (desc.isBlank()) {
+                                Text(
+                                    text = "No show notes available for this episode.",
+                                    style = Typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                SelectionContainer {
+                                    Text(
+                                        text = AnnotatedString.fromHtml(
+                                            htmlString = desc.replace("\n", "<br>")
+                                        ),
+                                        style = Typography.bodyMedium
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    MediaPlayerTab.TRANSCRIPT -> {
+                        val muteWindows = remember(muteEntities) { muteEntities.map { it.toDomain() } }
+                        val adWindows = remember(adEntities) { adEntities.map { it.toDomain() } }
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 320.dp, max = 520.dp)
+                                .verticalScroll(rememberScrollState())
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                        ) {
+                            if (transcriptBlob == null) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 32.dp, horizontal = 16.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Subtitles,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(40.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = "Transcript not generated yet",
+                                        style = Typography.titleMediumEmphasized
+                                    )
+                                    Text(
+                                        text = "Analyze this episode with HushCast AI to view a synced, tappable transcript.",
+                                        style = Typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                    Button(onClick = { triggerAnalyzeNow() }) {
+                                        Icon(Icons.Rounded.AutoAwesome, contentDescription = null)
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Analyze with HushCast AI")
+                                    }
+                                }
+                            } else {
+                                SyncedTranscriptCard(
+                                    segments = transcriptBlob?.segments ?: emptyList(),
+                                    words = transcriptBlob?.words ?: emptyList(),
+                                    muteWindows = muteWindows,
+                                    adWindows = adWindows,
+                                    currentPositionMs = vm.currentPosition,
+                                    onSeekToMs = { ms -> vm.seek(ms) },
+                                    onToggleWordMute = { word, mute ->
+                                        val clean = word.text.trim().trim('.', ',', '!', '?', '"', '\'')
+                                        if (clean.isNotEmpty() && episodeId.isNotBlank()) {
+                                            scope.launch {
+                                                if (mute) {
+                                                    autoMuteDb.dao().upsertRule(
+                                                        MuteRuleEntity(
+                                                            pattern = clean,
+                                                            actionMode = HushCastEngineBridge.defaultActionMode.name,
+                                                            category = "Transcript"
+                                                        )
+                                                    )
+                                                }
+                                                val sha = analysisStatus?.fileSha256?.takeIf { it.isNotBlank() }
+                                                if (sha != null) {
+                                                    app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
+                                                        .reevaluateMuteRules(sha, episodeId, defaultActionMode = HushCastEngineBridge.defaultActionMode)
+                                                    val updated = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
+                                                    HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
+                                                }
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    MediaPlayerTab.PLAYER -> {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(
+                                    state = rememberScrollState(),
+                                    flingBehavior = null
+                                )
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
                     AnimatedContent(
                         targetState = vm.mediaSourceType
                     ) {
@@ -570,6 +730,8 @@ fun MediaPlayerBottomSheet(
                             }
                         }
                     }
+                        }
+                    }
                 }
 
                 Surface(
@@ -610,11 +772,19 @@ fun MediaPlayerBottomSheet(
                             )
                         }
 
-                        androidx.compose.material3.IconButton(onClick = { showTranscript = true }) {
+                        androidx.compose.material3.IconButton(
+                            onClick = {
+                                selectedTab = if (selectedTab == MediaPlayerTab.TRANSCRIPT) {
+                                    MediaPlayerTab.PLAYER
+                                } else {
+                                    MediaPlayerTab.TRANSCRIPT
+                                }
+                            }
+                        ) {
                             Icon(
                                 imageVector = Icons.Rounded.Subtitles,
                                 contentDescription = "Transcript",
-                                tint = if(showTranscript) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                tint = if(selectedTab == MediaPlayerTab.TRANSCRIPT) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                             )
                         }
 
@@ -629,46 +799,6 @@ fun MediaPlayerBottomSheet(
             }
         }
 
-        if (showTranscript) {
-            ModalBottomSheet(
-                onDismissRequest = { showTranscript = false }
-            ) {
-                val muteWindows = remember(muteEntities) { muteEntities.map { it.toDomain() } }
-                val adWindows = remember(adEntities) { adEntities.map { it.toDomain() } }
-                SyncedTranscriptCard(
-                    segments = transcriptBlob?.segments ?: emptyList(),
-                    words = transcriptBlob?.words ?: emptyList(),
-                    muteWindows = muteWindows,
-                    adWindows = adWindows,
-                    currentPositionMs = vm.currentPosition,
-                    onSeekToMs = { ms -> vm.seek(ms) },
-                    onToggleWordMute = { word, mute ->
-                        val clean = word.text.trim().trim('.', ',', '!', '?', '"', '\'')
-                        if (clean.isNotEmpty() && episodeId.isNotBlank()) {
-                            scope.launch {
-                                if (mute) {
-                                    autoMuteDb.dao().upsertRule(
-                                        MuteRuleEntity(
-                                            pattern = clean,
-                                            actionMode = HushCastEngineBridge.defaultActionMode.name,
-                                            category = "Transcript"
-                                        )
-                                    )
-                                }
-                                val sha = analysisStatus?.fileSha256?.takeIf { it.isNotBlank() }
-                                if (sha != null) {
-                                    app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
-                                        .reevaluateMuteRules(sha, episodeId, defaultActionMode = HushCastEngineBridge.defaultActionMode)
-                                    val updated = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
-                                    HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
-                                }
-                            }
-                        }
-                    },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                )
-            }
-        }
 
         if (showMoreSheet) {
             ModalBottomSheet(

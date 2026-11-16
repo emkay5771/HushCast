@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -95,6 +96,14 @@ fun NewEpisodesRoute(
                         ) {
                             newEpisodes.itemSnapshotList.items.forEach {
                                 playerVm.enqueue(context, it)
+                            }
+                        }
+                        app.podiumpodcasts.podium.ui.component.common.BubbleButton(
+                            icon = androidx.compose.material.icons.Icons.Rounded.Done,
+                            contentDescription = "Mark all seen"
+                        ) {
+                            newEpisodes.itemSnapshotList.items.forEach {
+                                vm.unnew(it)
                             }
                         }
                     }

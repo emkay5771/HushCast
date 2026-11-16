@@ -28,11 +28,11 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_load(
     const char * path = env->GetStringUTFChars(jpath, nullptr);
     whisper_context_params cp = whisper_context_default_params();
     cp.use_gpu = false;
-    if (useDtw) {
+    if (useFlashAttn) {
+        cp.flash_attn = true;
+    } else if (useDtw) {
         cp.dtw_token_timestamps = true;
         cp.dtw_aheads_preset = isTiny ? WHISPER_AHEADS_TINY_EN : WHISPER_AHEADS_BASE_EN;
-    } else if (useFlashAttn) {
-        cp.flash_attn = true;
     }
     whisper_context * ctx = whisper_init_from_file_with_params(path, cp);
     env->ReleaseStringUTFChars(jpath, path);
