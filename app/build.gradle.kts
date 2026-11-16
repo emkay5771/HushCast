@@ -41,6 +41,15 @@ android {
     }
 
     signingConfigs {
+        getByName("debug") {
+            val ciKeystore = file("ci-debug.keystore")
+            if (ciKeystore.exists()) {
+                storeFile = ciKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
         create("release") {
             storeFile = file("keystore.jks")
             storePassword = System.getenv("SIGNING_STORE_PASSWORD")

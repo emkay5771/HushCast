@@ -45,7 +45,9 @@ class EpisodeAnalysisWorker(
         val audioFile = File(audioPath)
         if (!audioFile.exists()) return Result.failure()
 
-        setForeground(createForegroundInfo("Analyzing episode…", 0))
+        runCatching {
+            setForeground(createForegroundInfo("Analyzing episode…", 0))
+        }
 
         val db = AutoMuteDatabase.getInstance(applicationContext)
         val analyzer = AutoMuteAnalyzer(applicationContext, db)
@@ -58,7 +60,9 @@ class EpisodeAnalysisWorker(
                 quickWordMuteOnly = quickMode,
                 defaultActionMode = actionMode,
                 onProgress = { p ->
-                    setForegroundAsync(createForegroundInfo(p.stage, p.percent))
+                    runCatching {
+                        setForegroundAsync(createForegroundInfo(p.stage, p.percent))
+                    }
                 }
             )
             Result.success()
