@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "whisper.h"
+#define DR_MP3_IMPLEMENTATION
+#include "dr_mp3.h"
 
 namespace {
 
@@ -500,3 +502,80 @@ extern "C" JNIEXPORT void JNICALL
 Java_app_hushcast_automute_nativebridge_WhisperJni_fftFree(JNIEnv *, jclass, jlong h) {
     delete reinterpret_cast<NativeFft *>(h);
 }
+
+struct NativeMp3Decoder {
+    drmp3 mp3;
+    std::vector<float> interleaved;
+    std::vector<float> mid;
+    std::vector<float> side;
+};
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_mp3Open(JNIEnv * env, jclass, jstring jpath) {
+    const char * path = env->GetStringUTFChars(jpath, nullptr);
+    auto * dec = new NativeMp3Decoder();
+    if (!drmp3_init_file(&dec->mp3, path, nullptr)) {
+        env->ReleaseStringUTFChars(jpath, path);
+        delete dec;
+        return 0L;
+    }
+    env->ReleaseStringUTFChars(jpath, path);
+    return reinterpret_cast<jlong>(dec);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_mp3SampleRate(JNIEnv *, jclass, jlong h) {
+    return (jint) reinterpret_cast<NativeMp3Decoder *>(h)->mp3.sampleRate;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_mp3Channels(JNIEnv *, jclass, jlong h) {
+    return (jint) reinterpret_cast<NativeMp3Decoder *>(h)->mp3.channels;
+}
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_mp3TotalFrames(JNIEnv *, jclass, jlong h) {
+    return (jlong) drmp3_get_pcm_frame_count(&reinterpret_cast<NativeMp3Decoder *>(h)->mp3);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_mp3ReadChunk(
+        JNIEnv * env, jclass, jlong h, jfloatArray jmid, jfloatArray jside) {
+    auto * dec = reinterpret_cast<NativeMp3Decoder *>(h);
+    const jsize maxFrames = env->GetArrayLength(jmid);
+    const drmp3_uint32 ch = dec->mp3.channels;
+    if (maxFrames <= 0 || ch == 0) return 0;
+
+    dec->interleaved.resize((size_t) maxFrames * ch);
+    const drmp3_uint64 n = drmp3_read_pcm_frames_f32(&dec->mp3, (drmp3_uint64) maxFrames, dec->interleaved.data());
+    if (n == 0) return 0;
+
+    dec->mid.resize((size_t) n);
+    const float * src = dec->interleaved.data();
+    float * mid = dec->mid.data();
+    if (ch >= 2) {
+        dec->side.resize((size_t) n);
+        float * side = dec->side.data();
+        for (drmp3_uint64 i = 0; i < n; i++) {
+            const float l = src[i * ch];
+            const float r = src[i * ch + 1];
+            mid[i] = (l + r) * 0.5f;
+            side[i] = (l - r) * 0.5f;
+        }
+        if (jside != nullptr) {
+            env->SetFloatArrayRegion(jside, 0, (jsize) n, side);
+        }
+    } else {
+        std::copy(src, src + n, mid);
+    }
+    env->SetFloatArrayRegion(jmid, 0, (jsize) n, mid);
+    return (jint) n;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_mp3Close(JNIEnv *, jclass, jlong h) {
+    auto * dec = reinterpret_cast<NativeMp3Decoder *>(h);
+    drmp3_uninit(&dec->mp3);
+    delete dec;
+}
+

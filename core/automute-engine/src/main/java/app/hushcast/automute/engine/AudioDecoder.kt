@@ -26,11 +26,21 @@ object AudioDecoder {
         } ?: error("no audio track in $path")
         ex.selectTrack(track)
         val format = ex.getTrackFormat(track)
+        val mime = format.getString(MediaFormat.KEY_MIME)!!
         val duration = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
         var rate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
         var channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+
+        if (mime == "audio/mpeg" && !path.startsWith("http", ignoreCase = true) && app.hushcast.automute.nativebridge.WhisperJni.isAvailable) {
+            val mp3Handle = app.hushcast.automute.nativebridge.WhisperJni.mp3Open(path)
+            if (mp3Handle != 0L) {
+                ex.release()
+                return decodeMp3Native(mp3Handle, duration, frames, pcm16k, onProgress)
+            }
+        }
+
         var encoding = AudioFormat.ENCODING_PCM_16BIT
-        val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+        val codec = MediaCodec.createDecoderByType(mime)
         // Ask for float output: 16-bit samples turn near-silence into exact zeros, which shifts a few
         // of the audio features.  Decoders that can't do it either ignore the request or refuse it.
         try {
@@ -222,6 +232,135 @@ object AudioDecoder {
             codec.stop(); codec.release(); ex.release()
         }
         return Info(rate, channels, duration)
+    }
+
+    private fun decodeMp3Native(
+        mp3Handle: Long,
+        extractorDurationUs: Long,
+        frames: FrameExtractor?,
+        pcm16k: PcmBuffer?,
+        onProgress: ((Float) -> Unit)?
+    ): Info {
+        val wj = app.hushcast.automute.nativebridge.WhisperJni
+        val rate = wj.mp3SampleRate(mp3Handle).coerceAtLeast(8000)
+        val channels = wj.mp3Channels(mp3Handle).coerceAtLeast(1)
+        val totalPcmFrames = wj.mp3TotalFrames(mp3Handle)
+        val durationUs = if (totalPcmFrames > 0L) {
+            (totalPcmFrames * 1_000_000L) / rate
+        } else {
+            extractorDurationUs
+        }
+        val stereo = channels >= 2
+        val toFrames = if (frames != null) Resampler(rate, FrameExtractor.SR) else null
+        val toFramesSide = if (frames != null && stereo) Resampler(rate, FrameExtractor.SR) else null
+        val toWhisper = if (pcm16k != null) {
+            Resampler(if (frames != null) FrameExtractor.SR else rate, 16000)
+        } else null
+
+        val frameQueue = if (frames != null) java.util.concurrent.ArrayBlockingQueue<Pair<FloatArray, FloatArray?>>(64) else null
+        val frameError = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
+        val frameThread = if (frames != null && frameQueue != null) {
+            Thread({
+                try {
+                    while (true) {
+                        val item = frameQueue.take()
+                        if (item.first.isEmpty() && item.second == null) break
+                        feed(frames, item.first, item.second)
+                    }
+                } catch (t: Throwable) {
+                    frameError.compareAndSet(null, t)
+                }
+            }, "HushCast-FrameExtractor").apply { start() }
+        } else null
+
+        val chunkSize = 32768
+        val midChunk = FloatArray(chunkSize)
+        val sideChunk = if (stereo) FloatArray(chunkSize) else null
+        var decodedFrames = 0L
+        var lastReportedFraction = -1f
+        val startMs = System.currentTimeMillis()
+        var lastLogMs = startMs
+        android.util.Log.i(
+            "HushCastPerf",
+            "Decode MP3 (native dr_mp3): rate=$rate ch=$channels durSec=${durationUs / 1_000_000L}"
+        )
+
+        try {
+            while (true) {
+                val n = wj.mp3ReadChunk(mp3Handle, midChunk, sideChunk)
+                if (n <= 0) break
+                decodedFrames += n
+
+                if (frames != null && toFrames != null) {
+                    val mid24k = toFrames.process(midChunk, 0, n)
+                    val side24k = if (stereo) toFramesSide?.process(sideChunk!!, 0, n) else null
+                    val err = frameError.get()
+                    if (err != null) throw err
+                    if (mid24k.isNotEmpty()) frameQueue?.put(mid24k to side24k)
+                    if (pcm16k != null && toWhisper != null && mid24k.isNotEmpty()) {
+                        val w = toWhisper.process(mid24k, 0, mid24k.size)
+                        if (w.isNotEmpty()) pcm16k.append(w)
+                    }
+                } else if (pcm16k != null && toWhisper != null) {
+                    val w = toWhisper.process(midChunk, 0, n)
+                    if (w.isNotEmpty()) pcm16k.append(w)
+                }
+
+                if (onProgress != null && durationUs > 0L) {
+                    val posUs = (decodedFrames * 1_000_000L) / rate
+                    val fraction = (posUs.toFloat() / durationUs.toFloat()).coerceIn(0f, 1f)
+                    if (fraction - lastReportedFraction >= 0.03f) {
+                        lastReportedFraction = fraction
+                        onProgress(fraction)
+                    }
+                }
+                val nowMs = System.currentTimeMillis()
+                if (nowMs - lastLogMs >= 5000L) {
+                    lastLogMs = nowMs
+                    val elapsedSec = ((nowMs - startMs).coerceAtLeast(1L)) / 1000.0
+                    val audioSec = decodedFrames.toDouble() / rate
+                    val speed = String.format(java.util.Locale.US, "%.1f", audioSec / elapsedSec)
+                    val pct = if (durationUs > 0L) ((decodedFrames * 1_000_000L / rate) * 100L / durationUs).toInt() else 0
+                    android.util.Log.i("HushCastPerf", "Decode MP3 $pct%: ${audioSec.toInt()}s in ${elapsedSec.toInt()}s (${speed}x RT) q=${frameQueue?.size ?: 0}")
+                }
+            }
+
+            if (frames != null && toFrames != null) {
+                val mid24k = toFrames.finish()
+                val side24k = if (stereo) toFramesSide?.finish() else null
+                val err = frameError.get()
+                if (err != null) throw err
+                if (mid24k.isNotEmpty()) frameQueue?.put(mid24k to side24k)
+                if (pcm16k != null && toWhisper != null) {
+                    if (mid24k.isNotEmpty()) {
+                        val w = toWhisper.process(mid24k, 0, mid24k.size)
+                        if (w.isNotEmpty()) pcm16k.append(w)
+                    }
+                    val wf = toWhisper.finish()
+                    if (wf.isNotEmpty()) pcm16k.append(wf)
+                }
+            } else if (pcm16k != null && toWhisper != null) {
+                val wf = toWhisper.finish()
+                if (wf.isNotEmpty()) pcm16k.append(wf)
+            }
+
+            if (frameQueue != null && frameThread != null) {
+                frameQueue.put(FloatArray(0) to null)
+                frameThread.join()
+                frameError.get()?.let { throw it }
+            }
+            val totalMs = System.currentTimeMillis() - startMs
+            val audioSec = decodedFrames.toDouble() / rate
+            val speed = String.format(java.util.Locale.US, "%.1f", audioSec / (totalMs.coerceAtLeast(1L) / 1000.0))
+            android.util.Log.i("HushCastPerf", "Decode MP3 done: ${audioSec.toInt()}s in ${totalMs}ms (${speed}x RT)")
+        } finally {
+            frameThread?.interrupt()
+            toFrames?.close()
+            toFramesSide?.close()
+            toWhisper?.close()
+            wj.mp3Close(mp3Handle)
+        }
+        return Info(rate, channels, durationUs)
     }
 
     private fun feed(frames: FrameExtractor, mid: FloatArray, side: FloatArray?) {

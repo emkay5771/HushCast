@@ -72,6 +72,24 @@ internal object WhisperJni {
 
     @JvmStatic
     external fun fftFree(handle: Long)
+
+    @JvmStatic
+    external fun mp3Open(path: String): Long
+
+    @JvmStatic
+    external fun mp3SampleRate(handle: Long): Int
+
+    @JvmStatic
+    external fun mp3Channels(handle: Long): Int
+
+    @JvmStatic
+    external fun mp3TotalFrames(handle: Long): Long
+
+    @JvmStatic
+    external fun mp3ReadChunk(handle: Long, midOut: FloatArray, sideOut: FloatArray?): Int
+
+    @JvmStatic
+    external fun mp3Close(handle: Long)
 }
 
 internal object LlamaJni {
