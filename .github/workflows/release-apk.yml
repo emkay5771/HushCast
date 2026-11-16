@@ -56,14 +56,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cat <<'EOF' > /tmp/release_notes.md
+          if [ -f RELEASE_NOTES.md ]; then
+            cp RELEASE_NOTES.md /tmp/release_notes.md
+          else
+            cat <<'EOF' > /tmp/release_notes.md
           HushCast Android APK (`arm64-v8a`, Android 8.0+ / API 26+).
 
           ### First-Time Setup
           1. Download `${{ env.APK_FILE }}` on your Android phone and install it.
           2. Open **Settings → HushCast** to download the on-device AI models over Wi-Fi.
           EOF
-          sed -i "s|\${{ env.APK_FILE }}|${{ env.APK_FILE }}|g" /tmp/release_notes.md
+            sed -i "s|\${{ env.APK_FILE }}|${{ env.APK_FILE }}|g" /tmp/release_notes.md
+          fi
           gh release create "${GITHUB_REF_NAME}" "${{ env.APK_FILE }}" \
             --title "HushCast ${GITHUB_REF_NAME}" \
             --notes-file /tmp/release_notes.md

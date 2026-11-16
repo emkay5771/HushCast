@@ -27,14 +27,18 @@
 ### 🎨 Material 3 Expressive & Player Experience
 - **Adaptive & Themed Icon**: Supports Android 13+ Material You monochrome icon tinting.
 - **Theme Options**: Choose **Automatic**, **Light**, or **Dark** mode, plus **Dynamic color (Material You)** and artwork-adaptive player colors.
-- **Live-Synced Transcripts & Chapters**: Supports Podcasting 2.0 JSON chapters, Podlove Simple Chapters, and a live-scrolling transcript view.
-- **Persistent Drag-to-Reorder Queue**: Long-press and drag episodes in **Next up**; your queue persists across app restarts.
+- **Subscriptions & Podcast Browsing**: Switch between **Large Grid**, **Small Grid**, and **List** layouts, sort by **New Episodes** or **A–Z**, and customize unplayed badges (**Count**, **Dot**, or **Off**).
+- **Episode Listings & Multi-Select**: Quick filter chips (**Unplayed**, **Downloaded**, **In Progress**), duration & remaining-time metadata, inline progress bars on partially played episodes, and long-press multi-select for bulk **Play Next / Play Last / Mark Played**.
+- **Up Next Queue & Mini-Player**: **Play Next / Play Last** menu, tap-to-play from Up Next (keeping your previous episode at the top), swipe-to-remove, **Move to Top**, drag-to-reorder, **Clear Up Next**, and direct queue button + swipe-up gesture on the mini-player.
+- **Live-Synced Transcripts & Chapters**: Supports Podcasting 2.0 JSON chapters, Podlove Simple Chapters, a modal **Synced Transcript**, and a **Player Actions** sheet.
 - **Gradual Sleep Timer**: Fades playback volume down smoothly over the final 10 seconds.
 
 ### 🔍 Discovery, Sync & Playback
-- **Podcast Discovery**: Search via **Podcast Index** and **Apple Podcasts**.
+- **Podcast Discovery & OPML Import**: Search via **Podcast Index** and **Apple Podcasts**, or import subscriptions from Pocket Casts and other apps (including nested/foldered `.opml` files).
+- **Seamless Stream-to-Download Swap**: Start streaming immediately while downloading—playback swaps to the local file at the exact position as soon as the download completes.
+- **Per-Podcast Overrides**: Configure **Auto add to Up Next** (*Off*, *Play Next*, *Play Last*) and per-podcast **Playback speed** (*Global*, *0.8x–2.0x*).
 - **Sync & Android Auto**: Supports [**gpodder.net**](https://gpodder.net), [**nextcloud-gpodder**](https://github.com/thrillfall/nextcloud-gpodder), and **Android Auto**.
-- **Background Analysis**: Automatically hashes downloaded episodes (SHA-256) and queues analysis while charging, or trigger **Analyze Now** manually.
+- **Background Analysis**: Automatically hashes downloaded episodes (SHA-256) and queues analysis while charging, or trigger **Analyze Now** manually with live progress synced between the player and Live Activity.
 
 ---
 
