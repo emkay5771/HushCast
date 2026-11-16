@@ -402,10 +402,31 @@ def _decode_audio_16k_mono(audio_path: Path):
     return pcm, float(len(pcm) / 16000.0)
 
 
+def _estimate_pitch_hz(chunk, sr: int = 16000) -> float:
+    import numpy as np
+
+    if len(chunk) < sr // 10:
+        return 0.0
+    # Autocorrelation on centered chunk (70 Hz .. 350 Hz)
+    x = chunk - float(np.mean(chunk))
+    min_lag = sr // 350
+    max_lag = sr // 70
+    if len(x) <= max_lag + 16:
+        return 0.0
+    corr = np.correlate(x, x, mode="full")[len(x) - 1 :]
+    if corr[0] <= 1e-8:
+        return 0.0
+    sub = corr[min_lag : max_lag + 1]
+    peak_idx = int(np.argmax(sub))
+    if sub[peak_idx] < 0.25 * corr[0]:
+        return 0.0
+    return float(sr / (min_lag + peak_idx))
+
+
 def _assign_speakers(pcm_16k, segments: list[SegmentDto]) -> None:
     """
-    Lightweight acoustic speaker diarization using per-segment spectral/timbre
-    fingerprints on 16 kHz mono PCM + online cosine clustering.
+    Acoustic speaker diarization using MFCCs + fundamental frequency (F0) +
+    cosine K-means with silhouette-based speaker count selection.
     """
     import numpy as np
 
@@ -414,15 +435,38 @@ def _assign_speakers(pcm_16k, segments: list[SegmentDto]) -> None:
     if n_segs == 0 or len(pcm_16k) < sr // 10:
         return
 
-    # 8 log-spaced frequency bands from 80 Hz to 7500 Hz + ZCR + spectral centroid + RMS
-    band_edges = np.geomspace(80.0, 7500.0, 9)
+    # Precompute 24-band Mel filterbank & DCT-II matrix for 12 MFCCs
+    n_fft = 512
+    n_mels = 24
+    n_mfcc = 12
+    freqs = np.fft.rfftfreq(n_fft, d=1.0 / sr)
+    mel_low = 2595.0 * np.log10(1.0 + 80.0 / 700.0)
+    mel_high = 2595.0 * np.log10(1.0 + 7500.0 / 700.0)
+    mel_pts = np.linspace(mel_low, mel_high, n_mels + 2)
+    hz_pts = 700.0 * (10.0 ** (mel_pts / 2595.0) - 1.0)
+    bins = np.floor((n_fft + 1) * hz_pts / sr).astype(int)
+    fb = np.zeros((n_mels, len(freqs)), dtype=np.float32)
+    for m in range(1, n_mels + 1):
+        f_l, f_c, f_r = bins[m - 1], bins[m], bins[m + 1]
+        if f_c > f_l:
+            fb[m - 1, f_l:f_c] = (np.arange(f_l, f_c) - f_l) / float(f_c - f_l)
+        if f_r > f_c:
+            fb[m - 1, f_c:f_r] = (f_r - np.arange(f_c, f_r)) / float(f_r - f_c)
+    dct_idx = np.arange(n_mfcc)[:, None]
+    mel_idx = np.arange(n_mels)[None, :]
+    dct_mat = np.cos(np.pi * dct_idx * (mel_idx + 0.5) / n_mels).astype(np.float32)
+    hann = np.hanning(n_fft).astype(np.float32)
+
     feats: list[Optional[np.ndarray]] = []
+    durs: list[float] = []
 
     for s in segments:
+        dur = max(0.0, s.end - s.start)
+        durs.append(dur)
         i0 = max(0, int(s.start * sr))
         i1 = min(len(pcm_16k), int(s.end * sr))
         chunk = pcm_16k[i0:i1]
-        if len(chunk) < 320:
+        if len(chunk) < n_fft:
             feats.append(None)
             continue
         rms = float(np.sqrt(np.mean(chunk * chunk)))
@@ -430,26 +474,28 @@ def _assign_speakers(pcm_16k, segments: list[SegmentDto]) -> None:
             feats.append(None)
             continue
 
-        # Take up to 3 seconds centered in the segment for fast FFT
-        if len(chunk) > 3 * sr:
+        if len(chunk) > 4 * sr:
             mid = len(chunk) // 2
-            chunk = chunk[mid - (3 * sr) // 2 : mid + (3 * sr) // 2]
+            chunk = chunk[mid - 2 * sr : mid + 2 * sr]
 
-        zcr = float(np.mean(np.abs(np.diff(np.signbit(chunk)))))
-        window = np.hanning(len(chunk)).astype(np.float32)
-        spec = np.abs(np.fft.rfft(chunk * window))
-        freqs = np.fft.rfftfreq(len(chunk), d=1.0 / sr)
-        power = spec * spec + 1e-12
-        total_power = float(np.sum(power))
-        centroid = float(np.sum(freqs * power) / total_power) / 4000.0
+        # Frame-averaged MFCCs (hop = 256)
+        step = 256
+        frames = [
+            chunk[pos : pos + n_fft] * hann
+            for pos in range(0, len(chunk) - n_fft + 1, step)
+        ]
+        if not frames:
+            feats.append(None)
+            continue
+        frame_mat = np.stack(frames, axis=0)
+        pow_spec = np.abs(np.fft.rfft(frame_mat, n=n_fft)) ** 2
+        mel_e = np.log(np.maximum(pow_spec @ fb.T, 1e-9))
+        mfccs = mel_e @ dct_mat.T
+        mfcc_mean = np.mean(mfccs, axis=0)
 
-        bands = []
-        for b in range(8):
-            mask = (freqs >= band_edges[b]) & (freqs < band_edges[b + 1])
-            band_e = float(np.sum(power[mask])) if np.any(mask) else 1e-12
-            bands.append(float(np.log10(band_e / total_power + 1e-9)))
-
-        vec = np.array([np.log10(rms + 1e-6), zcr * 10.0, centroid, *bands], dtype=np.float32)
+        f0 = _estimate_pitch_hz(chunk[: min(len(chunk), sr)], sr)
+        f0_log = np.log2(f0 / 150.0) if f0 > 0 else 0.0
+        vec = np.concatenate([mfcc_mean[1:n_mfcc], [f0_log * 2.5]]).astype(np.float32)
         feats.append(vec)
 
     valid_idx = [i for i, v in enumerate(feats) if v is not None]
@@ -462,39 +508,62 @@ def _assign_speakers(pcm_16k, segments: list[SegmentDto]) -> None:
     mean = np.mean(mat, axis=0)
     std = np.std(mat, axis=0) + 1e-6
     mat_norm = (mat - mean) / std
-    norms = np.linalg.norm(mat_norm, axis=1, keepdims=True) + 1e-12
-    mat_unit = mat_norm / norms
+    mat_unit = mat_norm / (np.linalg.norm(mat_norm, axis=1, keepdims=True) + 1e-12)
 
-    # Greedy cosine-similarity speaker clustering (capped at 6 speakers)
-    centroids: list[np.ndarray] = []
-    counts: list[int] = []
-    labels = [0] * len(valid_idx)
-    sim_threshold = 0.72
-    max_speakers = 6
+    # Fit K-means on substantial voiced segments (>= 0.8s)
+    train_mask = np.array([durs[i] >= 0.8 for i in valid_idx], dtype=bool)
+    train_vecs = mat_unit[train_mask] if np.sum(train_mask) >= 6 else mat_unit
 
-    for row_i, vec in enumerate(mat_unit):
-        if not centroids:
-            centroids.append(vec.copy())
-            counts.append(1)
-            labels[row_i] = 0
+    def _run_kmeans(vecs: np.ndarray, k: int, iters: int = 18):
+        # Farthest-point deterministic initialization
+        centroids = [vecs[0].copy()]
+        for _ in range(1, k):
+            sims = np.max(vecs @ np.stack(centroids, axis=0).T, axis=1)
+            centroids.append(vecs[int(np.argmin(sims))].copy())
+        c_mat = np.stack(centroids, axis=0)
+        labels = np.zeros(len(vecs), dtype=int)
+        for _ in range(iters):
+            sims = vecs @ c_mat.T
+            new_labels = np.argmax(sims, axis=1)
+            if np.array_equal(new_labels, labels):
+                break
+            labels = new_labels
+            for c_i in range(k):
+                members = vecs[labels == c_i]
+                if len(members) > 0:
+                    c = np.mean(members, axis=0)
+                    c /= float(np.linalg.norm(c)) + 1e-12
+                    c_mat[c_i] = c
+        return c_mat, labels
+
+    best_centroids = None
+    best_sil = 0.14  # minimum silhouette to justify splitting into >= 2 speakers
+    max_k = min(4, max(1, len(train_vecs) // 4))
+    for k in range(2, max_k + 1):
+        c_mat, tr_labels = _run_kmeans(train_vecs, k)
+        # Skip degenerate clusters (< 8% of segments)
+        counts = np.bincount(tr_labels, minlength=k)
+        if np.min(counts) < max(2, int(0.06 * len(train_vecs))):
             continue
-        sims = [float(np.dot(vec, c)) for c in centroids]
-        best_spk = int(np.argmax(sims))
-        if sims[best_spk] >= sim_threshold or len(centroids) >= max_speakers:
-            labels[row_i] = best_spk
-            c_cnt = counts[best_spk]
-            new_c = (centroids[best_spk] * c_cnt + vec) / (c_cnt + 1)
-            new_c /= float(np.linalg.norm(new_c)) + 1e-12
-            centroids[best_spk] = new_c
-            counts[best_spk] = c_cnt + 1
-        else:
-            new_id = len(centroids)
-            centroids.append(vec.copy())
-            counts.append(1)
-            labels[row_i] = new_id
+        # Fast centroid silhouette approximation
+        sims = train_vecs @ c_mat.T
+        a_sim = sims[np.arange(len(train_vecs)), tr_labels]
+        masked_sims = sims.copy()
+        masked_sims[np.arange(len(train_vecs)), tr_labels] = -2.0
+        b_sim = np.max(masked_sims, axis=1)
+        sil = float(np.mean(a_sim - b_sim))
+        if sil > best_sil:
+            best_sil = sil
+            best_centroids = c_mat
 
+    if best_centroids is None:
+        for s in segments:
+            s.speaker = 0
+        return
+
+    all_labels = np.argmax(mat_unit @ best_centroids.T, axis=1)
     for row_i, seg_i in enumerate(valid_idx):
-        segments[seg_i].speaker = labels[row_i]
+        segments[seg_i].speaker = int(all_labels[row_i])
 
     # Fill silent/short segments from neighbor
     last_spk = 0
@@ -504,15 +573,23 @@ def _assign_speakers(pcm_16k, segments: list[SegmentDto]) -> None:
         else:
             last_spk = s.speaker
 
-    # Smooth single-segment blips (< 1.2s) where prev == next != cur
+    # Smooth short 1-segment blips (< 1.8s) where prev == next != cur
     for i in range(1, n_segs - 1):
         dur = segments[i].end - segments[i].start
         if (
-            dur < 1.2
+            dur < 1.8
             and segments[i - 1].speaker == segments[i + 1].speaker
             and segments[i].speaker != segments[i - 1].speaker
         ):
             segments[i].speaker = segments[i - 1].speaker
+
+    # Renumber speakers in order of first appearance (Speaker 1 = 0, Speaker 2 = 1, ...)
+    remap: dict[int, int] = {}
+    for s in segments:
+        if s.speaker is not None:
+            if s.speaker not in remap:
+                remap[s.speaker] = len(remap)
+            s.speaker = remap[s.speaker]
 
 
 def _basic_segment_features(segments: list[SegmentDto], duration_sec: float):
@@ -543,15 +620,94 @@ def _is_inside_ad(start_s: float, end_s: float, ad_segments: list[AdSegmentDto])
     return False
 
 
-def _clean_chapter_title(text: str) -> str:
-    cleaned = re.sub(r"^\s*(?:and|so|but|well|yeah|okay|ok|um|uh|like)[,\s]+", "", text.strip(), flags=re.IGNORECASE)
-    words = cleaned.split()
-    if not words:
-        words = text.strip().split()
-    snippet = " ".join(words[:8]).rstrip(" ,.;:-")
-    if len(words) > 8:
-        snippet += "…"
-    return snippet[:1].upper() + snippet[1:] if snippet else "Topic"
+_STOPWORDS = {
+    "a", "about", "above", "actually", "after", "again", "all", "also", "always",
+    "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been",
+    "before", "being", "but", "by", "can", "can't", "could", "did", "didn't", "do",
+    "does", "doesn't", "doing", "don't", "down", "during", "each", "even", "ever",
+    "every", "feel", "for", "from", "get", "getting", "go", "going", "good", "got",
+    "great", "had", "has", "have", "having", "he", "her", "here", "hers", "him",
+    "his", "how", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is",
+    "isn't", "it", "it's", "its", "just", "kind", "know", "like", "literally",
+    "little", "lot", "made", "make", "many", "maybe", "me", "mean", "more", "most",
+    "much", "my", "need", "no", "not", "now", "obviously", "of", "off", "oh", "ok",
+    "okay", "on", "one", "only", "or", "other", "our", "out", "over", "own",
+    "people", "personally", "pretty", "probably", "put", "really", "right", "said",
+    "same", "say", "saying", "see", "she", "should", "so", "some", "something",
+    "sort", "still", "stuff", "such", "sure", "take", "talking", "tell", "than",
+    "that", "that's", "the", "their", "them", "then", "there", "there's", "these",
+    "they", "they're", "thing", "things", "think", "this", "those", "though",
+    "through", "time", "to", "too", "totally", "try", "trying", "um", "uh", "up",
+    "us", "use", "used", "using", "very", "want", "was", "wasn't", "way", "we",
+    "we're", "well", "were", "what", "what's", "when", "where", "which", "while",
+    "who", "why", "will", "with", "would", "yeah", "yes", "you", "you're", "your",
+    "yours",
+}
+
+
+def _extract_chapter_tokens(text: str) -> list[tuple[str, bool]]:
+    """Returns list of (lowercase_token, is_capitalized_proper_noun)."""
+    out: list[tuple[str, bool]] = []
+    for raw in re.findall(r"[A-Za-z0-9][A-Za-z0-9'-]*", text):
+        low = raw.lower().strip("'-")
+        if len(low) < 3 or low in _STOPWORDS or low.isdigit():
+            continue
+        is_cap = raw[0].isupper() and not raw.isupper()
+        out.append((low, is_cap))
+    return out
+
+
+def _name_chapter_from_tfidf(
+    chunk_texts: list[str],
+    all_chunk_token_sets: list[set[str]],
+    chapter_idx: int,
+) -> str:
+    import math
+    from collections import Counter
+
+    tf: Counter[str] = Counter()
+    proper_forms: dict[str, str] = {}
+    for txt in chunk_texts:
+        toks = _extract_chapter_tokens(txt)
+        for idx, (low, is_cap) in enumerate(toks):
+            tf[low] += 1
+            if is_cap and low not in proper_forms:
+                proper_forms[low] = low.capitalize()
+            if idx + 1 < len(toks):
+                bi = f"{low} {toks[idx + 1][0]}"
+                tf[bi] += 1
+
+    if not tf:
+        return f"Part {chapter_idx + 1}"
+
+    n_chapters = max(1, len(all_chunk_token_sets))
+    scored: list[tuple[float, str]] = []
+    for term, count in tf.items():
+        if count < 2 and " " not in term:
+            continue
+        df = sum(1 for s in all_chunk_token_sets if term in s)
+        idf = math.log((n_chapters + 1.0) / (df + 0.5)) + 0.5
+        boost = 1.35 if " " in term else 1.0
+        if term in proper_forms:
+            boost *= 1.25
+        scored.append((count * idf * boost, term))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    picked: list[str] = []
+    used_words: set[str] = set()
+    for _, term in scored:
+        parts = term.split()
+        if any(p in used_words for p in parts):
+            continue
+        used_words.update(parts)
+        pretty = " ".join(proper_forms.get(p, p.capitalize()) for p in parts)
+        picked.append(pretty)
+        if len(picked) >= 3:
+            break
+
+    if not picked:
+        return f"Part {chapter_idx + 1}"
+    return " • ".join(picked)
 
 
 def _generate_chapters_and_summary(
@@ -614,36 +770,10 @@ def _generate_chapters_and_summary(
         except Exception:
             pass
 
-    # Default zero-extra-model path using already-computed Qwen3-Embedding vectors
+    # Default zero-extra-model path: Topic-shift chapters + TF-IDF naming + thesis summary
     sub_emb = embeddings[non_ad_indices]
-    centroid = np.mean(sub_emb, axis=0)
-    c_norm = float(np.linalg.norm(centroid))
-    if c_norm > 1e-12:
-        centroid = centroid / c_norm
-
-    # Extractive TL;DR: pick 3 central, well-spaced sentences (>= 8 words)
-    scores = sub_emb @ centroid
-    ranked = sorted(
-        [
-            (float(scores[k]), idx, segments[idx])
-            for k, idx in enumerate(non_ad_indices)
-            if len(segments[idx].text.split()) >= 8
-        ],
-        key=lambda x: x[0],
-        reverse=True,
-    )
-    chosen: list[tuple[int, SegmentDto]] = []
-    for _, idx, seg in ranked:
-        if all(abs(seg.start - c_seg.start) >= 45.0 for _, c_seg in chosen):
-            chosen.append((idx, seg))
-            if len(chosen) >= 3:
-                break
-    chosen.sort(key=lambda x: x[0])
-    summary = " ".join(seg.text.strip() for _, seg in chosen) if chosen else None
-
-    # Topic-shift chapters via sliding-window cosine similarity valleys
     m = len(non_ad_indices)
-    win = min(5, max(2, m // 10))
+    win = min(6, max(2, m // 12))
     boundaries: list[int] = [non_ad_indices[0]]
     if m > win * 2 + 2:
         sims: list[tuple[int, float]] = []
@@ -655,10 +785,9 @@ def _generate_chapters_and_summary(
             sim = float(np.dot(left / (ln + 1e-12), right / (rn + 1e-12)))
             sims.append((k, sim))
 
-        # Pick lowest similarity valleys separated by >= 120 seconds
         sims.sort(key=lambda x: x[1])
-        min_gap_sec = 120.0
-        max_chapters = 8
+        min_gap_sec = 180.0
+        max_chapters = 7
         selected_times: list[float] = [segments[non_ad_indices[0]].start]
         for k, _ in sims:
             seg_idx = non_ad_indices[k]
@@ -670,23 +799,80 @@ def _generate_chapters_and_summary(
                     break
         boundaries.sort()
 
-    chapters: list[DesktopChapterDto] = []
+    # Collect per-chapter texts & token sets for TF-IDF chapter naming
+    chapter_texts_list: list[list[str]] = []
+    all_chunk_token_sets: list[set[str]] = []
     for b_pos, start_idx in enumerate(boundaries):
         end_idx = boundaries[b_pos + 1] if b_pos + 1 < len(boundaries) else len(segments)
-        chunk_indices = [idx for idx in range(start_idx, end_idx) if not _is_inside_ad(segments[idx].start, segments[idx].end, ad_segments)]
-        if not chunk_indices:
-            chunk_indices = [start_idx]
-        chunk_emb = embeddings[chunk_indices]
-        ch_cent = np.mean(chunk_emb, axis=0)
-        ch_cent /= float(np.linalg.norm(ch_cent)) + 1e-12
-        best_local = int(np.argmax(chunk_emb @ ch_cent))
-        rep_text = segments[chunk_indices[best_local]].text
+        txts = [
+            segments[idx].text
+            for idx in range(start_idx, end_idx)
+            if not _is_inside_ad(segments[idx].start, segments[idx].end, ad_segments)
+        ]
+        chapter_texts_list.append(txts)
+        tset: set[str] = set()
+        for txt in txts:
+            toks = _extract_chapter_tokens(txt)
+            for ti, (low, _) in enumerate(toks):
+                tset.add(low)
+                if ti + 1 < len(toks):
+                    tset.add(f"{low} {toks[ti + 1][0]}")
+        all_chunk_token_sets.append(tset)
+
+    chapters: list[DesktopChapterDto] = []
+    for b_pos, start_idx in enumerate(boundaries):
+        title = _name_chapter_from_tfidf(chapter_texts_list[b_pos], all_chunk_token_sets, b_pos)
         chapters.append(
             DesktopChapterDto(
                 startMs=max(0, int(round(segments[start_idx].start * 1000))),
-                title=_clean_chapter_title(rep_text),
+                title=title,
             )
         )
+
+    # Coherent extractive TL;DR: score informative non-banter sentences
+    from collections import Counter
+
+    ep_keywords = Counter()
+    for idx in non_ad_indices:
+        for low, _ in _extract_chapter_tokens(segments[idx].text):
+            ep_keywords[low] += 1
+    top_kw = {w for w, _ in ep_keywords.most_common(15)}
+
+    centroid = np.mean(sub_emb, axis=0)
+    centroid /= float(np.linalg.norm(centroid)) + 1e-12
+    emb_scores = sub_emb @ centroid
+
+    filler_starts = re.compile(
+        r"^(?:yeah|yes|no|well|okay|ok|right|totally|exactly|i mean|so,|but,|and,)\b",
+        re.IGNORECASE,
+    )
+    intro_cues = re.compile(
+        r"\b(?:talking about|today on the show|welcome to|figure out|going to talk|my question)\b",
+        re.IGNORECASE,
+    )
+
+    candidates: list[tuple[float, int, SegmentDto]] = []
+    for k, idx in enumerate(non_ad_indices):
+        seg = segments[idx]
+        txt = seg.text.strip()
+        wc = len(txt.split())
+        if wc < 10 or wc > 42 or txt.endswith("?") or filler_starts.search(txt):
+            continue
+        kw_hits = sum(1 for low, _ in _extract_chapter_tokens(txt) if low in top_kw)
+        score = float(emb_scores[k]) + 0.08 * min(kw_hits, 5)
+        if k < max(10, m // 8) and intro_cues.search(txt):
+            score += 0.35
+        candidates.append((score, idx, seg))
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    chosen: list[tuple[int, SegmentDto]] = []
+    for _, idx, seg in candidates:
+        if all(abs(seg.start - c_seg.start) >= 60.0 for _, c_seg in chosen):
+            chosen.append((idx, seg))
+            if len(chosen) >= 3:
+                break
+    chosen.sort(key=lambda x: x[0])
+    summary = " ".join(seg.text.strip() for _, seg in chosen) if chosen else None
 
     return summary, chapters
 

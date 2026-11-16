@@ -670,15 +670,11 @@ fun MediaPlayerBottomSheet(
                         val muteWindows = remember(muteEntities) { muteEntities.map { it.toDomain() } }
                         val adWindows = remember(adEntities) { adEntities.map { it.toDomain() } }
 
-                        AnnotatedScrubberOverlay(
+                        app.podiumpodcasts.podium.ui.component.media.AnnotatedPlaybackSlider(
+                            value = sliderState,
                             durationMs = vm.currentDuration,
                             muteWindows = muteWindows,
-                            adWindows = adWindows
-                        )
-
-                        Slider(
-                            modifier = Modifier.fillMaxWidth(),
-                            value = sliderState,
+                            adWindows = adWindows,
                             onValueChange = {
                                 sliderState = it
                                 blockSliderUpdate = true

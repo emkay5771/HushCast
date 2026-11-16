@@ -159,6 +159,41 @@ fun MediaItemListItem(
                     ReadinessBadge.READY -> Unit
                     ReadinessBadge.WORD_MUTE_READY,
                     ReadinessBadge.NOT_PROCESSED -> {
+                        var showNeedDownloadDialog by remember { mutableStateOf(false) }
+
+                        if (showNeedDownloadDialog) {
+                            androidx.compose.material3.AlertDialog(
+                                onDismissRequest = { showNeedDownloadDialog = false },
+                                title = { Text("Analyze with HushCast AI") },
+                                text = {
+                                    Text("This episode isn't downloaded yet. Download it now so HushCast AI can transcribe, auto-mute profanity, and skip sponsor reads.")
+                                },
+                                confirmButton = {
+                                    androidx.compose.material3.TextButton(
+                                        onClick = {
+                                            showNeedDownloadDialog = false
+                                            scope.launch {
+                                                app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                                    context = context,
+                                                    db = appDb,
+                                                    episodeId = episodeId
+                                                )
+                                            }
+                                        }
+                                    ) {
+                                        Text("Download & Analyze")
+                                    }
+                                },
+                                dismissButton = {
+                                    androidx.compose.material3.TextButton(
+                                        onClick = { showNeedDownloadDialog = false }
+                                    ) {
+                                        Text("Cancel")
+                                    }
+                                }
+                            )
+                        }
+
                         IconButton(
                             onClick = {
                                 scope.launch {
@@ -167,6 +202,14 @@ fun MediaItemListItem(
                                     }
                                     val audioFile = bundle?.episode?.craftDownloadFile(context)
                                     if (audioFile != null && audioFile.exists()) {
+                                        autoMuteDb.dao().upsertStatus(
+                                            app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
+                                                episodeId = episodeId,
+                                                badge = ReadinessBadge.ANALYZING.name,
+                                                progressPercent = 0,
+                                                stageLabel = "Queued for AI analysis…"
+                                            )
+                                        )
                                         EpisodeAnalysisWorker.enqueueAnalyzeNow(
                                             context = context,
                                             episodeId = episodeId,
@@ -176,15 +219,11 @@ fun MediaItemListItem(
                                         )
                                         Toast.makeText(
                                             context,
-                                            "Starting HushCast AI analysis…",
+                                            "Queued for HushCast AI analysis",
                                             Toast.LENGTH_SHORT
                                         ).show()
                                     } else {
-                                        Toast.makeText(
-                                            context,
-                                            "Download episode first to analyze",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
+                                        showNeedDownloadDialog = true
                                     }
                                 }
                             }

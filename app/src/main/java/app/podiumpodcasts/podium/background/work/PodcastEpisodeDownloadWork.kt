@@ -25,7 +25,7 @@ class PodcastEpisodeDownloadWork(
         episodeId: String,
         downloadMethod: app.hushcast.automute.engine.DownloadAnalysisMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO,
         isAuto: Boolean = false,
-        onProgressUpdate: ((title: String, percent: Int) -> Unit)? = null
+        onProgressUpdate: ((title: String, sourceLabel: String, percent: Int) -> Unit)? = null
     ): Boolean {
         val bundle = db.podcastEpisodes().getSync(episodeId)
         val episode = bundle.episode
@@ -37,7 +37,7 @@ class PodcastEpisodeDownloadWork(
         val wasAlreadyDownloaded =
             bundle.download.state == PodcastEpisodeDownloadState.DOWNLOADED.value && file.exists()
 
-        onProgressUpdate?.invoke(episode.title, 0)
+        onProgressUpdate?.invoke(episode.title, "Preparing download…", 0)
         delay(500)
 
         db.podcastEpisodeDownloads()
@@ -102,7 +102,7 @@ class PodcastEpisodeDownloadWork(
                         .setProgress(episodeId, progress, total)
 
                     val pct = ((progress * 100L) / total).toInt().coerceIn(0, 100)
-                    onProgressUpdate?.invoke(episode.title, pct)
+                    onProgressUpdate?.invoke(episode.title, "Direct Download (Podcast Feed)", pct)
                 }
             )
         }
@@ -160,7 +160,7 @@ class PodcastEpisodeDownloadWork(
         destFile: java.io.File,
         workerUrl: String,
         token: String,
-        onProgressUpdate: ((title: String, percent: Int) -> Unit)?
+        onProgressUpdate: ((title: String, sourceLabel: String, percent: Int) -> Unit)?
     ): Boolean {
         return try {
             val autoMuteDb = app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
@@ -174,6 +174,7 @@ class PodcastEpisodeDownloadWork(
                     )
                 )
             }
+            onProgressUpdate?.invoke(title, "Desktop Companion • Submitting job…", 2)
             reportDesktopStatus(5, "Desktop: Submitting job…")
             val job = app.hushcast.automute.desktop.DesktopWorkerClient.submitJob(
                 baseUrl = workerUrl,
@@ -190,14 +191,16 @@ class PodcastEpisodeDownloadWork(
                 jobId = job.jobId
             ) { status ->
                 val pct = 10 + ((status.progressPercent * 60) / 100)
-                onProgressUpdate?.invoke(title, (status.progressPercent / 2).coerceIn(0, 50))
+                val stageText = status.stageLabel.ifBlank { status.state }
+                onProgressUpdate?.invoke(title, "Desktop Companion • $stageText", (status.progressPercent / 2).coerceIn(1, 50))
                 kotlinx.coroutines.runBlocking {
-                    reportDesktopStatus(pct, "Desktop: ${status.stageLabel}")
+                    reportDesktopStatus(pct, "Desktop: $stageText")
                 }
             }
             val sha256 = ready.fileSha256 ?: return false
 
             reportDesktopStatus(72, "Desktop: Transferring audio…")
+            onProgressUpdate?.invoke(title, "Desktop Companion • Transferring audio", 50)
             var lastStatusUpdateMs = 0L
             app.hushcast.automute.desktop.DesktopWorkerClient.downloadAudioAndVerifySha256(
                 baseUrl = workerUrl,
@@ -208,7 +211,7 @@ class PodcastEpisodeDownloadWork(
                 if (total > 0L) {
                     db.podcastEpisodeDownloads().setProgress(episodeId, received, total)
                     val pct = (50 + ((received * 50L) / total).toInt()).coerceIn(50, 100)
-                    onProgressUpdate?.invoke(title, pct)
+                    onProgressUpdate?.invoke(title, "Desktop Companion • Transferring audio", pct)
                     val now = System.currentTimeMillis()
                     if (now - lastStatusUpdateMs >= 400L) {
                         lastStatusUpdateMs = now

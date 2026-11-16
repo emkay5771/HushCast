@@ -191,6 +191,84 @@ fun AnnotatedScrubberOverlay(
     }
 }
 
+/**
+ * Single unified playback scrubber that renders played progress, ad-skip windows,
+ * and word-mute ticks directly on the slider track.
+ */
+@Composable
+fun AnnotatedPlaybackSlider(
+    value: Float,
+    durationMs: Long,
+    muteWindows: List<MuteWindow>,
+    adWindows: List<AdWindow>,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val activeTrackColor = MaterialTheme.colorScheme.primary
+    val inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+    val adColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.85f)
+    val suggestedAdColor = Color(0xFFFFB300).copy(alpha = 0.85f)
+    val muteTickColor = MaterialTheme.colorScheme.error
+
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp)
+                .height(8.dp)
+                .clip(RoundedCornerShape(4.dp))
+        ) {
+            val w = size.width
+            val h = size.height
+            val clampedVal = value.coerceIn(0f, 1f)
+
+            drawRect(color = inactiveTrackColor, size = Size(w, h))
+            if (clampedVal > 0f) {
+                drawRect(color = activeTrackColor, size = Size(w * clampedVal, h))
+            }
+
+            if (durationMs > 0L) {
+                val dur = durationMs.toFloat().coerceAtLeast(1f)
+                for (ad in adWindows) {
+                    val x0 = (ad.startMs / dur).coerceIn(0f, 1f) * w
+                    val x1 = (ad.endMs / dur).coerceIn(0f, 1f) * w
+                    drawRect(
+                        color = if (ad.isHighConfidence) adColor else suggestedAdColor,
+                        topLeft = Offset(x0, 0f),
+                        size = Size((x1 - x0).coerceAtLeast(4f), h)
+                    )
+                }
+                for (mute in muteWindows) {
+                    if (!mute.enabled) continue
+                    val x = (mute.startMs / dur).coerceIn(0f, 1f) * w
+                    drawRect(
+                        color = muteTickColor,
+                        topLeft = Offset(x, 0f),
+                        size = Size(3f, h)
+                    )
+                }
+            }
+        }
+
+        androidx.compose.material3.Slider(
+            modifier = Modifier.fillMaxWidth(),
+            value = value.coerceIn(0f, 1f),
+            onValueChange = onValueChange,
+            onValueChangeFinished = onValueChangeFinished,
+            colors = androidx.compose.material3.SliderDefaults.colors(
+                activeTrackColor = Color.Transparent,
+                inactiveTrackColor = Color.Transparent,
+                disabledActiveTrackColor = Color.Transparent,
+                disabledInactiveTrackColor = Color.Transparent
+            )
+        )
+    }
+}
+
 @Composable
 fun OneTapUndoAdSkipBanner(
     event: AdSkipEvent,

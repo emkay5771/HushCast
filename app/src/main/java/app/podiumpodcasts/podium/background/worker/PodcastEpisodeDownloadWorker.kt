@@ -52,9 +52,9 @@ class PodcastEpisodeDownloadWorker(
                 episodeId = episodeId,
                 downloadMethod = method,
                 isAuto = isAuto
-            ) { title, pct ->
+            ) { title, sourceLabel, pct ->
                 runCatching {
-                    setForegroundAsync(createDownloadForegroundInfo(title, pct))
+                    setForegroundAsync(createDownloadForegroundInfo(title, sourceLabel, pct))
                 }
             }
 
@@ -69,7 +69,11 @@ class PodcastEpisodeDownloadWorker(
         }
     }
 
-    private fun createDownloadForegroundInfo(title: String, percent: Int): androidx.work.ForegroundInfo {
+    private fun createDownloadForegroundInfo(
+        title: String,
+        sourceLabel: String = "Downloading",
+        percent: Int
+    ): androidx.work.ForegroundInfo {
         val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
         if(android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             val channel = android.app.NotificationChannel(
@@ -80,16 +84,31 @@ class PodcastEpisodeDownloadWorker(
             manager.createNotificationChannel(channel)
         }
 
+        val cancelIntent = WorkManager.getInstance(applicationContext).createCancelPendingIntent(id)
         val clamped = percent.coerceIn(0, 100)
-        val notification = androidx.core.app.NotificationCompat.Builder(applicationContext, DOWNLOAD_CHANNEL_ID)
-            .setContentTitle("Downloading episode")
-            .setContentText(if(clamped > 0) "$title ($clamped%)" else title)
+        val chipText = if (clamped > 0) "$clamped%" else "…"
+        val builder = androidx.core.app.NotificationCompat.Builder(applicationContext, DOWNLOAD_CHANNEL_ID)
+            .setContentTitle(title.ifBlank { "Downloading episode" })
+            .setSubText(sourceLabel)
+            .setContentText(if (clamped > 0) "$sourceLabel • $clamped%" else sourceLabel)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(androidx.core.app.NotificationCompat.CATEGORY_PROGRESS)
+            .setRequestPromotedOngoing(true)
+            .setShortCriticalText(chipText)
             .setProgress(100, clamped, clamped == 0)
-            .build()
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelIntent)
+
+        if (android.os.Build.VERSION.SDK_INT >= 36) {
+            builder.setStyle(
+                androidx.core.app.NotificationCompat.ProgressStyle()
+                    .setProgress(clamped)
+                    .setProgressIndeterminate(clamped == 0)
+            )
+        }
+
+        val notification = builder.build()
 
         val notificationId = 41002
         return if(android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {

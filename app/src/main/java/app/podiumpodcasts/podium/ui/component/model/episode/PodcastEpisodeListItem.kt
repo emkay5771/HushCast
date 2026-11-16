@@ -35,7 +35,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -289,10 +293,57 @@ fun PodcastEpisodeListItem(
                             ReadinessBadge.READY -> Unit
                             ReadinessBadge.WORD_MUTE_READY,
                             ReadinessBadge.NOT_PROCESSED -> {
+                                val sparkleScope = rememberCoroutineScope()
+                                val appDb = app.podiumpodcasts.podium.ui.helper.LocalDatabase.current
+                                var showNeedDownloadDialog by remember { mutableStateOf(false) }
+
+                                if (showNeedDownloadDialog) {
+                                    androidx.compose.material3.AlertDialog(
+                                        onDismissRequest = { showNeedDownloadDialog = false },
+                                        title = { Text("Analyze with HushCast AI") },
+                                        text = {
+                                            Text("This episode isn't downloaded yet. Download it now so HushCast AI can transcribe, auto-mute profanity, and skip sponsor reads.")
+                                        },
+                                        confirmButton = {
+                                            androidx.compose.material3.TextButton(
+                                                onClick = {
+                                                    showNeedDownloadDialog = false
+                                                    sparkleScope.launch {
+                                                        app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                                            context = context,
+                                                            db = appDb,
+                                                            episodeId = bundle.episode.id
+                                                        )
+                                                    }
+                                                }
+                                            ) {
+                                                Text("Download & Analyze")
+                                            }
+                                        },
+                                        dismissButton = {
+                                            androidx.compose.material3.TextButton(
+                                                onClick = { showNeedDownloadDialog = false }
+                                            ) {
+                                                Text("Cancel")
+                                            }
+                                        }
+                                    )
+                                }
+
                                 IconButton(
                                     onClick = {
                                         val audioFile = bundle.episode.craftDownloadFile(context)
                                         if (audioFile.exists()) {
+                                            sparkleScope.launch {
+                                                autoMuteDb.dao().upsertStatus(
+                                                    app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
+                                                        episodeId = bundle.episode.id,
+                                                        badge = ReadinessBadge.ANALYZING.name,
+                                                        progressPercent = 0,
+                                                        stageLabel = "Queued for AI analysis…"
+                                                    )
+                                                )
+                                            }
                                             EpisodeAnalysisWorker.enqueueAnalyzeNow(
                                                 context = context,
                                                 episodeId = bundle.episode.id,
@@ -302,15 +353,11 @@ fun PodcastEpisodeListItem(
                                             )
                                             Toast.makeText(
                                                 context,
-                                                "Starting HushCast AI analysis…",
+                                                "Queued for HushCast AI analysis",
                                                 Toast.LENGTH_SHORT
                                             ).show()
                                         } else {
-                                            Toast.makeText(
-                                                context,
-                                                "Download episode first to analyze",
-                                                Toast.LENGTH_SHORT
-                                            ).show()
+                                            showNeedDownloadDialog = true
                                         }
                                     }
                                 ) {

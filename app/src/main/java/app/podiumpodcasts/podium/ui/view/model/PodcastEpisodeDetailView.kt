@@ -30,6 +30,7 @@ import androidx.compose.material.icons.rounded.AccessTime
 import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.RssFeed
 import androidx.compose.material3.DropdownMenu
@@ -246,26 +247,59 @@ fun PodcastEpisodeDetailView(
                         bundle = bundle
                     )
 
+                    app.podiumpodcasts.podium.ui.component.model.episode.PodcastEpisodeQueueButton(
+                        bundle = bundle
+                    )
+
+                    PodcastEpisodeMarkAsPlayedButton(
+                        bundle = bundle,
+                        colors = IconButtonDefaults.filledIconToggleButtonColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            checkedContainerColor = MaterialTheme.colorScheme.primary,
+                            checkedContentColor = MaterialTheme.colorScheme.onPrimary
+                        )
+                    )
+
+                    ContentFavoriteButton(
+                        contentId = episode.id,
+                        isPodcast = false
+                    )
+
                     val downloadScope = rememberCoroutineScope()
                     val downloadDb = app.podiumpodcasts.podium.ui.helper.LocalDatabase.current
                     val downloadContext = LocalContext.current
-                    var showDownloadMenu by remember { mutableStateOf(false) }
+                    var showMoreMenu by remember { mutableStateOf(false) }
+                    var showSaveToList by remember { mutableStateOf(false) }
                     val isAlreadyDownloaded = bundle.download?.state ==
                         app.podiumpodcasts.podium.api.db.model.PodcastEpisodeDownloadState.DOWNLOADED.value
                     val hasDesktopUrl = remember(downloadContext) {
                         app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(downloadContext).isNotBlank()
                     }
+                    if (showSaveToList) {
+                        app.podiumpodcasts.podium.ui.dialog.bottomsheet.AddToListBottomSheet(
+                            contentId = episode.id,
+                            isPodcast = false,
+                            onDismissRequest = { showSaveToList = false }
+                        )
+                    }
                     Box {
-                        IconButton(onClick = { showDownloadMenu = true }) {
+                        IconButton(onClick = { showMoreMenu = true }) {
                             Icon(
-                                Icons.Rounded.ArrowDropDown,
-                                contentDescription = "Download method options"
+                                androidx.compose.material.icons.Icons.Rounded.MoreVert,
+                                contentDescription = "More episode actions"
                             )
                         }
                         DropdownMenu(
-                            expanded = showDownloadMenu,
-                            onDismissRequest = { showDownloadMenu = false }
+                            expanded = showMoreMenu,
+                            onDismissRequest = { showMoreMenu = false }
                         ) {
+                            DropdownMenuItem(
+                                text = { Text("Save to List") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    showSaveToList = true
+                                }
+                            )
                             if (hasDesktopUrl) {
                                 DropdownMenuItem(
                                     text = {
@@ -275,7 +309,7 @@ fun PodcastEpisodeDetailView(
                                         )
                                     },
                                     onClick = {
-                                        showDownloadMenu = false
+                                        showMoreMenu = false
                                         downloadScope.launch {
                                             app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
                                                 context = downloadContext,
@@ -295,7 +329,7 @@ fun PodcastEpisodeDetailView(
                                     )
                                 },
                                 onClick = {
-                                    showDownloadMenu = false
+                                    showMoreMenu = false
                                     downloadScope.launch {
                                         app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
                                             context = downloadContext,
@@ -314,7 +348,7 @@ fun PodcastEpisodeDetailView(
                                     )
                                 },
                                 onClick = {
-                                    showDownloadMenu = false
+                                    showMoreMenu = false
                                     downloadScope.launch {
                                         app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
                                             context = downloadContext,
@@ -327,30 +361,6 @@ fun PodcastEpisodeDetailView(
                             )
                         }
                     }
-
-                    app.podiumpodcasts.podium.ui.component.model.episode.PodcastEpisodeQueueButton(
-                        bundle = bundle
-                    )
-
-                    PodcastEpisodeMarkAsPlayedButton(
-                        bundle = bundle,
-                        colors = IconButtonDefaults.filledIconToggleButtonColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            checkedContainerColor = MaterialTheme.colorScheme.primary,
-                            checkedContentColor = MaterialTheme.colorScheme.onPrimary
-                        )
-                    )
-
-                    ContentFavoriteButton(
-                        contentId = episode.id,
-                        isPodcast = false
-                    )
-
-                    ContentSaveToListButton(
-                        contentId = episode.id,
-                        isPodcast = false,
-                        icon = true
-                    )
                 }
             }
 
