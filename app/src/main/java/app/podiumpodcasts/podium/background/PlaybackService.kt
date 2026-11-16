@@ -447,6 +447,7 @@ class PlaybackService : MediaLibraryService() {
                             .cancel(this@PlaybackService.applicationContext, episodeId)
 
                         scope.launch {
+                            HushCastEngineBridge.currentEpisodeId = episodeId
                             // Load HushCast mute windows and ad spans for this episode
                             val status = autoMuteDb.dao().getStatus(episodeId)
                             val sha = status?.fileSha256?.takeIf { it.isNotBlank() }

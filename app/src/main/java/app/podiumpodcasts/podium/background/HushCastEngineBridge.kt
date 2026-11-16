@@ -41,6 +41,9 @@ object HushCastEngineBridge {
 
     var defaultAdPolicy: AdPolicyMode = AdPolicyMode.AUTO_SKIP
 
+    @Volatile
+    var currentEpisodeId: String? = null
+
     fun notifyAdSkipped(event: AdSkipEvent) {
         _pendingUndoEvent.value = event
     }

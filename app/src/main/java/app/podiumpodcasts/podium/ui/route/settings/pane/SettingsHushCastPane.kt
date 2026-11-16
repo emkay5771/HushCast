@@ -439,6 +439,17 @@ fun SettingsHushCastPane(
                                                 actionMode = selectedActionMode.name
                                             )
                                         )
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            val analyzer = app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
+                                            val indices = autoMuteDb.dao().getAllWordIndices()
+                                            for (idx in indices) {
+                                                analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, HushCastEngineBridge.defaultActionMode)
+                                                if (idx.episodeId == HushCastEngineBridge.currentEpisodeId) {
+                                                    val updated = autoMuteDb.dao().getMuteSegments(idx.fileSha256).map { it.toDomain() }
+                                                    HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             ) {
@@ -549,11 +560,37 @@ fun SettingsHushCastPane(
                             Switch(
                                 checked = rule.enabled,
                                 onCheckedChange = { enabled ->
-                                    scope.launch { autoMuteDb.dao().setRuleEnabled(rule.id, enabled) }
+                                    scope.launch {
+                                        autoMuteDb.dao().setRuleEnabled(rule.id, enabled)
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            val analyzer = app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
+                                            val indices = autoMuteDb.dao().getAllWordIndices()
+                                            for (idx in indices) {
+                                                analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, HushCastEngineBridge.defaultActionMode)
+                                                if (idx.episodeId == HushCastEngineBridge.currentEpisodeId) {
+                                                    val updated = autoMuteDb.dao().getMuteSegments(idx.fileSha256).map { it.toDomain() }
+                                                    HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             )
                             IconButton(onClick = {
-                                scope.launch { autoMuteDb.dao().deleteRule(rule.id) }
+                                scope.launch {
+                                    autoMuteDb.dao().deleteRule(rule.id)
+                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        val analyzer = app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
+                                        val indices = autoMuteDb.dao().getAllWordIndices()
+                                        for (idx in indices) {
+                                            analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, HushCastEngineBridge.defaultActionMode)
+                                            if (idx.episodeId == HushCastEngineBridge.currentEpisodeId) {
+                                                val updated = autoMuteDb.dao().getMuteSegments(idx.fileSha256).map { it.toDomain() }
+                                                HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
+                                            }
+                                        }
+                                    }
+                                }
                             }) {
                                 Icon(Icons.Rounded.Delete, contentDescription = "Delete rule")
                             }

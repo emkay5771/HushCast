@@ -116,6 +116,9 @@ interface AutoMuteDao {
     @Query("SELECT * FROM episode_word_index WHERE episodeId = :episodeId ORDER BY createdAt DESC LIMIT 1")
     suspend fun getWordIndexByEpisode(episodeId: String): EpisodeWordIndexEntity?
 
+    @Query("SELECT * FROM episode_word_index")
+    suspend fun getAllWordIndices(): List<EpisodeWordIndexEntity>
+
     @Query("DELETE FROM mute_segments WHERE fileSha256 = :sha256")
     suspend fun deleteMuteSegments(sha256: String)
 
@@ -160,6 +163,9 @@ interface AutoMuteDao {
 
     @Query("DELETE FROM mute_rules WHERE id = :ruleId")
     suspend fun deleteRule(ruleId: Long)
+
+    @Query("DELETE FROM mute_rules")
+    suspend fun deleteAllRules()
 
     @androidx.room.Transaction
     suspend fun upsertRuleIfNew(rule: MuteRuleEntity): Boolean {
