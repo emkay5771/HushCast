@@ -149,7 +149,7 @@ def main() -> None:
             print(f"  mDNS warning:  {exc}")
 
     try:
-        uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+        uvicorn.run(app, host=args.host, port=args.port, log_level="warning", access_log=False)
     finally:
         if zc and info:
             zc.unregister_service(info)

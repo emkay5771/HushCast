@@ -230,8 +230,30 @@ class LocalMlBackend:
         )
 
         t_tr = time.monotonic()
-        whisper = WhisperModel(str(self.whisper_model), print_progress=False)
-        raw_segments = whisper.transcribe(pcm_16k, token_timestamps=True)
+        dur_str = f"{int(duration_sec // 60)}m{int(duration_sec % 60):02d}s"
+        import threading
+
+        tr_done = threading.Event()
+
+        def _whisper_heartbeat() -> None:
+            est_sec = max(4.0, duration_sec / 12.0)
+            while not tr_done.wait(0.5):
+                el = time.monotonic() - t_tr
+                pct = min(58, 30 + int(28 * (el / est_sec)))
+                on_progress(
+                    JobState.TRANSCRIBING,
+                    pct,
+                    f"Transcribing {dur_str} ({self.whisper_model.name}) • {el:.0f}s",
+                )
+
+        hb = threading.Thread(target=_whisper_heartbeat, daemon=True)
+        hb.start()
+        try:
+            whisper = WhisperModel(str(self.whisper_model), print_progress=False)
+            raw_segments = whisper.transcribe(pcm_16k, token_timestamps=True)
+        finally:
+            tr_done.set()
+            hb.join(timeout=1.0)
         words, segments = _extract_whisper_words_and_segments(whisper, raw_segments)
         tr_sec = max(0.01, time.monotonic() - t_tr)
         rt_speed = duration_sec / tr_sec if duration_sec > 0 else 0.0

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 import socket
 import sys
 import time
@@ -36,16 +37,20 @@ AudioDownloader = Callable[
 
 
 class _JobConsoleLogger:
-    """User-friendly CLI progress bar & detailed stage logger."""
+    """Single-line, non-wrapping CLI progress bar & stage logger."""
+
+    _SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 
     def __init__(self, job_id: str, title: str) -> None:
         self.short_id = job_id[:8]
         self.label = (title or "Episode").strip()
-        if len(self.label) > 36:
-            self.label = self.label[:33] + "..."
+        if len(self.label) > 24:
+            self.label = self.label[:21] + "..."
         self.is_tty = hasattr(sys.stdout, "isatty") and sys.stdout.isatty()
         self.last_state: Optional[JobState] = None
-        self.last_stage_msg: str = ""
+        self.last_milestone_msg: str = ""
+        self.last_draw_ts: float = 0.0
+        self.spin_idx: int = 0
         self.t_start = time.monotonic()
 
     @staticmethod
@@ -53,30 +58,46 @@ class _JobConsoleLogger:
         return datetime.now().strftime("%H:%M:%S")
 
     @staticmethod
-    def _bar(pct: int, width: int = 22) -> str:
+    def _bar(pct: int, width: int = 20) -> str:
         clamped = max(0, min(100, pct))
         filled = int(round(width * clamped / 100.0))
         return "█" * filled + "░" * (width - filled)
 
+    @staticmethod
+    def _fit_line(text: str) -> str:
+        cols = shutil.get_terminal_size((100, 24)).columns
+        max_len = max(40, cols - 1)
+        if len(text) <= max_len:
+            return text
+        return text[: max_len - 3] + "..."
+
     def update(self, state: JobState, pct: int, stage: str) -> None:
         bar = self._bar(pct)
         state_changed = state != self.last_state
-        # Print a permanent log line when entering a new major stage or milestone
         milestone = state_changed or any(
             kw in stage
-            for kw in ("Transcribed ", "Detected ", "Embedded ", "Found ", "Generated ")
+            for kw in ("Transcribed ", "Detected ", "Found ", "Generated ")
         )
-        if milestone and stage != self.last_stage_msg:
+        if milestone and stage != self.last_milestone_msg:
             if self.is_tty:
                 sys.stdout.write("\r\033[K")
-            print(f"[{self._ts()}] [{self.short_id}] {self.label} • {state.value:<12} [{bar}] {pct:3d}% | {stage}", flush=True)
+            line = f"[{self._ts()}] [{self.short_id}] {self.label} • {stage}"
+            print(line, flush=True)
             self.last_state = state
-            self.last_stage_msg = stage
-        elif self.is_tty:
-            sys.stdout.write(
-                f"\r\033[K[{self._ts()}] [{self.short_id}] {self.label} • {state.value:<12} [{bar}] {pct:3d}% | {stage}"
-            )
-            sys.stdout.flush()
+            self.last_milestone_msg = stage
+
+        if not self.is_tty:
+            return
+
+        now = time.monotonic()
+        if not state_changed and pct < 100 and (now - self.last_draw_ts) < 0.12:
+            return
+        self.last_draw_ts = now
+        spin = self._SPINNER[self.spin_idx % len(self._SPINNER)]
+        self.spin_idx += 1
+        raw = f"{spin} [{self.short_id}] {state.value:<12} [{bar}] {pct:3d}% | {stage}"
+        sys.stdout.write("\r\033[K" + self._fit_line(raw))
+        sys.stdout.flush()
 
     def finish(self, summary_line: str) -> None:
         elapsed = time.monotonic() - self.t_start
