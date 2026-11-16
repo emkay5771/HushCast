@@ -27,13 +27,18 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Label
 import androidx.compose.material.icons.rounded.AccessTime
+import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.AudioFile
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.RssFeed
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -47,7 +52,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -238,6 +245,88 @@ fun PodcastEpisodeDetailView(
                         icon = true,
                         bundle = bundle
                     )
+
+                    val downloadScope = rememberCoroutineScope()
+                    val downloadDb = app.podiumpodcasts.podium.ui.helper.LocalDatabase.current
+                    val downloadContext = LocalContext.current
+                    var showDownloadMenu by remember { mutableStateOf(false) }
+                    val isAlreadyDownloaded = bundle.download?.state ==
+                        app.podiumpodcasts.podium.api.db.model.PodcastEpisodeDownloadState.DOWNLOADED.value
+                    val hasDesktopUrl = remember(downloadContext) {
+                        app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(downloadContext).isNotBlank()
+                    }
+                    Box {
+                        IconButton(onClick = { showDownloadMenu = true }) {
+                            Icon(
+                                Icons.Rounded.ArrowDropDown,
+                                contentDescription = "Download method options"
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showDownloadMenu,
+                            onDismissRequest = { showDownloadMenu = false }
+                        ) {
+                            if (hasDesktopUrl) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (isAlreadyDownloaded) "Replace with Desktop Version"
+                                            else "Download via Desktop Companion"
+                                        )
+                                    },
+                                    onClick = {
+                                        showDownloadMenu = false
+                                        downloadScope.launch {
+                                            app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                                context = downloadContext,
+                                                db = downloadDb,
+                                                episodeId = episode.id,
+                                                downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
+                                            )
+                                        }
+                                    }
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (isAlreadyDownloaded) "Re-download & Analyze On-Device"
+                                        else "Download & Analyze On-Device"
+                                    )
+                                },
+                                onClick = {
+                                    showDownloadMenu = false
+                                    downloadScope.launch {
+                                        app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                            context = downloadContext,
+                                            db = downloadDb,
+                                            episodeId = episode.id,
+                                            downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
+                                        )
+                                    }
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (isAlreadyDownloaded) "Re-download Audio Only (Skip Analysis)"
+                                        else "Download Audio Only (Skip Analysis)"
+                                    )
+                                },
+                                onClick = {
+                                    showDownloadMenu = false
+                                    downloadScope.launch {
+                                        app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                            context = downloadContext,
+                                            db = downloadDb,
+                                            episodeId = episode.id,
+                                            downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS
+                                        )
+                                    }
+                                }
+                            )
+                        }
+                    }
 
                     app.podiumpodcasts.podium.ui.component.model.episode.PodcastEpisodeQueueButton(
                         bundle = bundle

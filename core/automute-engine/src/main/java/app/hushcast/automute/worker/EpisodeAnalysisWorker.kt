@@ -360,6 +360,10 @@ class EpisodeAnalysisWorker(
             )
         }
 
+        fun cancelEpisode(context: Context, episodeId: String) {
+            WorkManager.getInstance(context).cancelAllWorkByTag("episode:$episodeId")
+        }
+
         fun cancelAll(context: Context) {
             resetBatch(context)
             val wm = WorkManager.getInstance(context)

@@ -23,6 +23,8 @@ class PodcastEpisodeDownloadWork(
 
     suspend fun doWork(
         episodeId: String,
+        downloadMethod: app.hushcast.automute.engine.DownloadAnalysisMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO,
+        isAuto: Boolean = false,
         onProgressUpdate: ((title: String, percent: Int) -> Unit)? = null
     ): Boolean {
         val bundle = db.podcastEpisodes().getSync(episodeId)
@@ -31,37 +33,63 @@ class PodcastEpisodeDownloadWork(
         if(bundle.download == null)
             return false
 
+        val file = episode.craftDownloadFile(context)
+        val wasAlreadyDownloaded =
+            bundle.download.state == PodcastEpisodeDownloadState.DOWNLOADED.value && file.exists()
+
         onProgressUpdate?.invoke(episode.title, 0)
-        delay(1000)
+        delay(500)
 
         db.podcastEpisodeDownloads()
             .setState(episodeId, PodcastEpisodeDownloadState.DOWNLOADING.value)
 
-        val file = episode.craftDownloadFile(context)
-
-        if (app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context)) {
-            val workerUrl = app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context)
-            if (workerUrl.isNotBlank()) {
-                val offloaded = tryDownloadFromDesktopWorker(
-                    episodeId = episodeId,
-                    audioUrl = episode.audioUrl,
-                    title = episode.title,
-                    destFile = file,
-                    workerUrl = workerUrl,
-                    token = app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerToken(context),
-                    onProgressUpdate = onProgressUpdate
-                )
-                if (offloaded) {
-                    return true
-                }
-                Log.w("HushCastDesktop", "Desktop worker unavailable or failed; falling back to on-device download/analysis")
-            }
+        val workerUrl = app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context)
+        val shouldTryDesktop = when (downloadMethod) {
+            app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP -> workerUrl.isNotBlank()
+            app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO ->
+                app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) && workerUrl.isNotBlank()
+            app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE,
+            app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS -> false
         }
 
+        if (shouldTryDesktop) {
+            val offloaded = tryDownloadFromDesktopWorker(
+                episodeId = episodeId,
+                audioUrl = episode.audioUrl,
+                title = episode.title,
+                destFile = file,
+                workerUrl = workerUrl,
+                token = app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerToken(context),
+                onProgressUpdate = onProgressUpdate
+            )
+            if (offloaded) {
+                return true
+            }
+            if (downloadMethod == app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP) {
+                db.podcastEpisodeDownloads().setState(
+                    episodeId,
+                    if (wasAlreadyDownloaded) PodcastEpisodeDownloadState.DOWNLOADED.value
+                    else PodcastEpisodeDownloadState.NOT_DOWNLOADED.value
+                )
+                return false
+            }
+            Log.w("HushCastDesktop", "Desktop worker unavailable or failed (auto=$isAuto); falling back to on-device download/analysis")
+        } else if (downloadMethod == app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP) {
+            Log.w("HushCastDesktop", "Desktop method requested but no Desktop Worker URL is configured")
+            db.podcastEpisodeDownloads().setState(
+                episodeId,
+                if (wasAlreadyDownloaded) PodcastEpisodeDownloadState.DOWNLOADED.value
+                else PodcastEpisodeDownloadState.NOT_DOWNLOADED.value
+            )
+            return false
+        }
+
+        val tmpFile = java.io.File(file.parentFile, "${file.name}.part")
         val result = withContext(Dispatchers.IO) {
+            file.parentFile?.mkdirs()
             httpDownloadClient.download(
                 url = episode.audioUrl,
-                output = file,
+                output = tmpFile,
                 onProgress = { progress, total ->
                     if(total == 0L) return@download
 
@@ -81,28 +109,43 @@ class PodcastEpisodeDownloadWork(
 
         when(result) {
             is HttpDownloadClientResult.Success -> {
+                withContext(Dispatchers.IO) {
+                    if (file.exists()) file.delete()
+                    if (!tmpFile.renameTo(file)) {
+                        tmpFile.copyTo(file, overwrite = true)
+                        tmpFile.delete()
+                    }
+                }
                 db.podcastEpisodeDownloads()
                     .registerDownload(episodeId, file.absolutePath)
 
                 app.podiumpodcasts.podium.background.PlaybackService.notifyEpisodeDownloaded(episodeId)
 
-                // Compute SHA-256 and enqueue background charging analysis (DAI-resilient)
-                val sha256 = withContext(Dispatchers.IO) {
-                    app.hushcast.automute.hash.StreamingSha256.hashFile(file)
+                if (downloadMethod == app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS) {
+                    app.hushcast.automute.worker.EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
+                } else {
+                    // Compute SHA-256 and enqueue background charging analysis (DAI-resilient)
+                    val sha256 = withContext(Dispatchers.IO) {
+                        app.hushcast.automute.hash.StreamingSha256.hashFile(file)
+                    }
+                    app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueBackgroundCharging(
+                        context = context,
+                        episodeId = episodeId,
+                        audioPath = file.absolutePath,
+                        knownSha256 = sha256,
+                        episodeTitle = episode.title
+                    )
                 }
-                app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueBackgroundCharging(
-                    context = context,
-                    episodeId = episodeId,
-                    audioPath = file.absolutePath,
-                    knownSha256 = sha256,
-                    episodeTitle = episode.title
-                )
                 return true
             }
 
             is HttpDownloadClientResult.Failure -> {
-                db.podcastEpisodeDownloads()
-                    .setState(episodeId, PodcastEpisodeDownloadState.NOT_DOWNLOADED.value)
+                tmpFile.delete()
+                db.podcastEpisodeDownloads().setState(
+                    episodeId,
+                    if (wasAlreadyDownloaded) PodcastEpisodeDownloadState.DOWNLOADED.value
+                    else PodcastEpisodeDownloadState.NOT_DOWNLOADED.value
+                )
                 return false
             }
         }
@@ -157,6 +200,7 @@ class PodcastEpisodeDownloadWork(
                 token = token,
                 sha256 = sha256
             )
+            app.hushcast.automute.worker.EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
             app.hushcast.automute.desktop.DesktopWorkerClient.ingestBundleIntoDb(
                 db = autoMuteDb,
                 episodeId = episodeId,

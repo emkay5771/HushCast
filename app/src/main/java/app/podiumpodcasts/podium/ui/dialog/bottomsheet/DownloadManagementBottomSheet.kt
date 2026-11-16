@@ -109,6 +109,29 @@ fun DownloadManagementBottomSheet(
                 )
             }
 
+            val hasDesktopUrl = remember(context) {
+                app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+            }
+            if (hasDesktopUrl && cachedBundle.download.state == PodcastEpisodeDownloadState.DOWNLOADED.value) {
+                item {
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                DownloadManager.downloadEpisode(
+                                    context = context,
+                                    db = db,
+                                    episodeId = bundle.episode.id,
+                                    downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
+                                )
+                                onDismiss()
+                            }
+                        }
+                    ) {
+                        Text("Replace with Desktop Version")
+                    }
+                }
+            }
+
             item {
                 Button(
                     onClick = {

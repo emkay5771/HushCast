@@ -60,4 +60,24 @@ object HushCastPrefs {
     fun setDesktopWorkerToken(context: Context, token: String) {
         prefs(context).edit().putString(KEY_DESKTOP_TOKEN, token.trim()).apply()
     }
+
+    private const val KEY_AUTO_DOWNLOAD_METHOD = "auto_download_analysis_method"
+
+    fun getAutoDownloadMethod(context: Context): DownloadAnalysisMethod {
+        val raw = prefs(context).getString(KEY_AUTO_DOWNLOAD_METHOD, null)
+        return runCatching {
+            if (raw != null) DownloadAnalysisMethod.valueOf(raw) else DownloadAnalysisMethod.AUTO
+        }.getOrDefault(DownloadAnalysisMethod.AUTO)
+    }
+
+    fun setAutoDownloadMethod(context: Context, method: DownloadAnalysisMethod) {
+        prefs(context).edit().putString(KEY_AUTO_DOWNLOAD_METHOD, method.name).apply()
+    }
+}
+
+enum class DownloadAnalysisMethod {
+    AUTO,
+    DESKTOP,
+    ON_DEVICE,
+    SKIP_ANALYSIS
 }

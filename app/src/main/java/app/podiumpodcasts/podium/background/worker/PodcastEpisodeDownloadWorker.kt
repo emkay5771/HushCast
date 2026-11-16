@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 const val KEY_EPISODE_ID = "KEY_EPISODE_ID"
+const val KEY_DOWNLOAD_METHOD = "KEY_DOWNLOAD_METHOD"
+const val KEY_IS_AUTO = "KEY_IS_AUTO"
 
 class PodcastEpisodeDownloadWorker(
     context: Context,
@@ -36,13 +38,21 @@ class PodcastEpisodeDownloadWorker(
         return try {
             val episodeId = inputData.getString(KEY_EPISODE_ID)
                 ?: throw NullPointerException()
+            val method = inputData.getString(KEY_DOWNLOAD_METHOD)?.let { raw ->
+                runCatching { app.hushcast.automute.engine.DownloadAnalysisMethod.valueOf(raw) }.getOrNull()
+            } ?: app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO
+            val isAuto = inputData.getBoolean(KEY_IS_AUTO, false)
 
             runCatching {
                 setForeground(createDownloadForegroundInfo("Downloading episode…", 0))
             }
 
             val worker = PodcastEpisodeDownloadWork(applicationContext, db)
-            val result = worker.doWork(episodeId) { title, pct ->
+            val result = worker.doWork(
+                episodeId = episodeId,
+                downloadMethod = method,
+                isAuto = isAuto
+            ) { title, pct ->
                 runCatching {
                     setForegroundAsync(createDownloadForegroundInfo(title, pct))
                 }
@@ -103,15 +113,22 @@ class PodcastEpisodeDownloadWorker(
             context: Context,
             episodeId: String,
             settingsRepository: SettingsRepository = SettingsRepository(context),
-            auto: Boolean = false
+            auto: Boolean = false,
+            downloadMethod: app.hushcast.automute.engine.DownloadAnalysisMethod? = null
         ) {
             val downloadMetered = settingsRepository.behavior.downloadMetered.first()
             val downloadInRoaming = settingsRepository.behavior.downloadInRoaming.first()
             val applySettingsForAutoDownloads =
                 settingsRepository.behavior.applySettingsForAutoDownloads.first()
 
+            val effectiveMethod = downloadMethod
+                ?: if (auto) app.hushcast.automute.engine.HushCastPrefs.getAutoDownloadMethod(context)
+                else app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO
+
             val podcastData = workDataOf(
-                KEY_EPISODE_ID to episodeId
+                KEY_EPISODE_ID to episodeId,
+                KEY_DOWNLOAD_METHOD to effectiveMethod.name,
+                KEY_IS_AUTO to auto
             )
 
             val networkType = when(downloadMetered) {

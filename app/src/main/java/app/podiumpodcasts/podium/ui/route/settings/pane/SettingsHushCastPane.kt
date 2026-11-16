@@ -444,6 +444,37 @@ fun SettingsHushCastPane(
                                 )
                             }
                         }
+
+                        Spacer(Modifier.height(12.dp))
+                        var autoDownloadMethod by remember {
+                            mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.getAutoDownloadMethod(context))
+                        }
+                        Text("Auto-Download Analysis", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "How newly auto-downloaded episodes are processed.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        val autoOptions = listOf(
+                            app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO to "Auto",
+                            app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE to "On-Device",
+                            app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS to "Skip"
+                        )
+                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                            autoOptions.forEachIndexed { index, (method, label) ->
+                                SegmentedButton(
+                                    selected = autoDownloadMethod == method,
+                                    onClick = {
+                                        autoDownloadMethod = method
+                                        app.hushcast.automute.engine.HushCastPrefs.setAutoDownloadMethod(context, method)
+                                    },
+                                    shape = SegmentedButtonDefaults.itemShape(index = index, count = autoOptions.size)
+                                ) {
+                                    Text(label)
+                                }
+                            }
+                        }
                     }
                 }
             }

@@ -1,3 +1,17 @@
+# HushCast v0.1.16-hushcast
+
+## What's New
+- **Desktop Companion Worker (Phase 1 — Mac / GPU Offload)**:
+  - Added [`desktop-worker/`](desktop-worker/README.md), a headless LAN companion server (`FastAPI` + `zeroconf` mDNS `_hushcast._tcp.`) that downloads episodes on your Mac/desktop, runs `whisper.cpp` + `Qwen3-Embedding-0.6B` + `ad_tagger.onnx`, and serves both the exact audio file and pre-computed `WordIndexBlob` + `AdSegment`s keyed by `fileSha256` (guaranteeing 100% DAI timestamp alignment).
+  - Added **Desktop Companion (Mac / GPU)** settings in **Settings → HushCast** with Wi-Fi mDNS discovery, pairing token, and connection testing.
+- **Per-Episode Download Method Picker & Smooth Replacement**:
+  - Added a download options menu on the episode detail page to choose **Download via Desktop Companion**, **Download & Analyze On-Device**, or **Download Audio Only (Skip Analysis)**.
+  - Added **Replace with Desktop Version** in the episode menu and `DownloadManagementBottomSheet` — downloads to a `.part` file, verifies `fileSha256` before swapping, cancels any pending on-device analysis, and preserves your existing download if replacement fails.
+- **Auto-Download Analysis Control**:
+  - Added an **Auto-Download Analysis** setting (`Auto`, `On-Device`, `Skip`) in **Settings → HushCast** controlling how newly auto-downloaded episodes are processed.
+
+---
+
 # HushCast v0.1.15-hushcast
 
 ## What's New

@@ -27,15 +27,18 @@ class DownloadManager {
             context: Context,
             db: AppDatabase,
             episodeId: String,
-            auto: Boolean = false
+            auto: Boolean = false,
+            downloadMethod: app.hushcast.automute.engine.DownloadAnalysisMethod? = null
         ) {
-            db.podcastEpisodeDownloads()
-                .add(episodeId)
+            if(db.podcastEpisodeDownloads().getSync(episodeId) == null) {
+                db.podcastEpisodeDownloads().add(episodeId)
+            }
 
             PodcastEpisodeDownloadWorker.enqueueDownload(
                 context = context,
                 episodeId = episodeId,
-                auto = auto
+                auto = auto,
+                downloadMethod = downloadMethod
             )
         }
 
