@@ -139,12 +139,21 @@ class LocalMlBackend:
                     words.append(WordDto(start=ws, end=we, text=w))
 
         on_progress(JobState.EMBEDDING, 65, "Embedding sentences (Qwen3 Metal)")
-        llm = Llama(
-            model_path=str(self.qwen_model),
-            embedding=True,
-            n_gpu_layers=-1,
-            verbose=False,
-        )
+        try:
+            llm = Llama(
+                model_path=str(self.qwen_model),
+                embedding=True,
+                pooling_type=3,  # LLAMA_POOLING_TYPE_LAST (matches llama_jni.cpp)
+                n_gpu_layers=-1,
+                verbose=False,
+            )
+        except TypeError:
+            llm = Llama(
+                model_path=str(self.qwen_model),
+                embedding=True,
+                n_gpu_layers=-1,
+                verbose=False,
+            )
         texts = [s.text for s in segments]
         ad_segments: list[AdSegmentDto] = []
 
@@ -154,6 +163,10 @@ class LocalMlBackend:
             emb_list = []
             for t in texts:
                 vec = np.asarray(llm.embed(t), dtype=np.float32)
+                if vec.ndim == 2:
+                    vec = vec[-1]
+                elif vec.ndim > 2:
+                    vec = vec.reshape(-1, vec.shape[-1])[-1]
                 norm = np.linalg.norm(vec)
                 if norm > 1e-12:
                     vec = vec / norm
