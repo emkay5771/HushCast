@@ -1,18 +1,9 @@
-# HushCast v0.1.10-hushcast
+# HushCast v0.1.11-hushcast
 
 ## What's New
-- **20x+ Faster MP3 Decoding (Native `dr_mp3` Fast-Path)**:
-  - Telemetry from `v0.1.9-hushcast` showed that Android's `MediaCodec` (`c2.android.mp3.decoder`) over Binder IPC was capped at ~15x realtime (~8+ minutes for a 2-hour MP3).
-  - [`AudioDecoder`](core/automute-engine/src/main/java/app/hushcast/automute/engine/AudioDecoder.kt) now decodes local MP3 (`audio/mpeg`) files directly in native C++ using `dr_mp3` (`libhushcast_whisper.so`) in large 32,768-frame chunks, completely eliminating Binder IPC overhead (~1–2 seconds for a 2-hour MP3 decode).
-  - Non-MP3 formats (M4A/AAC/Opus) continue to use `MediaCodec` seamlessly.
-
----
-
-# HushCast v0.1.9-hushcast
-
-## What's New
-- **Detailed Performance & Crash Telemetry in Export Logs**:
-  - `Export Logs` now includes the installed app version (`versionName` & `versionCode`) and a dedicated `HushCastPerf & Crashes` section.
-  - Added `HushCastPerf` timing logs in [`AudioDecoder`](core/automute-engine/src/main/java/app/hushcast/automute/engine/AudioDecoder.kt) and [`AutoMuteAnalyzer`](core/automute-engine/src/main/java/app/hushcast/automute/pipeline/AutoMuteAnalyzer.kt).
-- **Bug Fix**:
-  - Fixed a `NoSuchElementException` crash in Debug Settings when tapping "Delete latest episodes" on podcasts with no episodes.
+- **Fixed 25% Crash / Reset When Fast Model (`tiny.en`) Is Enabled**:
+  - [`AutoMuteAnalyzer`](core/automute-engine/src/main/java/app/hushcast/automute/pipeline/AutoMuteAnalyzer.kt) was previously hardcoding `ggml-base.en-q5_1.bin` and ignoring the **Fast Model** (`tiny.en`) and **Flash Attention** toggles — causing Whisper to fail to load at 25% when only `ggml-tiny.en-q5_1.bin` was downloaded.
+  - It now loads `ggml-tiny.en-q5_1.bin` when Fast Model is enabled and passes both `useFlashAttn` and `isTiny` to [`Transcriber`](core/automute-engine/src/main/java/app/hushcast/automute/engine/Transcriber.kt).
+- **Worker Failure & Analysis Status Diagnostics**:
+  - [`EpisodeAnalysisWorker`](core/automute-engine/src/main/java/app/hushcast/automute/worker/EpisodeAnalysisWorker.kt) now logs worker start, completion, and any caught exception/stacktrace to `HushCastPerf`.
+  - `Export Logs` now includes `--- Analysis Statuses ---` (badge, %, stage label, peak RSS, and `errorMessage`) and captures `HushCastPerf:V` logs.

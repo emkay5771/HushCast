@@ -155,7 +155,16 @@ class AutoMuteAnalyzer(
 
                 report(25, "Transcribing speech (Whisper DTW)")
                 val whisperStart = System.currentTimeMillis()
-                val transcriber = Transcriber(paths.whisperBaseEn.absolutePath, useDtw = true)
+                val useFastModel = app.hushcast.automute.engine.HushCastPrefs.isFastModelEnabled(context)
+                val useFlashAttn = app.hushcast.automute.engine.HushCastPrefs.isFastAttentionEnabled(context)
+                val whisperModelPath = if (useFastModel) paths.whisperTinyEn.absolutePath else paths.whisperBaseEn.absolutePath
+                android.util.Log.i("HushCastPerf", "Whisper load: model=${java.io.File(whisperModelPath).name} tiny=$useFastModel flashAttn=$useFlashAttn")
+                val transcriber = Transcriber(
+                    modelPath = whisperModelPath,
+                    useDtw = true,
+                    useFlashAttn = useFlashAttn,
+                    isTiny = useFastModel
+                )
                 try {
                     val output = transcribeWithFeedFallback(
                         transcriber = transcriber,

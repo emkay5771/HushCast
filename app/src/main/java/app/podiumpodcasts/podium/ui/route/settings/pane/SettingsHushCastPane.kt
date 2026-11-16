@@ -61,6 +61,7 @@ import app.hushcast.automute.storage.MuteRuleEntity
 import app.podiumpodcasts.podium.background.HushCastEngineBridge
 import app.podiumpodcasts.podium.ui.route.settings.SettingsPaneKey
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -547,6 +548,9 @@ fun SettingsHushCastPane(
                                         }.getOrNull()
                                         val verName = pkgInfo?.versionName ?: "unknown"
                                         val verCode = if (pkgInfo != null) androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(pkgInfo) else 0L
+                                        val statuses = runCatching {
+                                            autoMuteDb.dao().observeAllStatuses().first()
+                                        }.getOrElse { emptyList() }
                                         val header = buildString {
                                             appendLine("HushCast Diagnostics")
                                             appendLine("App: $verName ($verCode)")
@@ -554,10 +558,14 @@ fun SettingsHushCastPane(
                                             appendLine("Perf Cores: ${app.hushcast.automute.engine.CpuTopology.performanceCoreCount()} • Thermal: ${app.hushcast.automute.engine.CpuTopology.thermalStatusLabel(context)}")
                                             appendLine("PSS: $currentPssMb MB • Models: $downloadedMb MB")
                                             appendLine("Fast Model: ${app.hushcast.automute.engine.HushCastPrefs.isFastModelEnabled(context)} • Flash Attn: ${app.hushcast.automute.engine.HushCastPrefs.isFastAttentionEnabled(context)} • Charging Only: ${app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context)}")
+                                            appendLine("--- Analysis Statuses (${statuses.size}) ---")
+                                            statuses.takeLast(10).forEach { st ->
+                                                appendLine("${st.episodeId.take(28)}: ${st.badge} ${st.progressPercent}% [${st.stageLabel}] rss=${st.peakRssMb}MB err=${st.errorMessage ?: "none"}")
+                                            }
                                             appendLine("--- HushCastPerf & Crashes ---")
                                         }
                                         val perfLogs = runCatching {
-                                            val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-s", "HushCastPerf:I", "AndroidRuntime:E"))
+                                            val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-s", "HushCastPerf:V", "AndroidRuntime:E"))
                                             proc.inputStream.bufferedReader().use { it.readText() }
                                         }.getOrElse { "perf logcat failed: ${it.message}" }
                                         val tailLogs = runCatching {

@@ -63,6 +63,7 @@ class EpisodeAnalysisWorker(
         }
 
         val analyzer = AutoMuteAnalyzer(applicationContext, db)
+        android.util.Log.i("HushCastPerf", "Worker start: ep=$episodeId quick=$quickMode file=${audioFile.name} (${audioFile.length() / 1024} KB)")
 
         return try {
             analyzer.analyzeEpisode(
@@ -77,8 +78,10 @@ class EpisodeAnalysisWorker(
                     }
                 }
             )
+            android.util.Log.i("HushCastPerf", "Worker success: ep=$episodeId")
             Result.success()
         } catch (t: Throwable) {
+            android.util.Log.e("HushCastPerf", "Worker failed: ep=$episodeId ${t.javaClass.simpleName}: ${t.message}", t)
             db.dao().upsertStatus(
                 EpisodeAnalysisStatusEntity(
                     episodeId = episodeId,
