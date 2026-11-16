@@ -78,6 +78,11 @@ _base_image = (
         "llama-cpp-python>=0.3.0",
         extra_options="--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124",
     )
+    .run_commands(
+        "find /usr/local/lib/python3.11/site-packages -name 'libwhisper*.so*' -o -name 'libggml*.so*' | xargs -r -n1 dirname | sort -u > /etc/ld.so.conf.d/hushcast-cuda.conf",
+        "ldconfig",
+        "LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:${LD_LIBRARY_PATH:-} python3 -c 'import av, numpy, onnxruntime, llama_cpp; from pywhispercpp.model import Model; print(\"ML imports OK\")'",
+    )
 )
 if _LOCAL_AD_TAGGER is not None:
     _base_image = _base_image.add_local_file(

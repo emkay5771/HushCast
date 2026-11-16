@@ -214,7 +214,7 @@ class LocalMlBackend:
             from pywhispercpp.model import Model as WhisperModel  # noqa: F401
         except ImportError as exc:
             raise RuntimeError(
-                "ML dependencies not installed. Install with: pip install -e '.[ml]'"
+                f"ML dependencies not installed ({exc}). Install with: pip install -e '.[ml]'"
             ) from exc
 
         t0 = time.monotonic()
