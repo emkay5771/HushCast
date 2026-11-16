@@ -431,7 +431,7 @@ fun MediaPlayerBottomSheet(
                                             }
                                             appendLine("Mute Windows (${muteWindows.size}):")
                                             muteWindows.take(50).forEach { m ->
-                                                appendLine("  - ${formatPlayerTime(m.startMs)}..${formatPlayerTime(m.endMs)} (${m.matchedWord}, enabled=${m.enabled})")
+                                                appendLine("  - ${formatPlayerTime(m.startMs)}..${formatPlayerTime(m.endMs)} (${m.word}, enabled=${m.enabled})")
                                             }
                                             appendLine("--- Transcript (${transcriptBlob?.segments?.size ?: 0} segments) ---")
                                             transcriptBlob?.segments?.forEach { seg ->

@@ -64,6 +64,7 @@ import app.hushcast.automute.engine.ModelManager
 import app.hushcast.automute.matcher.PresetDictionaries
 import app.hushcast.automute.storage.AutoMuteDatabase
 import app.hushcast.automute.storage.MuteRuleEntity
+import app.hushcast.automute.storage.toDomain
 import app.podiumpodcasts.podium.background.HushCastEngineBridge
 import app.podiumpodcasts.podium.ui.route.settings.SettingsPaneKey
 import kotlinx.coroutines.Dispatchers
@@ -595,7 +596,7 @@ fun SettingsHushCastPane(
                                             val analyzer = app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
                                             val indices = autoMuteDb.dao().getAllWordIndices()
                                             for (idx in indices) {
-                                                analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, HushCastEngineBridge.defaultActionMode)
+                                                analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, defaultActionMode = HushCastEngineBridge.defaultActionMode)
                                                 if (idx.episodeId == HushCastEngineBridge.currentEpisodeId) {
                                                     val updated = autoMuteDb.dao().getMuteSegments(idx.fileSha256).map { it.toDomain() }
                                                     HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
@@ -718,7 +719,7 @@ fun SettingsHushCastPane(
                                             val analyzer = app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
                                             val indices = autoMuteDb.dao().getAllWordIndices()
                                             for (idx in indices) {
-                                                analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, HushCastEngineBridge.defaultActionMode)
+                                                analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, defaultActionMode = HushCastEngineBridge.defaultActionMode)
                                                 if (idx.episodeId == HushCastEngineBridge.currentEpisodeId) {
                                                     val updated = autoMuteDb.dao().getMuteSegments(idx.fileSha256).map { it.toDomain() }
                                                     HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
@@ -735,7 +736,7 @@ fun SettingsHushCastPane(
                                         val analyzer = app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
                                         val indices = autoMuteDb.dao().getAllWordIndices()
                                         for (idx in indices) {
-                                            analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, HushCastEngineBridge.defaultActionMode)
+                                            analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, defaultActionMode = HushCastEngineBridge.defaultActionMode)
                                             if (idx.episodeId == HushCastEngineBridge.currentEpisodeId) {
                                                 val updated = autoMuteDb.dao().getMuteSegments(idx.fileSha256).map { it.toDomain() }
                                                 HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
