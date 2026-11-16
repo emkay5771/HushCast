@@ -399,7 +399,10 @@ fun SyncedTranscriptCard(
                         Text(
                             text = buildString {
                                 append("AI Summary")
-                                if (chapters.isNotEmpty()) append(" • ${chapters.size} Chapters")
+                                if (chapters.isNotEmpty()) {
+                                    val isPodcast = chapters.any { it.source == "podcast" }
+                                    append(if (isPodcast) " • ${chapters.size} Podcast Chapters" else " • ${chapters.size} Auto-Created Chapters")
+                                }
                             },
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.SemiBold,
@@ -522,7 +525,7 @@ fun SyncedTranscriptCard(
                 muteWindows.filter { it.enabled }.sortedBy { it.startMs }
             }
             val activeRowIndex = remember(displayRows, currentPositionMs) {
-                displayRows.indexOfFirst { row ->
+                val exact = displayRows.indexOfFirst { row ->
                     when (row) {
                         is TranscriptDisplayRow.SpeechLine -> {
                             val s = (row.segment.start * 1000.0).toLong()
@@ -533,6 +536,14 @@ fun SyncedTranscriptCard(
                             currentPositionMs in row.startMs..row.endMs
                         }
                     }
+                }
+                if (exact >= 0) exact
+                else displayRows.indexOfLast { row ->
+                    val s = when (row) {
+                        is TranscriptDisplayRow.SpeechLine -> (row.segment.start * 1000.0).toLong()
+                        is TranscriptDisplayRow.SponsorGroup -> row.startMs
+                    }
+                    s <= currentPositionMs
                 }
             }
 
@@ -1033,3 +1044,287 @@ fun HushCastAnalyzeDialog(
         }
     )
 }
+
+@Composable
+fun ChaptersTabContent(
+    chapters: List<app.hushcast.automute.desktop.DesktopChapterDto>,
+    currentPositionMs: Long,
+    episodeDurationMs: Long,
+    skippedChapterStarts: Set<Long>,
+    onSeekToMs: (Long) -> Unit,
+    onToggleSkipChapter: (app.hushcast.automute.desktop.DesktopChapterDto, Boolean) -> Unit,
+    onAnalyzeNowClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (chapters.isEmpty()) {
+        Column(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(vertical = 32.dp, horizontal = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.AutoAwesome,
+                contentDescription = null,
+                modifier = Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = "No chapters available yet",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = "Analyze this episode with HushCast AI to auto-create topic chapters, or play an episode with embedded podcast chapters.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            Button(onClick = onAnalyzeNowClick) {
+                Icon(Icons.Rounded.AutoAwesome, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Analyze with HushCast AI")
+            }
+        }
+        return
+    }
+
+    val isPodcastProvided = remember(chapters) {
+        chapters.any { it.source == "podcast" }
+    }
+    val activeIndex = remember(chapters, currentPositionMs) {
+        chapters.indexOfLast { it.startMs <= currentPositionMs }.coerceAtLeast(0)
+    }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (isPodcastProvided) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.secondaryContainer
+                }
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isPodcastProvided) {
+                            Icons.Rounded.Info
+                        } else {
+                            Icons.Rounded.AutoAwesome
+                        },
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = if (isPodcastProvided) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        }
+                    )
+                    Text(
+                        text = if (isPodcastProvided) {
+                            "Podcast Chapters"
+                        } else {
+                            "Auto-Created Chapters (HushCast AI)"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isPodcastProvided) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        }
+                    )
+                }
+            }
+
+            val skippedCount = chapters.count { it.startMs in skippedChapterStarts }
+            Text(
+                text = if (skippedCount > 0) {
+                    "${chapters.size} chapters • $skippedCount skipped"
+                } else {
+                    "${chapters.size} chapters"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilledTonalButton(
+                modifier = Modifier.weight(1f),
+                enabled = activeIndex > 0,
+                onClick = {
+                    val prev = chapters.getOrNull(activeIndex - 1) ?: return@FilledTonalButton
+                    if (prev.startMs in skippedChapterStarts) {
+                        onToggleSkipChapter(prev, false)
+                    }
+                    onSeekToMs(prev.startMs)
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Rounded.Undo,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text("Previous Chapter", maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+
+            FilledTonalButton(
+                modifier = Modifier.weight(1f),
+                enabled = activeIndex < chapters.lastIndex,
+                onClick = {
+                    val next = chapters.getOrNull(activeIndex + 1) ?: return@FilledTonalButton
+                    if (next.startMs in skippedChapterStarts) {
+                        onToggleSkipChapter(next, false)
+                    }
+                    onSeekToMs(next.startMs)
+                }
+            ) {
+                Text("Next Chapter", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.width(6.dp))
+                Icon(
+                    imageVector = Icons.Rounded.SkipNext,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f, fill = false),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            itemsIndexed(
+                items = chapters,
+                key = { idx, ch -> "${ch.startMs}_${idx}" }
+            ) { idx, ch ->
+                val isActive = idx == activeIndex
+                val isSkipped = ch.startMs in skippedChapterStarts
+                val nextStartMs = chapters.getOrNull(idx + 1)?.startMs ?: episodeDurationMs
+                val chDurationMs = (nextStartMs - ch.startMs).coerceAtLeast(0L)
+                val progress = if (isActive && chDurationMs > 0L) {
+                    ((currentPositionMs - ch.startMs).toFloat() / chDurationMs.toFloat()).coerceIn(0f, 1f)
+                } else {
+                    0f
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = when {
+                        isActive -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                        isSkipped -> MaterialTheme.colorScheme.surfaceContainerLow
+                        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (isSkipped) {
+                                onToggleSkipChapter(ch, false)
+                            }
+                            onSeekToMs(ch.startMs)
+                        }
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Text(
+                                text = "${idx + 1}",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isActive) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = ch.title,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Medium,
+                                    textDecoration = if (isSkipped) TextDecoration.LineThrough else TextDecoration.None,
+                                    color = when {
+                                        isSkipped -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                        isActive -> MaterialTheme.colorScheme.onPrimaryContainer
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    },
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(Modifier.height(2.dp))
+                                Text(
+                                    text = buildString {
+                                        append(formatTranscriptTimestamp(ch.startMs))
+                                        if (chDurationMs > 0L) {
+                                            append(" • ")
+                                            append(formatChapterDuration(chDurationMs))
+                                        }
+                                        if (isSkipped) {
+                                            append(" • Skipped")
+                                        }
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            androidx.compose.material3.Checkbox(
+                                checked = !isSkipped,
+                                onCheckedChange = { includeChapter ->
+                                    onToggleSkipChapter(ch, !includeChapter)
+                                }
+                            )
+                        }
+
+                        if (isActive && chDurationMs > 0L) {
+                            Spacer(Modifier.height(8.dp))
+                            androidx.compose.material3.LinearProgressIndicator(
+                                progress = { progress },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(4.dp)
+                                    .clip(RoundedCornerShape(2.dp))
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatChapterDuration(durationMs: Long): String {
+    val totalSec = (durationMs / 1000L).coerceAtLeast(0L)
+    val h = totalSec / 3600L
+    val m = (totalSec % 3600L) / 60L
+    val s = totalSec % 60L
+    return when {
+        h > 0 -> "${h}h ${m}m"
+        m > 0 -> "${m}m ${s}s"
+        else -> "${s}s"
+    }
+}
+

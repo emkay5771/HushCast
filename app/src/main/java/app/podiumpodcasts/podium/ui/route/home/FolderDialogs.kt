@@ -205,6 +205,88 @@ fun FolderBottomSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(vertical = 24.dp)
                 )
+            } else if (isEditing) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp),
+                    contentPadding = PaddingValues(vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(folderSubscriptions.size, key = { folderSubscriptions[it].podcast.origin }) { idx ->
+                        val bundle = folderSubscriptions[idx]
+                        androidx.compose.material3.Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                ShimmerAsyncImage(
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clip(RoundedCornerShape(8.dp)),
+                                    model = bundle.podcast.imageUrl,
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    targetSizePx = 128
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Text(
+                                    text = bundle.podcast.fetchTitle(),
+                                    style = Typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                IconButton(
+                                    enabled = idx > 0,
+                                    onClick = {
+                                        PodcastGridOrganization.moveFolderPodcast(
+                                            context,
+                                            folder.id,
+                                            bundle.podcast.origin,
+                                            -1
+                                        )
+                                    }
+                                ) {
+                                    Text("▲")
+                                }
+                                IconButton(
+                                    enabled = idx < folderSubscriptions.lastIndex,
+                                    onClick = {
+                                        PodcastGridOrganization.moveFolderPodcast(
+                                            context,
+                                            folder.id,
+                                            bundle.podcast.origin,
+                                            1
+                                        )
+                                    }
+                                ) {
+                                    Text("▼")
+                                }
+                                IconButton(
+                                    onClick = {
+                                        PodcastGridOrganization.removePodcastFromFolder(
+                                            context,
+                                            bundle.podcast.origin,
+                                            folder.id
+                                        )
+                                    }
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Close,
+                                        contentDescription = "Remove from folder"
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(3),
@@ -217,56 +299,16 @@ fun FolderBottomSheet(
                 ) {
                     items(folderSubscriptions.size, key = { folderSubscriptions[it].podcast.origin }) { idx ->
                         val bundle = folderSubscriptions[idx]
-                        androidx.compose.foundation.layout.Box(
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            SubscriptionCard(
-                                bundle = bundle,
-                                badgeMode = if (isEditing) SubscriptionsBadgeMode.OFF else badgeMode,
-                                fillCell = true,
-                                showTitles = true,
-                                onClick = {
-                                    if (isEditing) {
-                                        PodcastGridOrganization.removePodcastFromFolder(
-                                            context,
-                                            bundle.podcast.origin,
-                                            folder.id
-                                        )
-                                    } else {
-                                        onDismiss()
-                                        onClickPodcast(bundle.podcast.origin)
-                                    }
-                                }
-                            )
-                            if (isEditing) {
-                                androidx.compose.material3.Surface(
-                                    onClick = {
-                                        PodcastGridOrganization.removePodcastFromFolder(
-                                            context,
-                                            bundle.podcast.origin,
-                                            folder.id
-                                        )
-                                    },
-                                    shape = androidx.compose.foundation.shape.CircleShape,
-                                    color = MaterialTheme.colorScheme.errorContainer,
-                                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                                    shadowElevation = 2.dp,
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .size(26.dp)
-                                ) {
-                                    androidx.compose.foundation.layout.Box(
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            Icons.Rounded.Close,
-                                            contentDescription = "Remove from folder",
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                    }
-                                }
+                        SubscriptionCard(
+                            bundle = bundle,
+                            badgeMode = badgeMode,
+                            fillCell = true,
+                            showTitles = true,
+                            onClick = {
+                                onDismiss()
+                                onClickPodcast(bundle.podcast.origin)
                             }
-                        }
+                        )
                     }
                 }
             }

@@ -1,11 +1,15 @@
 package app.podiumpodcasts.podium.ui.component.common.swipeable
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.outlined.WatchLater
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.PlaylistRemove
 import androidx.compose.material.icons.rounded.RemoveDone
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.VerticalAlignTop
 import androidx.compose.material.icons.rounded.WatchLater
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -165,4 +169,170 @@ interface SwipeableItemActions {
             }
         }
     )
+
+    class QueueAction(
+        bundle: app.podiumpodcasts.podium.api.db.model.PodcastEpisodeBundle,
+        playNext: Boolean,
+        playerVm: app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel
+    ) : SwipeableItemAction(
+        style = {
+            val inQueue = playerVm.queue.contains(bundle.episode.id)
+            SwipeableItemActionStyle(
+                icon = when {
+                    inQueue -> Icons.Rounded.Delete
+                    playNext -> Icons.Rounded.RestartAlt
+                    else -> Icons.Rounded.Check
+                }.let {
+                    if (inQueue) androidx.compose.material.icons.Icons.Rounded.PlaylistRemove
+                    else if (playNext) androidx.compose.material.icons.Icons.Rounded.VerticalAlignTop
+                    else androidx.compose.material.icons.Icons.AutoMirrored.Rounded.PlaylistAdd
+                },
+                backgroundColor = MaterialTheme.colorScheme.primaryContainer,
+                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
+                activeBackgroundColor = MaterialTheme.colorScheme.primary,
+                activeIconTint = MaterialTheme.colorScheme.onPrimary,
+            )
+        },
+        onActionHandler = actionHandler@{
+            val context = androidx.compose.ui.platform.LocalContext.current
+            return@actionHandler {
+                val inQueue = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    playerVm.queue.contains(bundle.episode.id)
+                }
+                if (inQueue) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        playerVm.dequeue(bundle.episode.id)
+                    }
+                    SwipeableItemActionResult(
+                        isDismissed = false,
+                        message = "Removed from Up Next",
+                        onUndo = {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                if (playNext) playerVm.playNext(context, bundle)
+                                else playerVm.enqueue(context, bundle)
+                            }
+                        }
+                    )
+                } else {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        if (playNext) playerVm.playNext(context, bundle)
+                        else playerVm.enqueue(context, bundle)
+                    }
+                    SwipeableItemActionResult(
+                        isDismissed = false,
+                        message = if (playNext) "Added to Up Next (Play Next)" else "Added to Up Next (Play Last)",
+                        onUndo = {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                playerVm.dequeue(bundle.episode.id)
+                            }
+                        }
+                    )
+                }
+            }
+        }
+    )
+
+    class DownloadAction(
+        bundle: app.podiumpodcasts.podium.api.db.model.PodcastEpisodeBundle
+    ) : SwipeableItemAction(
+        style = {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val isDownloaded = remember(bundle.episode.id, bundle.download?.state) {
+                bundle.episode.craftDownloadFile(context).exists()
+            }
+            SwipeableItemActionStyle(
+                icon = if (isDownloaded) Icons.Rounded.Delete else androidx.compose.material.icons.Icons.Rounded.Download,
+                backgroundColor = if (isDownloaded) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
+                iconTint = if (isDownloaded) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+                activeBackgroundColor = if (isDownloaded) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary,
+                activeIconTint = if (isDownloaded) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSecondary,
+            )
+        },
+        onActionHandler = actionHandler@{
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val db = LocalDatabase.current
+            return@actionHandler {
+                val isDownloaded = bundle.episode.craftDownloadFile(context).exists()
+                if (isDownloaded) {
+                    app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
+                        context = context,
+                        db = db,
+                        episode = bundle.episode
+                    )
+                    SwipeableItemActionResult(
+                        isDismissed = false,
+                        message = "Download deleted",
+                        onUndo = {
+                            app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                context = context,
+                                db = db,
+                                episodeId = bundle.episode.id
+                            )
+                        }
+                    )
+                } else {
+                    app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                        context = context,
+                        db = db,
+                        episodeId = bundle.episode.id
+                    )
+                    SwipeableItemActionResult(
+                        isDismissed = false,
+                        message = "Downloading episode",
+                        onUndo = {
+                            app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
+                                context = context,
+                                db = db,
+                                episode = bundle.episode
+                            )
+                        }
+                    )
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun buildEpisodeSwipeAction(
+    actionType: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    bundle: app.podiumpodcasts.podium.api.db.model.PodcastEpisodeBundle,
+    playerVm: app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel,
+    onMarkPlayed: suspend (Boolean) -> Unit
+): SwipeableItemAction? {
+    val isCurrentlyPlayed = bundle.playState?.played == true
+    val markedAsPlayed = stringResource(R.string.snackbar_marked_as_played)
+    val markedAsUnplayed = stringResource(R.string.snackbar_marked_as_unplayed)
+
+    return when (actionType) {
+        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT -> SwipeableItemActions.QueueAction(
+            bundle = bundle,
+            playNext = true,
+            playerVm = playerVm
+        )
+        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST -> SwipeableItemActions.QueueAction(
+            bundle = bundle,
+            playNext = false,
+            playerVm = playerVm
+        )
+        app.podiumpodcasts.podium.EpisodeSwipeAction.HEAR_LATER -> SwipeableItemActions.HearLaterAction(
+            episodeId = bundle.episode.id
+        )
+        app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED -> SwipeableItemActions.CheckAction(
+            isChecked = isCurrentlyPlayed,
+            onAction = {
+                val markPlayed = !isCurrentlyPlayed
+                onMarkPlayed(markPlayed)
+                SwipeableItemActionResult(
+                    isDismissed = false,
+                    message = if (markPlayed) markedAsPlayed else markedAsUnplayed,
+                    onUndo = { onMarkPlayed(!markPlayed) }
+                )
+            }
+        )
+        app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD -> SwipeableItemActions.DownloadAction(
+            bundle = bundle
+        )
+        app.podiumpodcasts.podium.EpisodeSwipeAction.NONE -> null
+    }
 }

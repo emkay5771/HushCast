@@ -47,6 +47,15 @@ enum class AutoAddUpNextMode {
     PLAY_LAST
 }
 
+enum class EpisodeSwipeAction(val label: String) {
+    PLAY_NEXT("Add to Up Next (Play Next)"),
+    PLAY_LAST("Add to Up Next (Play Last)"),
+    HEAR_LATER("Add / Remove Hear Later"),
+    MARK_PLAYED("Mark Played / Unplayed"),
+    DOWNLOAD("Download / Delete Download"),
+    NONE("None")
+}
+
 object SettingsKeys {
     val APPEARANCE_THEME_MODE = stringPreferencesKey("appearance_theme_mode")
     val APPEARANCE_ENABLE_ARTWORK_COLORS = booleanPreferencesKey("appearance_enable_artwork_colors")
@@ -64,6 +73,10 @@ object SettingsKeys {
         floatPreferencesKey("behavior_player_playback_speed")
     val BEHAVIOR_TAP_UP_NEXT_TO_PLAY =
         booleanPreferencesKey("behavior_tap_up_next_to_play")
+    val BEHAVIOR_EPISODE_SWIPE_RIGHT_ACTION =
+        stringPreferencesKey("behavior_episode_swipe_right_action")
+    val BEHAVIOR_EPISODE_SWIPE_LEFT_ACTION =
+        stringPreferencesKey("behavior_episode_swipe_left_action")
     val BEHAVIOR_DISCOVER_COUNTRY_CODE =
         stringPreferencesKey("behavior_discover_country_code")
     val BEHAVIOR_PLAYER_SEEK_BACK_INCREMENT =
@@ -248,6 +261,28 @@ class SettingsRepository(val context: Context) {
 
         suspend fun setTapUpNextToPlay(enable: Boolean) = dataStore.edit { preferences ->
             preferences[SettingsKeys.BEHAVIOR_TAP_UP_NEXT_TO_PLAY] = enable
+        }
+
+        val episodeSwipeRightAction: Flow<EpisodeSwipeAction> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.BEHAVIOR_EPISODE_SWIPE_RIGHT_ACTION]
+                runCatching { raw?.let { EpisodeSwipeAction.valueOf(it) } }.getOrNull()
+                    ?: EpisodeSwipeAction.HEAR_LATER
+            }
+
+        suspend fun setEpisodeSwipeRightAction(action: EpisodeSwipeAction) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_EPISODE_SWIPE_RIGHT_ACTION] = action.name
+        }
+
+        val episodeSwipeLeftAction: Flow<EpisodeSwipeAction> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.BEHAVIOR_EPISODE_SWIPE_LEFT_ACTION]
+                runCatching { raw?.let { EpisodeSwipeAction.valueOf(it) } }.getOrNull()
+                    ?: EpisodeSwipeAction.MARK_PLAYED
+            }
+
+        suspend fun setEpisodeSwipeLeftAction(action: EpisodeSwipeAction) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_EPISODE_SWIPE_LEFT_ACTION] = action.name
         }
 
         fun podcastAutoAddToUpNext(origin: String): Flow<AutoAddUpNextMode> {

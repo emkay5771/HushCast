@@ -1,3 +1,23 @@
+# HushCast v0.1.26-hushcast
+
+## What's New
+- **Pocket Casts-Style Chapters & Chapter Skipping**:
+  - Added a dedicated **Chapters** tab in [`MediaPlayerBottomSheet`](app/src/main/java/app/podiumpodcasts/podium/ui/dialog/bottomsheet/media/MediaPlayerBottomSheet.kt) and [`ChaptersTabContent`](app/src/main/java/app/podiumpodcasts/podium/ui/component/media/HushCastPlayerOverlays.kt) with **Previous / Next Chapter** navigation, live active chapter progress bar, tap-to-seek, and per-episode **chapter skip toggles** (persisted and auto-skipped during playback).
+  - Clearly distinguishes **`Podcast Chapters`** (extracted from embedded ID3/MP4 chapters via `ffprobe` in [`pipeline.py`](desktop-worker/hushcast_worker/pipeline.py)) from **`Auto-Created Chapters (HushCast AI)`**, with [`DesktopChapterDto`](core/automute-engine/src/main/java/app/hushcast/automute/desktop/DesktopWorkerModels.kt) tracking `source` (`"podcast"` vs `"auto"`).
+  - Tapping the active chapter pill in the Player tab now jumps directly to the **Chapters** tab.
+- **Cleaner AI Summaries & Chapter Titles (`PIPELINE_VERSION = 3`)**:
+  - Improved [`pipeline.py`](desktop-worker/hushcast_worker/pipeline.py) extractive summaries to split on speaker turns, filter out Q&A/banter lines, and favor early episode intro sentences, and improved TF-IDF chapter naming to filter generic filler/number words into concise 1–2 topic titles. Bumped `PIPELINE_VERSION = 3` in [`models.py`](desktop-worker/hushcast_worker/models.py) so cached v2 bundles auto-upgrade.
+- **Home & Discover Cleanup (Pocket Casts Style)**:
+  - Removed the floating `+` Add button from [`HomeRoute`](app/src/main/java/app/podiumpodcasts/podium/ui/route/home/HomeRoute.kt) (keeping folder creation in the top bar) and moved **Add Podcast** (`+`) into [`DiscoverRoute`](app/src/main/java/app/podiumpodcasts/podium/ui/route/discover/DiscoverRoute.kt).
+  - Removed the floating **"Powered by Apple Podcasts"** chip from [`DiscoverRoute`](app/src/main/java/app/podiumpodcasts/podium/ui/route/discover/DiscoverRoute.kt) and [`DiscoverSearch`](app/src/main/java/app/podiumpodcasts/podium/ui/route/discover/DiscoverSearch.kt).
+- **Reliable Transcript Live Follow & Folder Interior Reordering**:
+  - Fixed [`SyncedTranscriptCard`](app/src/main/java/app/podiumpodcasts/podium/ui/component/media/HushCastPlayerOverlays.kt) so `activeRowIndex` holds the most recent segment during brief inter-segment pauses instead of flickering to `-1` and dropping live follow.
+  - Updated [`FolderBottomSheet`](app/src/main/java/app/podiumpodcasts/podium/ui/route/home/FolderDialogs.kt) edit mode to switch to a clear vertical list with `▲`/`▼` reorder buttons and remove action.
+- **Configurable Episode Swipe Actions**:
+  - Added **Episode swipe right action** and **Episode swipe left action** settings in [`SettingsPlaybackPane`](app/src/main/java/app/podiumpodcasts/podium/ui/route/settings/pane/SettingsPlaybackPane.kt) (`EpisodeSwipeAction`: **Add to Up Next (Play Next)**, **Add to Up Next (Play Last)**, **Hear Later**, **Mark Played / Unplayed**, **Download / Delete**, or **None**), wired into [`PodcastDetailView`](app/src/main/java/app/podiumpodcasts/podium/ui/view/model/PodcastDetailView.kt) and [`NewEpisodesRoute`](app/src/main/java/app/podiumpodcasts/podium/ui/route/content/NewEpisodesRoute.kt).
+
+---
+
 # HushCast v0.1.25-hushcast
 
 ## What's New

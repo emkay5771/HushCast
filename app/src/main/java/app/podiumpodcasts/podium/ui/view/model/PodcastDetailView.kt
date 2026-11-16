@@ -791,37 +791,35 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                     val markedAsUnplayed = stringResource(R.string.snackbar_marked_as_unplayed)
                     val isCurrentlyPlayed = episodeBundle.playState?.played == true
 
+                    val itemPlayerVm = viewModel<MediaPlayerViewModel>()
+                    val itemSettings = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
+                    val itemSwipeRightAction = itemSettings.behavior.episodeSwipeRightAction.collectAsState(
+                        app.podiumpodcasts.podium.EpisodeSwipeAction.HEAR_LATER
+                    ).value
+                    val itemSwipeLeftAction = itemSettings.behavior.episodeSwipeLeftAction.collectAsState(
+                        app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED
+                    ).value
+
                     SwipeableItem(
                         snackbarHostState = vm.snackbarHostState,
                         scope = scope,
 
-                        startAction = SwipeableItemActions.HearLaterAction(
-                            episodeId = episodeBundle.episode.id
+                        startAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
+                            actionType = itemSwipeRightAction,
+                            bundle = episodeBundle,
+                            playerVm = itemPlayerVm,
+                            onMarkPlayed = { markPlayed ->
+                                if (markPlayed) vm.markAsPlayed(episodeBundle)
+                                else vm.markAsUnplayed(episodeBundle)
+                            }
                         ),
-                        endAction = SwipeableItemActions.CheckAction(
-                            isChecked = isCurrentlyPlayed,
-                            onAction = {
-                                if (isCurrentlyPlayed) {
-                                    vm.markAsUnplayed(episodeBundle)
-
-                                    SwipeableItemActionResult(
-                                        isDismissed = false,
-                                        message = markedAsUnplayed,
-                                        onUndo = {
-                                            vm.markAsPlayed(episodeBundle)
-                                        }
-                                    )
-                                } else {
-                                    vm.markAsPlayed(episodeBundle)
-
-                                    SwipeableItemActionResult(
-                                        isDismissed = false,
-                                        message = markedAsPlayed,
-                                        onUndo = {
-                                            vm.markAsUnplayed(episodeBundle)
-                                        }
-                                    )
-                                }
+                        endAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
+                            actionType = itemSwipeLeftAction,
+                            bundle = episodeBundle,
+                            playerVm = itemPlayerVm,
+                            onMarkPlayed = { markPlayed ->
+                                if (markPlayed) vm.markAsPlayed(episodeBundle)
+                                else vm.markAsUnplayed(episodeBundle)
                             }
                         ),
                         content = {

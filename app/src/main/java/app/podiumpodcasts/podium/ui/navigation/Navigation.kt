@@ -137,7 +137,8 @@ fun Navigation(
 
                 is Discover -> NavEntry(key) {
                     DiscoverRoute(
-                        onClickPodcast = { podcast -> onClickPodcast(podcast) }
+                        onClickPodcast = { podcast -> onClickPodcast(podcast) },
+                        onClickAddPodcast = { backStack.add(AddPodcast) }
                     )
                 }
 

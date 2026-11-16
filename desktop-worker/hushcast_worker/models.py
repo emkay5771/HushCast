@@ -35,9 +35,10 @@ class AdSegmentDto(BaseModel):
 class DesktopChapterDto(BaseModel):
     startMs: int
     title: str
+    source: str = "auto"  # "podcast" (ID3/MP4/RSS) or "auto" (HushCast AI)
 
 
-PIPELINE_VERSION = 2
+PIPELINE_VERSION = 3
 
 
 class DesktopAnalysisBundle(BaseModel):

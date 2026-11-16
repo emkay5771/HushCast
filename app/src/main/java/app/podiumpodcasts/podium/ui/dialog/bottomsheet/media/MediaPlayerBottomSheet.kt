@@ -127,6 +127,7 @@ import java.util.Locale
 private enum class MediaPlayerTab(val label: String) {
     PLAYER("Player"),
     NOTES("Notes"),
+    CHAPTERS("Chapters"),
     TRANSCRIPT("Transcript")
 }
 
@@ -206,6 +207,52 @@ fun MediaPlayerBottomSheet(
         episodeChapters = decodedChapters
     }
 
+    val chapterSkipPrefs = remember(context) {
+        context.getSharedPreferences("hushcast_chapter_skips", android.content.Context.MODE_PRIVATE)
+    }
+    var skippedChapterStarts by remember(episodeId) {
+        val saved = if (episodeId.isNotBlank()) {
+            chapterSkipPrefs.getStringSet(episodeId, emptySet())
+                ?.mapNotNull { it.toLongOrNull() }
+                ?.toSet()
+                ?: emptySet()
+        } else {
+            emptySet()
+        }
+        mutableStateOf(saved)
+    }
+    fun toggleSkippedChapter(startMs: Long, skip: Boolean) {
+        val updated = if (skip) skippedChapterStarts + startMs else skippedChapterStarts - startMs
+        skippedChapterStarts = updated
+        if (episodeId.isNotBlank()) {
+            chapterSkipPrefs.edit()
+                .putStringSet(episodeId, updated.map { it.toString() }.toSet())
+                .apply()
+        }
+    }
+
+    var lastAutoSkippedChapterStart by remember(episodeId) { mutableStateOf<Long?>(null) }
+    LaunchedEffect(episodeId, vm.currentPosition, episodeChapters, skippedChapterStarts) {
+        if (episodeId.isBlank() || episodeChapters.isEmpty() || skippedChapterStarts.isEmpty()) return@LaunchedEffect
+        val posMs = vm.currentPosition
+        val activeIdx = episodeChapters.indexOfLast { it.startMs <= posMs }
+        if (activeIdx < 0) return@LaunchedEffect
+        val active = episodeChapters[activeIdx]
+        if (active.startMs in skippedChapterStarts) {
+            if (lastAutoSkippedChapterStart == active.startMs) return@LaunchedEffect
+            val nextEnabled = episodeChapters
+                .drop(activeIdx + 1)
+                .firstOrNull { it.startMs !in skippedChapterStarts }
+            val targetMs = nextEnabled?.startMs ?: vm.currentDuration
+            if (targetMs > posMs + 300L) {
+                lastAutoSkippedChapterStart = active.startMs
+                vm.seek(targetMs)
+            }
+        } else if (lastAutoSkippedChapterStart != null) {
+            lastAutoSkippedChapterStart = null
+        }
+    }
+
     LaunchedEffect(pendingUndo) {
         if (pendingUndo != null) {
             delay(6000L)
@@ -276,7 +323,14 @@ fun MediaPlayerBottomSheet(
                             Tab(
                                 selected = selectedTab == tab,
                                 onClick = { selectedTab = tab },
-                                text = { Text(tab.label) }
+                                text = {
+                                    Text(
+                                        text = tab.label,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             )
                         }
                     }
@@ -293,6 +347,25 @@ fun MediaPlayerBottomSheet(
                 }
 
                 when (selectedTab) {
+                    MediaPlayerTab.CHAPTERS -> {
+                        app.podiumpodcasts.podium.ui.component.media.ChaptersTabContent(
+                            chapters = episodeChapters,
+                            currentPositionMs = vm.currentPosition,
+                            episodeDurationMs = vm.currentDuration,
+                            skippedChapterStarts = skippedChapterStarts,
+                            onSeekToMs = { ms -> vm.seek(ms) },
+                            onToggleSkipChapter = { ch, skip -> toggleSkippedChapter(ch.startMs, skip) },
+                            onAnalyzeNowClick = { triggerAnalyzeNow() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(
+                                    if (isFullScreen) Modifier.weight(1f)
+                                    else Modifier.heightIn(min = 320.dp, max = 520.dp)
+                                )
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                        )
+                    }
+
                     MediaPlayerTab.NOTES -> {
                         Column(
                             modifier = Modifier
@@ -609,7 +682,7 @@ fun MediaPlayerBottomSheet(
                                             ActiveChapterPill(
                                                 vm = vm,
                                                 chapters = episodeChapters,
-                                                onClick = { selectedTab = MediaPlayerTab.TRANSCRIPT }
+                                                onClick = { selectedTab = MediaPlayerTab.CHAPTERS }
                                             )
                                         }
                                     }

@@ -188,12 +188,4 @@ private fun BoxScope.SearchContent(
             }
         }
     }
-
-    Box(
-        Modifier
-            .align(Alignment.BottomCenter)
-            .padding(16.dp)
-    ) {
-        PoweredByApplePodcastsBadge()
-    }
 }

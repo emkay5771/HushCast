@@ -48,7 +48,8 @@ data class DesktopAdSegmentDto(
 @Serializable
 data class DesktopChapterDto(
     val startMs: Long,
-    val title: String
+    val title: String,
+    val source: String = "auto"
 )
 
 @Serializable

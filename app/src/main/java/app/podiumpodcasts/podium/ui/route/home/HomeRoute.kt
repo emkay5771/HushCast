@@ -26,6 +26,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Podcasts
@@ -358,7 +359,7 @@ fun HomeRoute(
                 actions = {
                     IconButton(onClick = { showCreateFolderDialog = true }) {
                         Icon(
-                            androidx.compose.material.icons.Icons.Rounded.Add,
+                            androidx.compose.material.icons.Icons.Rounded.CreateNewFolder,
                             contentDescription = "New folder"
                         )
                     }
@@ -379,26 +380,8 @@ fun HomeRoute(
                     }
                 }
             )
-        },
-        floatingActionButton = {
-            androidx.compose.material3.SmallFloatingActionButton(
-                modifier = Modifier.padding(
-                    bottom = if(screenWidthDp <= FloatingMediaPlayerBreakpoint)
-                        LocalFloatingMediaPlayerHeight.current
-                    else
-                        0.dp
-                ),
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    onClick = onClickAddPodcast
-                ) {
-                    Icon(
-                        Icons.Rounded.Add,
-                        contentDescription = stringResource(R.string.common_action_add)
-                    )
-                }
-            }
-        ) { inset ->
+        }
+    ) { inset ->
             Box(
                 Modifier
                     .padding(inset)

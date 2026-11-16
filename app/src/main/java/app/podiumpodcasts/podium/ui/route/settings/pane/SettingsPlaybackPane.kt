@@ -1,9 +1,11 @@
 package app.podiumpodcasts.podium.ui.route.settings.pane
 
 import android.annotation.SuppressLint
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -104,7 +106,7 @@ fun SettingsPlaybackPane(
                     },
 
                     index = 0,
-                    count = 4
+                    count = 6
                 )
             }
 
@@ -138,7 +140,7 @@ fun SettingsPlaybackPane(
                     },
 
                     index = 1,
-                    count = 4
+                    count = 6
                 )
             }
 
@@ -161,7 +163,7 @@ fun SettingsPlaybackPane(
                     label = "Tap Up Next to play",
                     description = "Tapping a queued episode plays it immediately instead of opening episode details",
                     index = 2,
-                    count = 4
+                    count = 6
                 )
             }
 
@@ -192,9 +194,121 @@ fun SettingsPlaybackPane(
                         Text("${String.format(java.util.Locale.US, "%.1f", speed.value)}x")
                     },
                     index = 3,
-                    count = 4
+                    count = 6
                 )
+            }
+
+            item {
+                val swipeRightAction = vm.repository.behavior.episodeSwipeRightAction.collectAsState(
+                    app.podiumpodcasts.podium.EpisodeSwipeAction.HEAR_LATER
+                )
+                val showPicker = remember { mutableStateOf(false) }
+
+                app.podiumpodcasts.podium.ui.component.settings.SettingsListItem(
+                    icon = {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.PlaylistAdd,
+                            "Swipe right action"
+                        )
+                    },
+                    label = "Episode swipe right action",
+                    description = swipeRightAction.value.label,
+                    onClick = { showPicker.value = true },
+                    index = 4,
+                    count = 6
+                )
+
+                if (showPicker.value) {
+                    SwipeActionPickerDialog(
+                        title = "Episode swipe right action",
+                        selected = swipeRightAction.value,
+                        onSelect = { action ->
+                            showPicker.value = false
+                            scope.launch {
+                                vm.repository.behavior.setEpisodeSwipeRightAction(action)
+                            }
+                        },
+                        onDismiss = { showPicker.value = false }
+                    )
+                }
+            }
+
+            item {
+                val swipeLeftAction = vm.repository.behavior.episodeSwipeLeftAction.collectAsState(
+                    app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED
+                )
+                val showPicker = remember { mutableStateOf(false) }
+
+                app.podiumpodcasts.podium.ui.component.settings.SettingsListItem(
+                    icon = {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.PlaylistAdd,
+                            "Swipe left action"
+                        )
+                    },
+                    label = "Episode swipe left action",
+                    description = swipeLeftAction.value.label,
+                    onClick = { showPicker.value = true },
+                    index = 5,
+                    count = 6
+                )
+
+                if (showPicker.value) {
+                    SwipeActionPickerDialog(
+                        title = "Episode swipe left action",
+                        selected = swipeLeftAction.value,
+                        onSelect = { action ->
+                            showPicker.value = false
+                            scope.launch {
+                                vm.repository.behavior.setEpisodeSwipeLeftAction(action)
+                            }
+                        },
+                        onDismiss = { showPicker.value = false }
+                    )
+                }
             }
         }
     }
+}
+
+@Composable
+private fun SwipeActionPickerDialog(
+    title: String,
+    selected: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    onSelect: (app.podiumpodcasts.podium.EpisodeSwipeAction) -> Unit,
+    onDismiss: () -> Unit
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            androidx.compose.foundation.layout.Column {
+                app.podiumpodcasts.podium.EpisodeSwipeAction.entries.forEach { action ->
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(action) }
+                            .padding(vertical = 8.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        androidx.compose.material3.RadioButton(
+                            selected = action == selected,
+                            onClick = { onSelect(action) }
+                        )
+                        androidx.compose.foundation.layout.Spacer(Modifier.padding(horizontal = 4.dp))
+                        Text(
+                            text = action.label,
+                            style = androidx.compose.material3.MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

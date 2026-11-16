@@ -330,6 +330,7 @@ class LocalMlBackend:
                 embeddings=emb_2d,
                 ad_segments=ad_segments,
                 chat_model_path=chat_path,
+                audio_path=audio_path,
             )
             on_progress(
                 JobState.TAGGING,
@@ -886,15 +887,19 @@ def _generate_chapters_and_summary(
                     tset.add(f"{low} {toks[ti + 1][0]}")
         all_chunk_token_sets.append(tset)
 
-    chapters: list[DesktopChapterDto] = []
-    for b_pos, start_idx in enumerate(boundaries):
-        title = _name_chapter_from_tfidf(chapter_texts_list[b_pos], all_chunk_token_sets, b_pos)
-        chapters.append(
-            DesktopChapterDto(
-                startMs=max(0, int(round(segments[start_idx].start * 1000))),
-                title=title,
+    if embedded_chapters:
+        chapters = embedded_chapters
+    else:
+        chapters = []
+        for b_pos, start_idx in enumerate(boundaries):
+            title = _name_chapter_from_tfidf(chapter_texts_list[b_pos], all_chunk_token_sets, b_pos)
+            chapters.append(
+                DesktopChapterDto(
+                    startMs=max(0, int(round(segments[start_idx].start * 1000))),
+                    title=title,
+                    source="auto",
+                )
             )
-        )
 
     # Coherent extractive TL;DR: reconstruct complete sentences across contiguous non-ad segments
     from collections import Counter
@@ -909,15 +914,19 @@ def _generate_chapters_and_summary(
     centroid /= float(np.linalg.norm(centroid)) + 1e-12
 
     filler_starts = re.compile(
-        r"^(?:yeah|yes|no|well|okay|ok|right|totally|exactly|i mean|you know|so,|but,|and,|uh\b|um\b|like,)\b",
+        r"^(?:yeah|yes|no|well|okay|ok|right|totally|exactly|i mean|you know|so it is|i guess|so,|but,|and,|uh\b|um\b|like,|wait,)\b",
         re.IGNORECASE,
     )
     promo_cues = re.compile(
         r"\b(?:promo code|dot com|slash|subscribe|patreon|sponsor|sponsored by)\b",
         re.IGNORECASE,
     )
+    banter_cues = re.compile(
+        r"(?:\s-\s|\?|good guess|we'll explain|you said|my question|two acceptable)",
+        re.IGNORECASE,
+    )
     intro_cues = re.compile(
-        r"\b(?:talking about|today on the show|welcome to|figure out|going to talk|my question)\b",
+        r"\b(?:talking about|today on the show|welcome to|going to talk about|this week we)\b",
         re.IGNORECASE,
     )
 
@@ -954,11 +963,11 @@ def _generate_chapters_and_summary(
         if not run_text:
             continue
 
-        # Split into sentences at terminal punctuation followed by whitespace + capital/quote or end
+        # Split into sentences at terminal punctuation followed by whitespace + capital/quote/dash
         sent_start = 0
-        for m_split in re.finditer(r'(?<=[.!?])\s+(?=[A-Z"\'(])', run_text):
+        for m_split in re.finditer(r'(?<=[.!?])\s+(?=[A-Z"\'(\-])', run_text):
             sent_end = m_split.start()
-            _score_sentence = run_text[sent_start:sent_end].strip()
+            _score_sentence = run_text[sent_start:sent_end].strip().lstrip("- ")
             _s_start, _s_end = sent_start, sent_end
             sent_start = m_split.end()
             if _score_sentence:
@@ -972,19 +981,23 @@ def _generate_chapters_and_summary(
                     continue
                 if not _score_sentence.endswith((".", "!")) or _score_sentence.endswith("?"):
                     continue
-                if filler_starts.search(_score_sentence) or promo_cues.search(_score_sentence):
+                if (
+                    filler_starts.search(_score_sentence)
+                    or promo_cues.search(_score_sentence)
+                    or banter_cues.search(_score_sentence)
+                ):
                     continue
                 sent_vec = np.mean(sub_emb[k_list], axis=0)
                 sent_vec /= float(np.linalg.norm(sent_vec)) + 1e-12
                 emb_sc = float(np.dot(sent_vec, centroid))
                 kw_hits = sum(1 for low, _ in _extract_chapter_tokens(_score_sentence) if low in top_kw)
                 score = emb_sc + 0.08 * min(kw_hits, 5) + (0.05 if 14 <= wc <= 32 else 0.0)
-                if k_list[0] < max(10, m // 8) and intro_cues.search(_score_sentence):
-                    score += 0.35
+                if k_list[0] < max(12, m // 6) and intro_cues.search(_score_sentence):
+                    score += 0.55
                 sentence_candidates.append((score, segments[non_ad_indices[k_list[0]]].start, _score_sentence))
 
         # Trailing sentence in run if it ends with terminal punctuation
-        tail = run_text[sent_start:].strip()
+        tail = run_text[sent_start:].strip().lstrip("- ")
         if tail and tail.endswith((".", "!")) and not tail.endswith("?"):
             k_list = [k for cs, ce, k in spans if ce > sent_start]
             wc = len(tail.split())
@@ -994,14 +1007,15 @@ def _generate_chapters_and_summary(
                 and (tail[0].isupper() or tail[0] in '"\'')
                 and not filler_starts.search(tail)
                 and not promo_cues.search(tail)
+                and not banter_cues.search(tail)
             ):
                 sent_vec = np.mean(sub_emb[k_list], axis=0)
                 sent_vec /= float(np.linalg.norm(sent_vec)) + 1e-12
                 emb_sc = float(np.dot(sent_vec, centroid))
                 kw_hits = sum(1 for low, _ in _extract_chapter_tokens(tail) if low in top_kw)
                 score = emb_sc + 0.08 * min(kw_hits, 5) + (0.05 if 14 <= wc <= 32 else 0.0)
-                if k_list[0] < max(10, m // 8) and intro_cues.search(tail):
-                    score += 0.35
+                if k_list[0] < max(12, m // 6) and intro_cues.search(tail):
+                    score += 0.55
                 sentence_candidates.append((score, segments[non_ad_indices[k_list[0]]].start, tail))
 
     # Fallback for unpunctuated transcripts
@@ -1011,12 +1025,18 @@ def _generate_chapters_and_summary(
             seg = segments[idx]
             txt = re.sub(r"\s+", " ", seg.text).strip()
             wc = len(txt.split())
-            if wc < 10 or wc > 42 or txt.endswith("?") or filler_starts.search(txt):
+            if (
+                wc < 10
+                or wc > 42
+                or txt.endswith("?")
+                or filler_starts.search(txt)
+                or banter_cues.search(txt)
+            ):
                 continue
             kw_hits = sum(1 for low, _ in _extract_chapter_tokens(txt) if low in top_kw)
             score = float(emb_scores[k]) + 0.08 * min(kw_hits, 5)
-            if k < max(10, m // 8) and intro_cues.search(txt):
-                score += 0.35
+            if k < max(12, m // 6) and intro_cues.search(txt):
+                score += 0.55
             cleaned = txt.rstrip(",;:- ")
             if cleaned and cleaned[0].islower():
                 cleaned = cleaned[0].upper() + cleaned[1:]
@@ -1027,9 +1047,9 @@ def _generate_chapters_and_summary(
     sentence_candidates.sort(key=lambda x: x[0], reverse=True)
     chosen_sents: list[tuple[float, str]] = []
     for _, start_s, sent_txt in sentence_candidates:
-        if all(abs(start_s - c_start) >= 60.0 for c_start, _ in chosen_sents):
+        if all(abs(start_s - c_start) >= 90.0 for c_start, _ in chosen_sents):
             chosen_sents.append((start_s, sent_txt))
-            if len(chosen_sents) >= 3:
+            if len(chosen_sents) >= 2:
                 break
     chosen_sents.sort(key=lambda x: x[0])
     summary = " ".join(sent_txt for _, sent_txt in chosen_sents) if chosen_sents else None

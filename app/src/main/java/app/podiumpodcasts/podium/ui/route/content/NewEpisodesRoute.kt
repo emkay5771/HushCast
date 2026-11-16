@@ -21,6 +21,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -142,6 +143,11 @@ fun NewEpisodesRoute(
                     key = newEpisodes.itemKey { it.episode.id }
                 ) {
                     val item = newEpisodes[it] ?: return@items
+                    val itemPlayerVm = viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+                    val itemSettings = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
+                    val itemSwipeRightAction = itemSettings.behavior.episodeSwipeRightAction.collectAsState(
+                        app.podiumpodcasts.podium.EpisodeSwipeAction.HEAR_LATER
+                    ).value
 
                     val markedAsSeen = stringResource(R.string.snackbar_marked_as_seen)
 
@@ -149,6 +155,14 @@ fun NewEpisodesRoute(
                         scope = scope,
                         modifier = Modifier.animateItem(),
                         snackbarHostState = snackbarHostState,
+                        startAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
+                            actionType = itemSwipeRightAction,
+                            bundle = item,
+                            playerVm = itemPlayerVm,
+                            onMarkPlayed = { markPlayed ->
+                                db.podcastEpisodePlayStates().savePlayed(item.episode.id, markPlayed)
+                            }
+                        ),
                         endAction = SwipeableItemActions.CheckAction(
                             onAction = {
                                 vm.unnew(item)

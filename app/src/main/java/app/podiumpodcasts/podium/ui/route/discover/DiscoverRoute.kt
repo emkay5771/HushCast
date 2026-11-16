@@ -13,6 +13,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -55,7 +56,8 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun DiscoverRoute(
-    onClickPodcast: (origin: String) -> Unit
+    onClickPodcast: (origin: String) -> Unit,
+    onClickAddPodcast: () -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
 
@@ -98,6 +100,14 @@ fun DiscoverRoute(
                 textFieldState = textFieldState,
                 searchBarState = searchBarState,
                 actions = {
+                    IconButton(
+                        onClick = onClickAddPodcast
+                    ) {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Rounded.Add,
+                            contentDescription = stringResource(R.string.common_action_add)
+                        )
+                    }
                     IconButton(
                         onClick = {
                             showCountryCodeSelector.value = true
@@ -205,15 +215,6 @@ fun DiscoverRoute(
                         }
                     }
                 }
-            }
-
-            Box(
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp)
-                    .padding(bottom = LocalFloatingMediaPlayerHeight.current)
-            ) {
-                PoweredByApplePodcastsBadge()
             }
         }
     }
