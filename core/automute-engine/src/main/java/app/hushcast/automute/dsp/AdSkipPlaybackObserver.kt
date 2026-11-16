@@ -68,6 +68,10 @@ class AdSkipPlaybackObserver {
         return false
     }
 
+    fun bypassAd(adStartMs: Long) {
+        bypassedStartMs.add(adStartMs)
+    }
+
     /**
      * Called when the user taps "Undo" on the 6-second snackbar.
      * Seeks back to the ad start and suppresses re-skipping that span for this playback.

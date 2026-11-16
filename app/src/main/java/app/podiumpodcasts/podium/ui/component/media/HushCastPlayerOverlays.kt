@@ -243,11 +243,11 @@ fun CastingBypassNoticeBanner(modifier: Modifier = Modifier) {
 
 /**
  * Synced Interactive Transcript View:
- * - Highlights active speech
- * - Flags muted words with strike-through pills (tap-to-mute/unmute)
- * - Collapses sponsor reads into "Sponsor Read — Tap to hear" cards
+ * - Searchable lines with timestamps (tap any line or word to jump)
+ * - Long-press any word to mute/unmute it across the episode
+ * - Collapses sponsor reads into "Sponsor Read — Tap to hear" cards with working Play
  */
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun SyncedTranscriptCard(
     segments: List<Segment>,
@@ -257,6 +257,8 @@ fun SyncedTranscriptCard(
     currentPositionMs: Long,
     onSeekToMs: (Long) -> Unit,
     onToggleWordMute: (Word, Boolean) -> Unit,
+    onPlayAdSegment: ((AdWindow, Long) -> Unit)? = null,
+    onCopyReport: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     if (segments.isEmpty()) {
@@ -279,121 +281,216 @@ fun SyncedTranscriptCard(
         return
     }
 
-    LazyColumn(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(max = 320.dp),
+    var searchQuery by remember { mutableStateOf("") }
+    val filteredSegments = remember(segments, searchQuery) {
+        val q = searchQuery.trim()
+        if (q.isEmpty()) segments
+        else segments.filter { it.text.contains(q, ignoreCase = true) }
+    }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        itemsIndexed(segments) { _, seg ->
-            val segStartMs = (seg.start * 1000.0).toLong()
-            val segEndMs = (seg.end * 1000.0).toLong()
-            val isActive = currentPositionMs in segStartMs..segEndMs
-
-            val overlappingAd = adWindows.firstOrNull { ad ->
-                segStartMs < ad.endMs && segEndMs > ad.startMs
-            }
-
-            if (overlappingAd != null) {
-                var expanded by remember(segStartMs) { mutableStateOf(false) }
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { expanded = !expanded }
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = "${overlappingAd.label} — Tap to hear",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                            Button(onClick = { onSeekToMs(segStartMs) }) {
-                                Text("Play", style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                        if (expanded) {
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                text = seg.text,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            androidx.compose.material3.OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                placeholder = { Text("Search transcript…") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Rounded.Search,
+                        contentDescription = null
+                    )
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        androidx.compose.material3.IconButton(onClick = { searchQuery = "" }) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "Clear search"
                             )
                         }
                     }
                 }
-            } else {
-                val segWords = words.filter { w ->
-                    val ws = (w.start * 1000.0).toLong()
-                    ws in segStartMs..segEndMs
-                }
+            )
 
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (isActive) {
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                    } else {
-                        MaterialTheme.colorScheme.surfaceContainerLow
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onSeekToMs(segStartMs) }
-                ) {
-                    if (segWords.isNotEmpty()) {
-                        FlowRow(
-                            modifier = Modifier.padding(10.dp),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+            onCopyReport?.let { copyReport ->
+                androidx.compose.material3.FilledTonalIconButton(onClick = copyReport) {
+                    Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Rounded.ContentCopy,
+                        contentDescription = "Copy transcript & ad report"
+                    )
+                }
+            }
+        }
+
+        Text(
+            text = if (searchQuery.isBlank()) {
+                "Tap any line or word to jump • Long-press a word to mute/unmute"
+            } else {
+                "${filteredSegments.size} matching ${if (filteredSegments.size == 1) "line" else "lines"} • Tap to jump"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        if (filteredSegments.isEmpty()) {
+            Text(
+                text = "No lines matching \"$searchQuery\".",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 16.dp)
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                itemsIndexed(filteredSegments) { _, seg ->
+                    val segStartMs = (seg.start * 1000.0).toLong()
+                    val segEndMs = (seg.end * 1000.0).toLong()
+                    val isActive = currentPositionMs in segStartMs..segEndMs
+
+                    val overlappingAd = adWindows.firstOrNull { ad ->
+                        segStartMs < ad.endMs && segEndMs > ad.startMs
+                    }
+
+                    if (overlappingAd != null) {
+                        var expanded by remember(segStartMs) { mutableStateOf(false) }
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { expanded = !expanded }
                         ) {
-                            segWords.forEach { w ->
-                                val ws = (w.start * 1000.0).toLong()
-                                val we = (w.end * 1000.0).toLong()
-                                val matchedMute = muteWindows.firstOrNull { m ->
-                                    ws < m.endMs && we > m.startMs
-                                }
-                                val isMuted = matchedMute?.enabled == true
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = if (isMuted) {
-                                        MaterialTheme.colorScheme.errorContainer
-                                    } else {
-                                        Color.Transparent
-                                    },
-                                    modifier = Modifier.clickable {
-                                        onToggleWordMute(w, !isMuted)
-                                    }
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Text(
-                                        text = w.text.trim(),
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            textDecoration = if (isMuted) TextDecoration.LineThrough else TextDecoration.None
-                                        ),
-                                        color = if (isMuted) {
-                                            MaterialTheme.colorScheme.onErrorContainer
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurface
-                                        },
-                                        modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
+                                        text = "${overlappingAd.label} (${formatTranscriptTimestamp(segStartMs)}) — Tap to expand",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Button(
+                                        onClick = {
+                                            if (onPlayAdSegment != null) {
+                                                onPlayAdSegment(overlappingAd, segStartMs)
+                                            } else {
+                                                onSeekToMs(segStartMs)
+                                            }
+                                        }
+                                    ) {
+                                        Text("Play", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                if (expanded) {
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = seg.text,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer
                                     )
                                 }
                             }
                         }
                     } else {
-                        Text(
-                            text = seg.text,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(10.dp)
-                        )
+                        val segWords = words.filter { w ->
+                            val ws = (w.start * 1000.0).toLong()
+                            ws in segStartMs..segEndMs
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (isActive) {
+                                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                            } else {
+                                MaterialTheme.colorScheme.surfaceContainerLow
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onSeekToMs(segStartMs) }
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text(
+                                    text = formatTranscriptTimestamp(segStartMs),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                if (segWords.isNotEmpty()) {
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        segWords.forEach { w ->
+                                            val ws = (w.start * 1000.0).toLong()
+                                            val we = (w.end * 1000.0).toLong()
+                                            val matchedMute = muteWindows.firstOrNull { m ->
+                                                ws < m.endMs && we > m.startMs
+                                            }
+                                            val isMuted = matchedMute?.enabled == true
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = if (isMuted) {
+                                                    MaterialTheme.colorScheme.errorContainer
+                                                } else {
+                                                    Color.Transparent
+                                                },
+                                                modifier = Modifier.combinedClickable(
+                                                    onClick = { onSeekToMs(ws) },
+                                                    onLongClick = { onToggleWordMute(w, !isMuted) }
+                                                )
+                                            ) {
+                                                Text(
+                                                    text = w.text.trim(),
+                                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                                        textDecoration = if (isMuted) TextDecoration.LineThrough else TextDecoration.None
+                                                    ),
+                                                    color = if (isMuted) {
+                                                        MaterialTheme.colorScheme.onErrorContainer
+                                                    } else {
+                                                        MaterialTheme.colorScheme.onSurface
+                                                    },
+                                                    modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Text(
+                                        text = seg.text,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
+}
+
+private fun formatTranscriptTimestamp(ms: Long): String {
+    val totalSec = (ms / 1000L).coerceAtLeast(0L)
+    val h = totalSec / 3600L
+    val m = (totalSec % 3600L) / 60L
+    val s = totalSec % 60L
+    return if (h > 0L) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }

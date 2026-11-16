@@ -372,7 +372,6 @@ fun MediaPlayerBottomSheet(
                                     if (isFullScreen) Modifier.weight(1f)
                                     else Modifier.heightIn(min = 320.dp, max = 520.dp)
                                 )
-                                .verticalScroll(rememberScrollState())
                                 .padding(horizontal = 16.dp, vertical = 12.dp)
                         ) {
                             if (transcriptBlob == null) {
@@ -407,24 +406,62 @@ fun MediaPlayerBottomSheet(
                                 }
                             } else {
                                 SyncedTranscriptCard(
+                                    modifier = Modifier.weight(1f),
                                     segments = transcriptBlob?.segments ?: emptyList(),
                                     words = transcriptBlob?.words ?: emptyList(),
                                     muteWindows = muteWindows,
                                     adWindows = adWindows,
                                     currentPositionMs = vm.currentPosition,
                                     onSeekToMs = { ms -> vm.seek(ms) },
+                                    onPlayAdSegment = { ad, startMs ->
+                                        HushCastEngineBridge.adSkipObserver.bypassAd(ad.startMs)
+                                        vm.seek(startMs)
+                                        if (!vm.isPlaying) vm.play()
+                                    },
+                                    onCopyReport = {
+                                        val title = currentEpisodeBundle?.episode?.title
+                                            ?: vm.mediaMetadata?.title?.toString()
+                                            ?: episodeId
+                                        val report = buildString {
+                                            appendLine("HushCast Transcript & Ad Report")
+                                            appendLine("Episode: $title")
+                                            appendLine("Ad Windows (${adWindows.size}):")
+                                            adWindows.forEach { ad ->
+                                                appendLine("  - ${formatPlayerTime(ad.startMs)}..${formatPlayerTime(ad.endMs)} [${ad.label}]")
+                                            }
+                                            appendLine("Mute Windows (${muteWindows.size}):")
+                                            muteWindows.take(50).forEach { m ->
+                                                appendLine("  - ${formatPlayerTime(m.startMs)}..${formatPlayerTime(m.endMs)} (${m.matchedWord}, enabled=${m.enabled})")
+                                            }
+                                            appendLine("--- Transcript (${transcriptBlob?.segments?.size ?: 0} segments) ---")
+                                            transcriptBlob?.segments?.forEach { seg ->
+                                                val ms = (seg.start * 1000.0).toLong()
+                                                appendLine("[${formatPlayerTime(ms)}] ${seg.text.trim()}")
+                                            }
+                                        }
+                                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("HushCast Transcript Report", report))
+                                        android.widget.Toast.makeText(context, "Transcript & Ad Report copied", android.widget.Toast.LENGTH_SHORT).show()
+                                    },
                                     onToggleWordMute = { word, mute ->
                                         val clean = word.text.trim().trim('.', ',', '!', '?', '"', '\'')
                                         if (clean.isNotEmpty() && episodeId.isNotBlank()) {
                                             scope.launch {
                                                 if (mute) {
-                                                    autoMuteDb.dao().upsertRule(
+                                                    autoMuteDb.dao().upsertRuleIfNew(
                                                         MuteRuleEntity(
                                                             pattern = clean,
                                                             actionMode = HushCastEngineBridge.defaultActionMode.name,
                                                             category = "Transcript"
                                                         )
                                                     )
+                                                    android.widget.Toast.makeText(context, "Muted \"$clean\" (long-press again to undo)", android.widget.Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    val matching = autoMuteDb.dao().getAllRules().filter {
+                                                        it.pattern.equals(clean, ignoreCase = true)
+                                                    }
+                                                    matching.forEach { autoMuteDb.dao().deleteRule(it.id) }
+                                                    android.widget.Toast.makeText(context, "Unmuted \"$clean\"", android.widget.Toast.LENGTH_SHORT).show()
                                                 }
                                                 val sha = analysisStatus?.fileSha256?.takeIf { it.isNotBlank() }
                                                 if (sha != null) {
