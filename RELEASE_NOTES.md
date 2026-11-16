@@ -1,3 +1,14 @@
+# HushCast v0.1.19-hushcast
+
+## What's New
+- **QR Code Pairing (Desktop & Cloud Workers)**:
+  - `hushcast-worker` now prints a scannable `hushcast://pair?url=...&token=...` QR code directly in the terminal on startup (and `modal_app.py::pair_qr` generates one for Modal cloud deployments).
+  - Added an in-app **Scan QR** button in **Settings → HushCast → Desktop Companion**, plus `hushcast://pair` deep-link support so scanning with your phone's Camera app also pairs automatically.
+- **Modal Serverless GPU Support**:
+  - Added [`desktop-worker/modal_app.py`](desktop-worker/modal_app.py) for one-command serverless GPU deployment on Modal's free tier, while keeping true on-device Android and local Mac/LAN worker modes completely intact.
+
+---
+
 # HushCast v0.1.18-hushcast
 
 ## What's New

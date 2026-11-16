@@ -38,6 +38,28 @@ def _load_or_create_token(root_dir: Path, cli_token: Optional[str]) -> str:
     return token
 
 
+def build_pairing_uri(url: str, token: str) -> str:
+    from urllib.parse import quote
+
+    clean_url = url.strip().rstrip("/")
+    return f"hushcast://pair?url={quote(clean_url, safe='')}&token={quote(token, safe='')}"
+
+
+def print_pairing_qr(url: str, token: str) -> None:
+    uri = build_pairing_uri(url, token)
+    print(f"  Pair URI:      {uri}")
+    try:
+        import qrcode
+
+        qr = qrcode.QRCode(border=2)
+        qr.add_data(uri)
+        qr.make(fit=True)
+        print("\n  Scan with your phone's Camera or HushCast Settings → Scan QR:")
+        qr.print_ascii(invert=True)
+    except Exception:
+        pass
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="HushCast Desktop Companion Worker")
     parser.add_argument("--host", default="0.0.0.0")
@@ -77,12 +99,14 @@ def main() -> None:
     app = create_app(cache=cache, backend=backend, token=token)
 
     lan_ip = _get_lan_ip()
+    worker_url = f"http://{lan_ip}:{args.port}"
     print(f"HushCast Desktop Worker v0.1.0 ({detect_accelerator().upper()})")
-    print(f"  URL:           http://{lan_ip}:{args.port}")
+    print(f"  URL:           {worker_url}")
     print(f"  Pairing Token: {token}")
     print(f"  Models Ready:  {backend.models_ready()} (dir: {backend.models_dir})")
     print(f"  Whisper Model: {backend.whisper_model_name()}")
     print(f"  Chat Model:    {backend.chat_model_path().name if backend.chat_model_ready() else 'Extractive fallback (drop any Instruct GGUF in models dir to enable LLM summaries)'}")
+    print_pairing_qr(worker_url, token)
 
     zc: Optional[Zeroconf] = None
     info: Optional[ServiceInfo] = None

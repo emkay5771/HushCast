@@ -426,7 +426,62 @@ fun SettingsHushCastPane(
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Spacer(Modifier.height(10.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    enabled = !desktopBusy,
+                                    onClick = {
+                                        desktopBusy = true
+                                        desktopStatus = "Opening QR scanner…"
+                                        val options = com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions.Builder()
+                                            .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE)
+                                            .build()
+                                        com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(context, options)
+                                            .startScan()
+                                            .addOnSuccessListener { barcode ->
+                                                val raw = barcode.rawValue.orEmpty()
+                                                val parsed = parseWorkerPairingPayload(raw)
+                                                if (parsed == null) {
+                                                    desktopStatus = "Unrecognized QR code."
+                                                    desktopBusy = false
+                                                    return@addOnSuccessListener
+                                                }
+                                                val (scannedUrl, scannedToken) = parsed
+                                                desktopUrl = scannedUrl
+                                                app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerUrl(context, scannedUrl)
+                                                if (scannedToken.isNotBlank()) {
+                                                    desktopToken = scannedToken
+                                                    app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerToken(context, scannedToken)
+                                                }
+                                                desktopStatus = "Scanned $scannedUrl — verifying…"
+                                                scope.launch {
+                                                    try {
+                                                        val health = app.hushcast.automute.desktop.DesktopWorkerClient.healthCheck(
+                                                            baseUrl = scannedUrl,
+                                                            token = scannedToken.ifBlank { desktopToken }
+                                                        )
+                                                        desktopStatus = "Connected: ${health.hostname} (${health.accelerator.uppercase()}) • ${health.whisperModel}"
+                                                    } catch (t: Throwable) {
+                                                        desktopStatus = "Saved QR config, but connection check failed: ${t.message ?: t.javaClass.simpleName}"
+                                                    } finally {
+                                                        desktopBusy = false
+                                                    }
+                                                }
+                                            }
+                                            .addOnCanceledListener {
+                                                desktopStatus = null
+                                                desktopBusy = false
+                                            }
+                                            .addOnFailureListener { e ->
+                                                desktopStatus = "QR scanner unavailable (${e.message ?: "no Play Services"}). Scan with your Camera app instead."
+                                                desktopBusy = false
+                                            }
+                                    }
+                                ) {
+                                    Text("Scan QR")
+                                }
                                 OutlinedButton(
                                     enabled = !desktopBusy,
                                     onClick = {
@@ -445,7 +500,7 @@ fun SettingsHushCastPane(
                                         }
                                     }
                                 ) {
-                                    Text("Discover Wi-Fi")
+                                    Text("Discover")
                                 }
                                 Button(
                                     enabled = !desktopBusy && desktopUrl.isNotBlank(),
@@ -473,7 +528,7 @@ fun SettingsHushCastPane(
                                         }
                                     }
                                 ) {
-                                    Text("Test Connection")
+                                    Text("Test")
                                 }
                             }
                             if (desktopStatus != null) {
@@ -970,4 +1025,27 @@ fun SettingsHushCastPane(
             }
         }
     }
+}
+
+private fun parseWorkerPairingPayload(raw: String): Pair<String, String>? {
+    val trimmed = raw.trim()
+    if (trimmed.isEmpty()) return null
+    if (trimmed.startsWith("hushcast://", ignoreCase = true)) {
+        val uri = android.net.Uri.parse(trimmed)
+        val url = uri.getQueryParameter("url")?.trim()?.trimEnd('/') ?: return null
+        if (url.isBlank()) return null
+        val token = uri.getQueryParameter("token")?.trim().orEmpty()
+        return url to token
+    }
+    if (trimmed.startsWith("{")) {
+        return runCatching {
+            val obj = org.json.JSONObject(trimmed)
+            val url = obj.optString("url").trim().trimEnd('/')
+            if (url.isBlank()) null else url to obj.optString("token").trim()
+        }.getOrNull()
+    }
+    if (trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true)) {
+        return trimmed.trimEnd('/') to ""
+    }
+    return null
 }

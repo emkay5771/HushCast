@@ -16,6 +16,7 @@ dependencies = [
     "zeroconf>=0.132.0",
     "numpy>=1.26.0",
     "onnxruntime>=1.19.0",
+    "qrcode>=7.4",
 ]
 
 [project.optional-dependencies]

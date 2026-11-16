@@ -27,10 +27,18 @@
         <activity
             android:name=".AppActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:configChanges="density|fontScale|keyboard|keyboardHidden|layoutDirection|locale|mcc|mnc|navigation|orientation|screenLayout|screenSize|smallestScreenSize|touchscreen|uiMode"
             android:theme="@style/Theme.Podium"
             android:windowSoftInputMode="adjustPan"
-            android:enableOnBackInvokedCallback="true" />
+            android:enableOnBackInvokedCallback="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="hushcast" android:host="pair" />
+            </intent-filter>
+        </activity>
 
         <activity-alias
             android:name=".Default"

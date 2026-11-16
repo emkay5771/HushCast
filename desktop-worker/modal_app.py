@@ -125,3 +125,15 @@ def fastapi_app():
     backend = DesktopMlBackend(MODELS_DIR)
     token = os.environ.get("HUSHCAST_WORKER_TOKEN") or None
     return create_app(cache=cache, backend=backend, token=token)
+
+
+@app.local_entrypoint()
+def pair_qr(url: str, token: str = "") -> None:
+    """Print a scannable hushcast://pair QR code for your deployed Modal URL."""
+    from hushcast_worker.cli import print_pairing_qr
+
+    print(f"HushCast Modal Worker")
+    print(f"  URL:           {url.strip()}")
+    if token:
+        print(f"  Pairing Token: {token}")
+    print_pairing_qr(url, token)

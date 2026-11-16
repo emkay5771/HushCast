@@ -37,6 +37,7 @@ class AppActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        handleWorkerPairingIntent(intent)
         mediaPlayerViewModel.passDB(db)
 
         val deepLink = intent.extractDeepLink()
@@ -96,5 +97,29 @@ class AppActivity : ComponentActivity() {
         }
 
         super.onStop()
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleWorkerPairingIntent(intent)
+    }
+
+    private fun handleWorkerPairingIntent(intent: android.content.Intent?) {
+        val data = intent?.data ?: return
+        if (data.scheme != "hushcast" || data.host != "pair") return
+        val url = data.getQueryParameter("url")?.trim()?.trimEnd('/') ?: return
+        if (url.isBlank()) return
+        val token = data.getQueryParameter("token")?.trim().orEmpty()
+        app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerEnabled(this, true)
+        app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerUrl(this, url)
+        if (token.isNotBlank()) {
+            app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerToken(this, token)
+        }
+        android.widget.Toast.makeText(
+            this,
+            "HushCast Worker paired: $url",
+            android.widget.Toast.LENGTH_LONG
+        ).show()
     }
 }

@@ -25,8 +25,8 @@ android {
         applicationId = "app.podiumpodcasts.podium"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1000020
-        versionName = "0.1.18-hushcast"
+        versionCode = 1000021
+        versionName = "0.1.19-hushcast"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
@@ -188,6 +188,7 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
 
     implementation("androidx.concurrent:concurrent-futures-ktx:1.1.0")
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 
     implementation(libs.kotlinx.serialization.json)
 
