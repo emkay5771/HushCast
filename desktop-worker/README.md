@@ -130,7 +130,8 @@ On your phone:
   ```
   You can also run `uv run modal secret list` to confirm `hushcast-token` is in the active environment.
 - **Cold starts (scale-to-zero):** To save credits, Modal scales the GPU container down after 2 minutes of idle time (`scaledown_window=120`). The first **Test** or episode download after idle may take ~15–25 seconds while the T4 container boots; subsequent requests while warm are instant.
-- **Updating the worker:** After pulling new changes (`git pull origin main`), re-run `uv run modal deploy modal_app.py` inside `desktop-worker/`.
+- **Auto-deploy via GitHub Actions:** Pushing changes under `desktop-worker/` to `main` automatically deploys to Modal via [`.github/workflows/deploy-modal.yml`](../.github/workflows/deploy-modal.yml) once you add **`MODAL_TOKEN_ID`** and **`MODAL_TOKEN_SECRET`** (from [Modal Settings → API Tokens](https://modal.com/settings/tokens)) to your GitHub repository's **Settings → Secrets and variables → Actions**.
+- **Updating the worker manually:** After pulling new changes (`git pull origin main`), re-run `uv run modal deploy modal_app.py` inside `desktop-worker/`.
 - **Optional LLM Chat / Summaries:** If you also want an instruct GGUF model on Modal, upload or download it into `/data/models/` inside the `hushcast-data` volume.
 
 

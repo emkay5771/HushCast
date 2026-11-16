@@ -1,0 +1,37 @@
+name: Deploy Modal Cloud Worker
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'desktop-worker/**'
+      - '.github/workflows/deploy-modal.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Modal
+    runs-on: ubuntu-latest
+    # Skip cleanly on forks or repos that haven't configured Modal CI secrets yet
+    if: ${{ secrets.MODAL_TOKEN_ID != '' && secrets.MODAL_TOKEN_SECRET != '' }}
+    defaults:
+      run:
+        working-directory: desktop-worker
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Modal CLI
+        run: python -m pip install --upgrade pip modal
+
+      - name: Deploy Modal worker
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal deploy modal_app.py
