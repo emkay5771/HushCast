@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Undo
@@ -33,20 +34,25 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.Subtitles
+import androidx.compose.material.icons.rounded.VerticalAlignCenter
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -353,67 +359,120 @@ fun SyncedTranscriptCard(
                 modifier = Modifier.padding(vertical = 16.dp)
             )
         } else {
-            LazyColumn(
+            val displayRows = remember(filteredSegments, adWindows) {
+                buildTranscriptDisplayRows(filteredSegments, adWindows)
+            }
+            val activeRowIndex = remember(displayRows, currentPositionMs) {
+                displayRows.indexOfFirst { row ->
+                    when (row) {
+                        is TranscriptDisplayRow.SpeechLine -> {
+                            val s = (row.segment.start * 1000.0).toLong()
+                            val e = (row.segment.end * 1000.0).toLong()
+                            currentPositionMs in s..e
+                        }
+                        is TranscriptDisplayRow.SponsorGroup -> {
+                            currentPositionMs in row.startMs..row.endMs
+                        }
+                    }
+                }
+            }
+
+            val listState = rememberLazyListState()
+            val scope = rememberCoroutineScope()
+            var followLive by remember { mutableStateOf(true) }
+
+            LaunchedEffect(listState.isScrollInProgress, activeRowIndex) {
+                if (listState.isScrollInProgress && activeRowIndex >= 0) {
+                    val visible = listState.layoutInfo.visibleItemsInfo.any { it.index == activeRowIndex }
+                    if (!visible) {
+                        followLive = false
+                    }
+                }
+            }
+
+            LaunchedEffect(activeRowIndex, followLive, searchQuery) {
+                if (followLive && searchQuery.isBlank() && activeRowIndex >= 0) {
+                    listState.animateScrollToItem(activeRowIndex)
+                }
+            }
+
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f, fill = false),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                    .weight(1f, fill = false)
             ) {
-                itemsIndexed(filteredSegments) { _, seg ->
-                    val segStartMs = (seg.start * 1000.0).toLong()
-                    val segEndMs = (seg.end * 1000.0).toLong()
-                    val isActive = currentPositionMs in segStartMs..segEndMs
-
-                    val overlappingAd = adWindows.firstOrNull { ad ->
-                        segStartMs < ad.endMs && segEndMs > ad.startMs
-                    }
-
-                    if (overlappingAd != null) {
-                        var expanded by remember(segStartMs) { mutableStateOf(false) }
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { expanded = !expanded }
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.fillMaxWidth()
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    itemsIndexed(displayRows) { _, row ->
+                        when (row) {
+                            is TranscriptDisplayRow.SponsorGroup -> {
+                                var expanded by remember(row.startMs) { mutableStateOf(false) }
+                                val durSec = ((row.endMs - row.startMs) / 1000L).coerceAtLeast(1L)
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { expanded = !expanded }
                                 ) {
-                                    Text(
-                                        text = "${overlappingAd.label} (${formatTranscriptTimestamp(segStartMs)}) — Tap to expand",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                    Button(
-                                        onClick = {
-                                            if (onPlayAdSegment != null) {
-                                                onPlayAdSegment(overlappingAd, segStartMs)
-                                            } else {
-                                                onSeekToMs(segStartMs)
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = "${row.displayLabel} • ${formatTranscriptTimestamp(row.startMs)} (${durSec}s)",
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = MaterialTheme.colorScheme.onTertiaryContainer
+                                                )
+                                                Text(
+                                                    text = if (expanded) "Tap to collapse (${row.segments.size} lines)" else "Tap to expand transcript (${row.segments.size} lines)",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+                                                )
+                                            }
+                                            Spacer(Modifier.width(8.dp))
+                                            Button(
+                                                onClick = {
+                                                    if (onPlayAdSegment != null) {
+                                                        onPlayAdSegment(row.ad, row.startMs)
+                                                    } else {
+                                                        onSeekToMs(row.startMs)
+                                                    }
+                                                }
+                                            ) {
+                                                Text("Play", style = MaterialTheme.typography.labelSmall)
                                             }
                                         }
-                                    ) {
-                                        Text("Play", style = MaterialTheme.typography.labelSmall)
+                                        if (expanded) {
+                                            Spacer(Modifier.height(8.dp))
+                                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                row.segments.forEach { adSeg ->
+                                                    val adSegMs = (adSeg.start * 1000.0).toLong()
+                                                    Text(
+                                                        text = "[${formatTranscriptTimestamp(adSegMs)}] ${adSeg.text.trim()}",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                                        modifier = Modifier.clickable { onSeekToMs(adSegMs) }
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
-                                if (expanded) {
-                                    Spacer(Modifier.height(6.dp))
-                                    Text(
-                                        text = seg.text,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                                    )
-                                }
                             }
-                        }
-                    } else {
+
+                            is TranscriptDisplayRow.SpeechLine -> {
+                                val seg = row.segment
+                                val segStartMs = (seg.start * 1000.0).toLong()
+                                val segEndMs = (seg.end * 1000.0).toLong()
+                                val isActive = currentPositionMs in segStartMs..segEndMs
                         val segWords = words.filter { w ->
                             val ws = (w.start * 1000.0).toLong()
                             ws in segStartMs..segEndMs
@@ -484,11 +543,130 @@ fun SyncedTranscriptCard(
                                 }
                             }
                         }
+                            }
+                        }
+                    }
+                }
+
+                if (!followLive && searchQuery.isBlank() && activeRowIndex >= 0) {
+                    FilledTonalButton(
+                        onClick = {
+                            followLive = true
+                            scope.launch {
+                                listState.animateScrollToItem(activeRowIndex)
+                            }
+                        },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.VerticalAlignCenter,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text("Catch up to live", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
         }
     }
+}
+
+private sealed interface TranscriptDisplayRow {
+    data class SpeechLine(val segment: Segment) : TranscriptDisplayRow
+    data class SponsorGroup(
+        val ad: AdWindow,
+        val segments: List<Segment>,
+        val displayLabel: String,
+        val startMs: Long,
+        val endMs: Long
+    ) : TranscriptDisplayRow
+}
+
+private val sponsorPatterns = listOf(
+    Regex(
+        """(?:support for (?:the|this) show comes from|sponsored by|brought to you by|thanks to|this episode is brought to you by)\s+([A-Z][A-Za-z0-9&'.-]+(?:\s+[A-Z][A-Za-z0-9&'.-]+){0,2})""",
+        RegexOption.IGNORE_CASE
+    ),
+    Regex(
+        """(?:learn more at|visit|head to|go to|check out)\s+([A-Za-z0-9-]+)\.(?:com|io|co|org|net|ai)\b""",
+        RegexOption.IGNORE_CASE
+    )
+)
+
+private fun extractSponsorName(text: String): String? {
+    for (pat in sponsorPatterns) {
+        val m = pat.find(text) ?: continue
+        val raw = m.groupValues.getOrNull(1)?.trim(' ', '.', ',', ':', ';', '!', '?', '"', '\'')
+        if (!raw.isNullOrBlank() && raw.length in 2..28) {
+            return if (raw.all { it.isLowerCase() }) {
+                raw.replaceFirstChar { it.uppercase() }
+            } else {
+                raw
+            }
+        }
+    }
+    return null
+}
+
+private fun buildTranscriptDisplayRows(
+    segments: List<Segment>,
+    adWindows: List<AdWindow>
+): List<TranscriptDisplayRow> {
+    if (adWindows.isEmpty()) return segments.map { TranscriptDisplayRow.SpeechLine(it) }
+
+    val rows = ArrayList<TranscriptDisplayRow>()
+    var pendingAd: AdWindow? = null
+    val pendingSegs = ArrayList<Segment>()
+
+    fun flushPending() {
+        val ad = pendingAd ?: return
+        if (pendingSegs.isEmpty()) return
+        val startMs = (pendingSegs.first().start * 1000.0).toLong()
+        val endMs = (pendingSegs.last().end * 1000.0).toLong().coerceAtLeast(startMs + 1000L)
+        val combined = pendingSegs.joinToString(" ") { it.text }
+        val sponsor = extractSponsorName(combined)
+        val label = when {
+            sponsor != null && ad.isHighConfidence -> "Sponsor: $sponsor"
+            sponsor != null -> "Suggested Ad: $sponsor"
+            else -> ad.label
+        }
+        rows.add(
+            TranscriptDisplayRow.SponsorGroup(
+                ad = ad,
+                segments = pendingSegs.toList(),
+                displayLabel = label,
+                startMs = startMs,
+                endMs = endMs
+            )
+        )
+        pendingAd = null
+        pendingSegs.clear()
+    }
+
+    for (seg in segments) {
+        val sMs = (seg.start * 1000.0).toLong()
+        val eMs = (seg.end * 1000.0).toLong()
+        val overlappingAd = adWindows.firstOrNull { ad -> sMs < ad.endMs && eMs > ad.startMs }
+        if (overlappingAd != null) {
+            val curAd = pendingAd
+            val lastEndMs = pendingSegs.lastOrNull()?.let { (it.end * 1000.0).toLong() } ?: sMs
+            if (curAd != null && (sMs - lastEndMs) <= 8000L && curAd.isHighConfidence == overlappingAd.isHighConfidence) {
+                pendingSegs.add(seg)
+            } else {
+                flushPending()
+                pendingAd = overlappingAd
+                pendingSegs.add(seg)
+            }
+        } else {
+            flushPending()
+            rows.add(TranscriptDisplayRow.SpeechLine(seg))
+        }
+    }
+    flushPending()
+    return rows
 }
 
 private fun formatTranscriptTimestamp(ms: Long): String {

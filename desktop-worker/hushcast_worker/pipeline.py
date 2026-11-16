@@ -302,9 +302,28 @@ def _basic_segment_features(segments: list[SegmentDto], duration_sec: float):
     return feats
 
 
+def _extract_sponsor_name(text: str) -> Optional[str]:
+    import re
+
+    patterns = [
+        r"(?:support for (?:the|this) show comes from|sponsored by|brought to you by|thanks to|this episode is brought to you by)\s+([A-Z][A-Za-z0-9&'.-]+(?:\s+[A-Z][A-Za-z0-9&'.-]+){0,2})",
+        r"(?:learn more at|visit|head to|go to|check out)\s+([A-Za-z0-9-]+)\.(?:com|io|co|org|net|ai)\b",
+    ]
+    for pat in patterns:
+        m = re.search(pat, text, flags=re.IGNORECASE)
+        if m:
+            candidate = m.group(1).strip(" .,:;!?\"'")
+            if 2 <= len(candidate) <= 28:
+                # Title-case domain-like lowercase matches
+                if candidate.islower():
+                    candidate = candidate.capitalize()
+                return candidate
+    return None
+
+
 def _decode_ad_segments(probs, segments: list[SegmentDto]) -> list[AdSegmentDto]:
-    # Matches core/automute-engine/Decoder.kt thresholds
-    out: list[AdSegmentDto] = []
+    # Matches core/automute-engine/Decoder.kt thresholds, then merges nearby ad chunks
+    raw: list[tuple[int, int, float, bool]] = []
     n = len(segments)
     i = 0
     while i < n:
@@ -318,19 +337,39 @@ def _decode_ad_segments(probs, segments: list[SegmentDto]) -> list[AdSegmentDto]
             count = j - i + 1
             if count >= 2:
                 avg_p = total_p / count
-                high = avg_p >= 0.80
-                out.append(
-                    AdSegmentDto(
-                        startMs=int(round(segments[i].start * 1000)),
-                        endMs=int(round(segments[j].end * 1000)),
-                        confidence=round(avg_p, 3),
-                        isHighConfidence=high,
-                        label="Sponsor / Ad" if high else "Suggested Ad",
-                    )
-                )
+                raw.append((i, j, avg_p, avg_p >= 0.80))
             i = j + 1
         else:
             i += 1
+
+    # Merge adjacent/nearby spans within 8s of the same confidence tier
+    merged: list[tuple[int, int, float, bool]] = []
+    for i, j, avg_p, high in raw:
+        if merged:
+            pi, pj, p_avg, p_high = merged[-1]
+            gap_s = segments[i].start - segments[pj].end
+            if gap_s <= 8.0 and p_high == high:
+                w1 = pj - pi + 1
+                w2 = j - i + 1
+                merged[-1] = (pi, j, (p_avg * w1 + avg_p * w2) / (w1 + w2), high)
+                continue
+        merged.append((i, j, avg_p, high))
+
+    out: list[AdSegmentDto] = []
+    for i, j, avg_p, high in merged:
+        combined_text = " ".join(s.text for s in segments[i : j + 1])
+        sponsor = _extract_sponsor_name(combined_text)
+        base_label = "Sponsor" if high else "Suggested Ad"
+        label = f"{base_label}: {sponsor}" if sponsor else ("Sponsor / Ad" if high else "Suggested Ad")
+        out.append(
+            AdSegmentDto(
+                startMs=int(round(segments[i].start * 1000)),
+                endMs=int(round(segments[j].end * 1000)),
+                confidence=round(avg_p, 3),
+                isHighConfidence=high,
+                label=label,
+            )
+        )
     return out
 
 

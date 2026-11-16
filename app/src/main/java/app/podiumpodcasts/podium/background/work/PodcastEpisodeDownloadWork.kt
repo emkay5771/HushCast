@@ -164,6 +164,17 @@ class PodcastEpisodeDownloadWork(
     ): Boolean {
         return try {
             val autoMuteDb = app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
+            suspend fun reportDesktopStatus(pct: Int, stage: String) {
+                autoMuteDb.dao().upsertStatus(
+                    app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
+                        episodeId = episodeId,
+                        badge = app.hushcast.automute.dsp.ReadinessBadge.ANALYZING.name,
+                        progressPercent = pct.coerceIn(0, 99),
+                        stageLabel = stage
+                    )
+                )
+            }
+            reportDesktopStatus(5, "Desktop: Submitting job…")
             val job = app.hushcast.automute.desktop.DesktopWorkerClient.submitJob(
                 baseUrl = workerUrl,
                 token = token,
@@ -178,10 +189,16 @@ class PodcastEpisodeDownloadWork(
                 token = token,
                 jobId = job.jobId
             ) { status ->
+                val pct = 10 + ((status.progressPercent * 60) / 100)
                 onProgressUpdate?.invoke(title, (status.progressPercent / 2).coerceIn(0, 50))
+                kotlinx.coroutines.runBlocking {
+                    reportDesktopStatus(pct, "Desktop: ${status.stageLabel}")
+                }
             }
             val sha256 = ready.fileSha256 ?: return false
 
+            reportDesktopStatus(72, "Desktop: Transferring audio…")
+            var lastStatusUpdateMs = 0L
             app.hushcast.automute.desktop.DesktopWorkerClient.downloadAudioAndVerifySha256(
                 baseUrl = workerUrl,
                 token = token,
@@ -192,9 +209,18 @@ class PodcastEpisodeDownloadWork(
                     db.podcastEpisodeDownloads().setProgress(episodeId, received, total)
                     val pct = (50 + ((received * 50L) / total).toInt()).coerceIn(50, 100)
                     onProgressUpdate?.invoke(title, pct)
+                    val now = System.currentTimeMillis()
+                    if (now - lastStatusUpdateMs >= 400L) {
+                        lastStatusUpdateMs = now
+                        val statusPct = (72 + ((received * 25L) / total).toInt()).coerceIn(72, 97)
+                        kotlinx.coroutines.runBlocking {
+                            reportDesktopStatus(statusPct, "Desktop: Transferring audio (${(received * 100L / total).toInt()}%)")
+                        }
+                    }
                 }
             }
 
+            reportDesktopStatus(98, "Desktop: Finalizing…")
             val bundle = app.hushcast.automute.desktop.DesktopWorkerClient.fetchBundle(
                 baseUrl = workerUrl,
                 token = token,
@@ -213,6 +239,17 @@ class PodcastEpisodeDownloadWork(
             true
         } catch (t: Throwable) {
             Log.w("HushCastDesktop", "Desktop worker offload failed for $episodeId: ${t.message}")
+            runCatching {
+                val autoMuteDb = app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
+                autoMuteDb.dao().upsertStatus(
+                    app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
+                        episodeId = episodeId,
+                        badge = app.hushcast.automute.dsp.ReadinessBadge.NOT_PROCESSED.name,
+                        progressPercent = 0,
+                        stageLabel = "Not Processed"
+                    )
+                )
+            }
             false
         }
     }
