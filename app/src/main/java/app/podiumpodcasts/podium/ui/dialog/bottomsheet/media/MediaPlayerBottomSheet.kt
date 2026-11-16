@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CloseFullscreen
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.Download
@@ -37,6 +39,7 @@ import androidx.compose.material.icons.rounded.Forward30
 import androidx.compose.material.icons.rounded.Forward5
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Podcasts
@@ -44,6 +47,7 @@ import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.Replay10
 import androidx.compose.material.icons.rounded.Replay30
 import androidx.compose.material.icons.rounded.Replay5
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroup
@@ -53,6 +57,7 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.IconButtonDefaults.IconButtonWidthOption
 import androidx.compose.material3.ListItemDefaults
@@ -246,40 +251,63 @@ fun MediaPlayerBottomSheet(
         onDismiss()
     }
 
+    var isFullScreen by remember { mutableStateOf(false) }
+
     SwitchableDynamicMaterialExpressiveTheme(
         enable = enableArtworkColors.value,
         seedColor = Color(vm.metadataImageSeedColor ?: 1)
     ) {
         ModalBottomSheet(
             sheetState = sheetState,
+            sheetMaxWidth = if (isFullScreen) androidx.compose.ui.unit.Dp.Infinity else BottomSheetDefaults.SheetMaxWidth,
             onDismissRequest = onDismiss
         ) {
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .pointerInput(Unit) {
+                    .then(if (isFullScreen) Modifier.fillMaxHeight() else Modifier)
+                    .pointerInput(isFullScreen) {
                         var totalDrag = 0f
                         detectVerticalDragGestures(
                             onDragStart = { totalDrag = 0f },
                             onVerticalDrag = { _, dragAmount ->
                                 totalDrag += dragAmount
-                                if(totalDrag < -60f) {
+                                if (totalDrag < -60f && !isFullScreen) {
                                     totalDrag = 0f
-                                    showQueueBottomSheet = true
+                                    isFullScreen = true
+                                } else if (totalDrag > 60f && isFullScreen) {
+                                    totalDrag = 0f
+                                    isFullScreen = false
                                 }
                             }
                         )
                     }
             ) {
-                PrimaryTabRow(
-                    selectedTabIndex = selectedTab.ordinal,
-                    containerColor = Color.Transparent
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    MediaPlayerTab.entries.forEach { tab ->
-                        Tab(
-                            selected = selectedTab == tab,
-                            onClick = { selectedTab = tab },
-                            text = { Text(tab.label) }
+                    PrimaryTabRow(
+                        modifier = Modifier.weight(1f),
+                        selectedTabIndex = selectedTab.ordinal,
+                        containerColor = Color.Transparent
+                    ) {
+                        MediaPlayerTab.entries.forEach { tab ->
+                            Tab(
+                                selected = selectedTab == tab,
+                                onClick = { selectedTab = tab },
+                                text = { Text(tab.label) }
+                            )
+                        }
+                    }
+
+                    IconButton(
+                        modifier = Modifier.padding(end = 4.dp),
+                        onClick = { isFullScreen = !isFullScreen }
+                    ) {
+                        Icon(
+                            imageVector = if (isFullScreen) Icons.Rounded.CloseFullscreen else Icons.Rounded.OpenInFull,
+                            contentDescription = if (isFullScreen) "Collapse player" else "Expand player"
                         )
                     }
                 }
@@ -289,7 +317,10 @@ fun MediaPlayerBottomSheet(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 320.dp, max = 520.dp)
+                                .then(
+                                    if (isFullScreen) Modifier.weight(1f)
+                                    else Modifier.heightIn(min = 320.dp, max = 520.dp)
+                                )
                                 .verticalScroll(rememberScrollState())
                                 .padding(horizontal = 20.dp, vertical = 16.dp)
                         ) {
@@ -337,7 +368,10 @@ fun MediaPlayerBottomSheet(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .heightIn(min = 320.dp, max = 520.dp)
+                                .then(
+                                    if (isFullScreen) Modifier.weight(1f)
+                                    else Modifier.heightIn(min = 320.dp, max = 520.dp)
+                                )
                                 .verticalScroll(rememberScrollState())
                                 .padding(horizontal = 16.dp, vertical = 12.dp)
                         ) {
