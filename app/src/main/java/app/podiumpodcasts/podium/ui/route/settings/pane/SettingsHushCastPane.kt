@@ -417,7 +417,7 @@ fun SettingsHushCastPane(
                                     val pat = newPattern.trim()
                                     newPattern = ""
                                     scope.launch {
-                                        autoMuteDb.dao().upsertRule(
+                                        autoMuteDb.dao().upsertRuleIfNew(
                                             MuteRuleEntity(
                                                 pattern = pat,
                                                 isRegex = isRegex,
@@ -436,38 +436,57 @@ fun SettingsHushCastPane(
                             Text("Treat as Regex", style = MaterialTheme.typography.bodySmall)
                         }
                         Spacer(Modifier.height(6.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = {
-                                scope.launch {
-                                    val entities = PresetDictionaries.profanityRules(selectedActionMode).map {
-                                        MuteRuleEntity(
-                                            pattern = it.pattern,
-                                            isRegex = it.isRegex,
-                                            matchPlurals = it.matchPlurals,
-                                            actionMode = it.actionMode.name,
-                                            category = it.category
-                                        )
-                                    }
-                                    autoMuteDb.dao().upsertRules(entities)
-                                }
-                            }) {
-                                Text("+ Profanity Preset")
+                        val existingKeys = remember(rules) {
+                            rules.map { it.pattern.trim().lowercase() to it.isRegex }.toSet()
+                        }
+                        val profanityAdded = remember(existingKeys) {
+                            PresetDictionaries.profanityRules(selectedActionMode).all {
+                                (it.pattern.trim().lowercase() to it.isRegex) in existingKeys
                             }
-                            OutlinedButton(onClick = {
-                                scope.launch {
-                                    val entities = PresetDictionaries.explicitRules(selectedActionMode).map {
-                                        MuteRuleEntity(
-                                            pattern = it.pattern,
-                                            isRegex = it.isRegex,
-                                            matchPlurals = it.matchPlurals,
-                                            actionMode = it.actionMode.name,
-                                            category = it.category
-                                        )
+                        }
+                        val explicitAdded = remember(existingKeys) {
+                            PresetDictionaries.explicitRules(selectedActionMode).all {
+                                (it.pattern.trim().lowercase() to it.isRegex) in existingKeys
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                enabled = !profanityAdded,
+                                onClick = {
+                                    scope.launch {
+                                        val entities = PresetDictionaries.profanityRules(selectedActionMode).map {
+                                            MuteRuleEntity(
+                                                pattern = it.pattern,
+                                                isRegex = it.isRegex,
+                                                matchPlurals = it.matchPlurals,
+                                                actionMode = it.actionMode.name,
+                                                category = it.category
+                                            )
+                                        }
+                                        autoMuteDb.dao().upsertRulesIfNew(entities)
                                     }
-                                    autoMuteDb.dao().upsertRules(entities)
                                 }
-                            }) {
-                                Text("+ Explicit Preset")
+                            ) {
+                                Text(if (profanityAdded) "Profanity Added" else "+ Profanity Preset")
+                            }
+                            OutlinedButton(
+                                enabled = !explicitAdded,
+                                onClick = {
+                                    scope.launch {
+                                        val entities = PresetDictionaries.explicitRules(selectedActionMode).map {
+                                            MuteRuleEntity(
+                                                pattern = it.pattern,
+                                                isRegex = it.isRegex,
+                                                matchPlurals = it.matchPlurals,
+                                                actionMode = it.actionMode.name,
+                                                category = it.category
+                                            )
+                                        }
+                                        autoMuteDb.dao().upsertRulesIfNew(entities)
+                                    }
+                                }
+                            ) {
+                                Text(if (explicitAdded) "Explicit Added" else "+ Explicit Preset")
                             }
                         }
                     }

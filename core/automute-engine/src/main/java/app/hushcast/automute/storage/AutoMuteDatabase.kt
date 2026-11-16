@@ -146,6 +146,9 @@ interface AutoMuteDao {
     @Query("SELECT * FROM mute_rules ORDER BY category ASC, pattern ASC")
     fun observeRules(): Flow<List<MuteRuleEntity>>
 
+    @Query("SELECT * FROM mute_rules")
+    suspend fun getAllRules(): List<MuteRuleEntity>
+
     @Query("SELECT * FROM mute_rules WHERE enabled = 1")
     suspend fun getEnabledRules(): List<MuteRuleEntity>
 
@@ -157,6 +160,36 @@ interface AutoMuteDao {
 
     @Query("DELETE FROM mute_rules WHERE id = :ruleId")
     suspend fun deleteRule(ruleId: Long)
+
+    @androidx.room.Transaction
+    suspend fun upsertRuleIfNew(rule: MuteRuleEntity): Boolean {
+        return upsertRulesIfNew(listOf(rule)) > 0
+    }
+
+    @androidx.room.Transaction
+    suspend fun upsertRulesIfNew(newRules: List<MuteRuleEntity>): Int {
+        val existing = getAllRules()
+        val seen = HashSet<Pair<String, Boolean>>(existing.size)
+        for (r in existing) {
+            val key = r.pattern.trim().lowercase() to r.isRegex
+            if (!seen.add(key)) {
+                deleteRule(r.id)
+            }
+        }
+        val toInsert = ArrayList<MuteRuleEntity>()
+        for (r in newRules) {
+            val trimmed = r.pattern.trim()
+            if (trimmed.isEmpty()) continue
+            val key = trimmed.lowercase() to r.isRegex
+            if (seen.add(key)) {
+                toInsert.add(r.copy(pattern = trimmed))
+            }
+        }
+        if (toInsert.isNotEmpty()) {
+            upsertRules(toInsert)
+        }
+        return toInsert.size
+    }
 
     @Query("UPDATE mute_rules SET enabled = :enabled WHERE id = :ruleId")
     suspend fun setRuleEnabled(ruleId: Long, enabled: Boolean)

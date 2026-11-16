@@ -10,6 +10,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -285,6 +286,7 @@ fun Main(
             androidx.compose.foundation.layout.Box(
                 modifier = Modifier
                     .align(androidx.compose.ui.Alignment.BottomEnd)
+                    .navigationBarsPadding()
                     .padding(bottom = 8.dp, end = 16.dp)
             ) {
                 FloatingMediaPlayer(

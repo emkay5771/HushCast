@@ -166,12 +166,34 @@ class AutoMuteAnalyzer(
                     isTiny = useFastModel
                 )
                 try {
+                    var lastWhisperPct = 25
                     val output = transcribeWithFeedFallback(
                         transcriber = transcriber,
                         vadPath = paths.sileroVad,
                         pcm = pcm,
                         parsedFeed = parsedFeed
-                    )
+                    ) { wPct ->
+                        val pct = (25 + (wPct * 34) / 100).coerceIn(25, 59)
+                        if (pct > lastWhisperPct) {
+                            lastWhisperPct = pct
+                            onProgress(AnalysisProgress(pct, "Transcribing speech ($pct%)", ReadinessBadge.ANALYZING))
+                            if (pct % 5 == 0 || pct == 59) {
+                                android.util.Log.i("HushCastPerf", "Whisper progress: $wPct% (overall $pct%)")
+                                kotlinx.coroutines.runBlocking {
+                                    dao.upsertStatus(
+                                        EpisodeAnalysisStatusEntity(
+                                            episodeId = episodeId,
+                                            fileSha256 = currentSha,
+                                            badge = ReadinessBadge.ANALYZING.name,
+                                            progressPercent = pct,
+                                            stageLabel = "Transcribing speech",
+                                            peakRssMb = maxOf(peakRssMb, currentRssMb())
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    }
                     words = output.first
                     segments = output.second
                 } finally {
