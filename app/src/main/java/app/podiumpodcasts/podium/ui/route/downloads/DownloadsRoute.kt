@@ -8,7 +8,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -69,6 +71,32 @@ fun DownloadsRoute(
                     Text(stringResource(R.string.route_downloads))
                 },
                 actions = {
+                    if(pager.itemCount > 0) {
+                        val playerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+                        val context = androidx.compose.ui.platform.LocalContext.current
+                        app.podiumpodcasts.podium.ui.component.common.BubbleButton(
+                            icon = androidx.compose.material.icons.Icons.Rounded.PlayArrow,
+                            contentDescription = "Play all"
+                        ) {
+                            val episodes = pager.itemSnapshotList.items
+                                .filter { it.download.state == PodcastEpisodeDownloadState.DOWNLOADED.value }
+                                .map { PodcastEpisodeBundle(it.episode, it.playState, it.download) }
+                            if(episodes.isNotEmpty()) {
+                                playerVm.play(context, episodes.first())
+                                episodes.drop(1).forEach { playerVm.enqueue(context, it) }
+                            }
+                        }
+                        app.podiumpodcasts.podium.ui.component.common.BubbleButton(
+                            icon = androidx.compose.material.icons.Icons.AutoMirrored.Rounded.PlaylistAdd,
+                            contentDescription = "Add all to Up Next"
+                        ) {
+                            pager.itemSnapshotList.items
+                                .filter { it.download.state == PodcastEpisodeDownloadState.DOWNLOADED.value }
+                                .forEach {
+                                    playerVm.enqueue(context, PodcastEpisodeBundle(it.episode, it.playState, it.download))
+                                }
+                        }
+                    }
                     if(totalSize.value > 0L) Surface(
                         Modifier.padding(8.dp),
                         shape = CircleShape,

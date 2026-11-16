@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -72,6 +74,30 @@ fun NewEpisodesRoute(
                 },
                 title = {
                     Text(stringResource(R.string.route_new_episodes))
+                },
+                actions = {
+                    if(newEpisodes.itemCount > 0) {
+                        val playerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+                        val context = androidx.compose.ui.platform.LocalContext.current
+                        app.podiumpodcasts.podium.ui.component.common.BubbleButton(
+                            icon = androidx.compose.material.icons.Icons.Rounded.PlayArrow,
+                            contentDescription = "Play all"
+                        ) {
+                            val episodes = newEpisodes.itemSnapshotList.items
+                            if(episodes.isNotEmpty()) {
+                                playerVm.play(context, episodes.first())
+                                episodes.drop(1).forEach { playerVm.enqueue(context, it) }
+                            }
+                        }
+                        app.podiumpodcasts.podium.ui.component.common.BubbleButton(
+                            icon = androidx.compose.material.icons.Icons.AutoMirrored.Rounded.PlaylistAdd,
+                            contentDescription = "Add all to Up Next"
+                        ) {
+                            newEpisodes.itemSnapshotList.items.forEach {
+                                playerVm.enqueue(context, it)
+                            }
+                        }
+                    }
                 }
             )
         }

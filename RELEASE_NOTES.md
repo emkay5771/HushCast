@@ -1,3 +1,22 @@
+## What's New in v0.1.5-hushcast
+
+### 🐛 Critical Crash Fixes
+- **Fixed Stream-to-Download & Background Analysis Crash**: Resolved an `IllegalStateException` (`Player callback method is called from a wrong thread`) in `PlaybackService` when a download completed during playback or active AI analysis by dispatching player mutations onto `Dispatchers.Main`.
+
+### ⚡ Performance & APK Size (**190 MB → 72 MB**)
+- **62% Smaller APK**: Filtered native packaging to `arm64-v8a` (removing 55 MB of unused `x86`/`x86_64`/`armeabi-v7a` binaries) and enabled `--gc-sections` + `--strip-debug` for `libhushcast_llama.so` (52 MB → 5.0 MB) and `libhushcast_whisper.so` (15 MB → 1.4 MB).
+- **Faster Audio Decoding & Feature Extraction**:
+  - Vectorized `Resampler` inner loop in `Float` and reused scratch buffers to eliminate ~300k+ per-frame allocations per hour.
+  - Cascaded 24 kHz → 16 kHz resampling for Whisper and moved `FrameExtractor` (FFTs, cepstrum, K-weighting) to a concurrent worker thread.
+  - Smooth `70% → 89%` progress updates during Qwen3 sentence embedding.
+
+### 🎙️ Pocket Casts-Style Home, Playlists & Settings
+- **Home Podcasts Grid**: Replaced the single-row home carousel with a full Pocket Casts-style Podcasts Grid (**Large Grid**, **Small Grid**, **List**), **Recently Added** / **A–Z** sorting, **Count** / **Dot** / **Off** badges, a **Tune** options sheet, and a compact **Continue Playing** card at the top.
+- **Play All & Add All to Up Next**: Added **Play All** and **Add All to Up Next** actions in the top bar of **Playlists**, **New Episodes**, **Downloads**, and **Continue Playing**.
+- **Global Default Playback Speed & Storage Cleanup**: Added **Default playback speed** (`0.5x–3.0x`) in **Settings → Playback** and **Clean up downloaded episodes** in **Settings → Downloads & Storage**.
+
+---
+
 ## What's New in v0.1.4-hushcast
 
 ### 🎙️ Pocket Casts-Inspired UX (Material 3 Expressive)

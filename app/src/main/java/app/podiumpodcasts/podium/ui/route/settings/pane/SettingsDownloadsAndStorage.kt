@@ -260,7 +260,71 @@ fun SettingsDownloadsAndStoragePane(
                     },
 
                     index = 1,
-                    count = 2
+                    count = 3
+                )
+            }
+
+            item {
+                val totalSize = db.podcastEpisodeDownloads().totalSize().collectAsState(0L)
+                val showConfirm = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+                if(showConfirm.value) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { showConfirm.value = false },
+                        title = { Text("Clean up all downloads?") },
+                        text = {
+                            Text("This will delete all downloaded episode audio files (${app.podiumpodcasts.podium.ui.formatFileSize(totalSize.value)}) from your device.")
+                        },
+                        confirmButton = {
+                            androidx.compose.material3.TextButton(
+                                onClick = {
+                                    showConfirm.value = false
+                                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                        db.podcastEpisodeDownloads().allRandomSync().forEach { bundle ->
+                                            app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
+                                                context = context,
+                                                db = db,
+                                                episode = bundle.episode
+                                            )
+                                        }
+                                    }
+                                }
+                            ) {
+                                Text("Delete all")
+                            }
+                        },
+                        dismissButton = {
+                            androidx.compose.material3.TextButton(onClick = { showConfirm.value = false }) {
+                                Text("Cancel")
+                            }
+                        }
+                    )
+                }
+
+                androidx.compose.material3.SegmentedListItem(
+                    shapes = ListItemDefaults.segmentedShapes(
+                        index = 2,
+                        count = 3
+                    ),
+                    leadingContent = {
+                        Icon(
+                            Icons.Rounded.CleaningServices,
+                            "Clean up downloaded episodes"
+                        )
+                    },
+                    content = {
+                        Text("Clean up downloaded episodes")
+                    },
+                    supportingContent = {
+                        Text(
+                            if(totalSize.value > 0L)
+                                "${app.podiumpodcasts.podium.ui.formatFileSize(totalSize.value)} currently used"
+                            else
+                                "No downloaded episodes"
+                        )
+                    },
+                    enabled = totalSize.value > 0L,
+                    onClick = { showConfirm.value = true }
                 )
             }
         }

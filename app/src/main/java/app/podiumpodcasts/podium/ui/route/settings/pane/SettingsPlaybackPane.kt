@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -103,7 +104,7 @@ fun SettingsPlaybackPane(
                     },
 
                     index = 0,
-                    count = 3
+                    count = 4
                 )
             }
 
@@ -137,7 +138,7 @@ fun SettingsPlaybackPane(
                     },
 
                     index = 1,
-                    count = 3
+                    count = 4
                 )
             }
 
@@ -160,7 +161,38 @@ fun SettingsPlaybackPane(
                     label = "Tap Up Next to play",
                     description = "Tapping a queued episode plays it immediately instead of opening episode details",
                     index = 2,
-                    count = 3
+                    count = 4
+                )
+            }
+
+            item {
+                val savedSpeed = vm.repository.behavior.playerPlaybackSpeed.collectAsState(1f)
+                val speed = remember { mutableStateOf(1f) }
+                LaunchedEffect(savedSpeed.value) { speed.value = savedSpeed.value }
+
+                app.podiumpodcasts.podium.ui.component.settings.SettingsSliderListItem(
+                    icon = {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Rounded.Speed,
+                            "Default playback speed"
+                        )
+                    },
+                    label = "Default playback speed",
+                    value = speed.value,
+                    onValueChange = { speed.value = (kotlin.math.round(it * 10f) / 10f).coerceIn(0.5f, 3.0f) },
+                    valueRange = 0.5f..3.0f,
+                    steps = 24,
+                    onValueChangeFinished = {
+                        scope.launch {
+                            vm.repository.behavior.setPlayerPlaybackSpeed(speed.value)
+                            mediaPlayerViewModel.setPlaybackSpeed(speed.value)
+                        }
+                    },
+                    supportingContent = {
+                        Text("${String.format(java.util.Locale.US, "%.1f", speed.value)}x")
+                    },
+                    index = 3,
+                    count = 4
                 )
             }
         }

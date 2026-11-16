@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.DoneAll
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -74,6 +76,29 @@ fun ContinuePlayingRoute(
                 },
                 title = {
                     Text(stringResource(R.string.route_continue_playing))
+                },
+                actions = {
+                    if(continuePlaying.itemCount > 0) {
+                        val playerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+                        app.podiumpodcasts.podium.ui.component.common.BubbleButton(
+                            icon = androidx.compose.material.icons.Icons.Rounded.PlayArrow,
+                            contentDescription = "Play all"
+                        ) {
+                            val episodes = continuePlaying.itemSnapshotList.items.map { it.toPodcastEpisodeBundle() }
+                            if(episodes.isNotEmpty()) {
+                                playerVm.play(context, episodes.first())
+                                episodes.drop(1).forEach { playerVm.enqueue(context, it) }
+                            }
+                        }
+                        app.podiumpodcasts.podium.ui.component.common.BubbleButton(
+                            icon = androidx.compose.material.icons.Icons.AutoMirrored.Rounded.PlaylistAdd,
+                            contentDescription = "Add all to Up Next"
+                        ) {
+                            continuePlaying.itemSnapshotList.items.forEach {
+                                playerVm.enqueue(context, it.toPodcastEpisodeBundle())
+                            }
+                        }
+                    }
                 }
             )
         }
