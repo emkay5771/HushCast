@@ -78,9 +78,32 @@ def main() -> None:
     )
     parser.add_argument("--token", default=None, help="Override pairing token")
     parser.add_argument("--no-mdns", action="store_true", help="Disable Bonjour/mDNS broadcast")
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="Delete all cached episodes, bundles, and embeddings in <data-dir>/cache and exit",
+    )
+    parser.add_argument(
+        "--clear-audio-cache",
+        action="store_true",
+        help="Delete only cached .audio files in <data-dir>/cache (keeps transcripts/bundles) and exit",
+    )
     args = parser.parse_args()
 
     args.data_dir.mkdir(parents=True, exist_ok=True)
+    cache = WorkerCache(args.data_dir / "cache")
+
+    if args.clear_cache or args.clear_audio_cache:
+        audio_only = bool(args.clear_audio_cache and not args.clear_cache)
+        stats = cache.clear(audio_only=audio_only)
+        freed_mb = stats["freedBytes"] / (1024 * 1024)
+        mode = "audio-only" if audio_only else "full"
+        print(
+            f"Cleared {mode} cache in {cache.root_dir}: "
+            f"{stats['removedFiles']} file(s) removed, {freed_mb:.2f} MB freed."
+        )
+        return
+
     token = _load_or_create_token(args.data_dir, args.token)
 
     repo_onnx = (
@@ -94,7 +117,6 @@ def main() -> None:
     )
     onnx_path = args.ad_tagger_onnx or (repo_onnx if repo_onnx.exists() else None)
 
-    cache = WorkerCache(args.data_dir / "cache")
     backend = LocalMlBackend(args.data_dir / "models", ad_tagger_onnx=onnx_path)
     app = create_app(cache=cache, backend=backend, token=token)
 

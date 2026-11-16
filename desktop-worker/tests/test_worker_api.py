@@ -192,3 +192,18 @@ def test_job_lifecycle_auth_and_sha256_serving(tmp_path: Path) -> None:
         assert eps.status_code == 200
         assert len(eps.json()) == 1
         assert eps.json()[0]["fileSha256"] == expected_sha
+
+        # Clear audio-only cache (keeps bundle/embeddings, removes .audio)
+        clear_audio = client.delete("/v1/cache?audio_only=true", headers=headers)
+        assert clear_audio.status_code == 200
+        assert clear_audio.json()["removedFiles"] == 1
+        assert clear_audio.json()["freedBytes"] == len(payload)
+        assert client.get(f"/v1/episodes/{expected_sha}/bundle", headers=headers).status_code == 200
+        assert client.get(f"/v1/episodes/{expected_sha}/audio", headers=headers).status_code == 404
+
+        # Clear full cache
+        clear_all = client.delete("/v1/cache", headers=headers)
+        assert clear_all.status_code == 200
+        assert clear_all.json()["removedFiles"] >= 1
+        assert client.get("/v1/episodes", headers=headers).json() == []
+

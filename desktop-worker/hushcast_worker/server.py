@@ -275,4 +275,11 @@ def create_app(
         hits = cache.semantic_search(query_vec, top_k=req.topK)
         return DesktopSearchResponse(query=req.query, hits=hits)
 
+    @app.delete(
+        "/v1/cache",
+        dependencies=[Depends(verify_auth)],
+    )
+    async def clear_cache(audio_only: bool = False) -> dict[str, int]:
+        return cache.clear(audio_only=audio_only)
+
     return app

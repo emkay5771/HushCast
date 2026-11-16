@@ -165,3 +165,30 @@ class WorkerCache:
             )
         out.sort(key=lambda e: e.createdAtMs, reverse=True)
         return out
+
+    def clear(self, *, audio_only: bool = False) -> dict[str, int]:
+        removed_files = 0
+        freed_bytes = 0
+
+        for directory in (self.episodes_dir, self.tmp_dir):
+            if not directory.exists():
+                continue
+            for entry in directory.iterdir():
+                if not entry.is_file():
+                    continue
+                if audio_only and directory == self.episodes_dir and entry.suffix != ".audio":
+                    continue
+                try:
+                    size = entry.stat().st_size
+                except OSError:
+                    size = 0
+                entry.unlink(missing_ok=True)
+                removed_files += 1
+                freed_bytes += size
+
+        if not audio_only:
+            self._index = {"by_url": {}, "by_sha": {}}
+            self._save_index()
+
+        return {"removedFiles": removed_files, "freedBytes": freed_bytes}
+
