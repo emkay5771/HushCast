@@ -4,6 +4,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -194,7 +196,8 @@ fun AnnotatedScrubberOverlay(
 
 /**
  * Single unified playback scrubber that renders played progress, ad-skip windows,
- * and word-mute ticks directly on the slider track.
+ * and word-mute ticks directly on the slider track, with vertical-drag fine scrubbing,
+ * haptic sponsor-boundary ticks, and a zoomed ±90s mini-timeline callout.
  */
 @Composable
 fun AnnotatedPlaybackSlider(
@@ -209,65 +212,315 @@ fun AnnotatedPlaybackSlider(
     val activeTrackColor = MaterialTheme.colorScheme.primary
     val inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
     val adColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.85f)
+    val activeAdColor = MaterialTheme.colorScheme.tertiary
     val suggestedAdColor = Color(0xFFFFB300).copy(alpha = 0.85f)
     val muteTickColor = MaterialTheme.colorScheme.error
+    val thumbDefaultColor = MaterialTheme.colorScheme.primary
+    val thumbAdColor = MaterialTheme.colorScheme.tertiary
+    val thumbBorderColor = MaterialTheme.colorScheme.surface
 
-    Box(
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    var isDragging by remember { mutableStateOf(false) }
+    var scrubSpeed by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
+
+    val clampedVal = value.coerceIn(0f, 1f)
+    val currentPosMs = if (durationMs > 0L) (clampedVal * durationMs).toLong() else 0L
+    val activeAd = remember(currentPosMs, adWindows) {
+        if (durationMs <= 0L) null
+        else adWindows.firstOrNull { currentPosMs in it.startMs..it.endMs }
+    }
+    val activeMute = remember(currentPosMs, muteWindows) {
+        if (durationMs <= 0L) null
+        else muteWindows.firstOrNull { it.enabled && kotlin.math.abs(currentPosMs - it.startMs) <= 1500L }
+    }
+
+    LaunchedEffect(isDragging, activeAd?.startMs) {
+        if (isDragging) {
+            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+        }
+    }
+
+    val trackHeight by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (isDragging) 14.dp else 8.dp,
+        animationSpec = androidx.compose.animation.core.spring(
+            stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow
+        ),
+        label = "trackHeight"
+    )
+
+    val latestOnValueChange by androidx.compose.runtime.rememberUpdatedState(onValueChange)
+    val latestOnValueChangeFinished by androidx.compose.runtime.rememberUpdatedState(onValueChangeFinished)
+
+    Column(
         modifier = modifier.fillMaxWidth(),
-        contentAlignment = Alignment.Center
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp)
-                .height(8.dp)
-                .clip(RoundedCornerShape(4.dp))
+        androidx.compose.animation.AnimatedVisibility(
+            visible = isDragging || activeAd != null,
+            enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(),
+            exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically()
         ) {
-            val w = size.width
-            val h = size.height
-            val clampedVal = value.coerceIn(0f, 1f)
-
-            drawRect(color = inactiveTrackColor, size = Size(w, h))
-            if (clampedVal > 0f) {
-                drawRect(color = activeTrackColor, size = Size(w * clampedVal, h))
+            val pillBg = if (activeAd != null) {
+                MaterialTheme.colorScheme.tertiaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerHighest
+            }
+            val pillFg = if (activeAd != null) {
+                MaterialTheme.colorScheme.onTertiaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurface
             }
 
-            if (durationMs > 0L) {
-                val dur = durationMs.toFloat().coerceAtLeast(1f)
-                for (ad in adWindows) {
-                    val x0 = (ad.startMs / dur).coerceIn(0f, 1f) * w
-                    val x1 = (ad.endMs / dur).coerceIn(0f, 1f) * w
-                    drawRect(
-                        color = if (ad.isHighConfidence) adColor else suggestedAdColor,
-                        topLeft = Offset(x0, 0f),
-                        size = Size((x1 - x0).coerceAtLeast(4f), h)
-                    )
-                }
-                for (mute in muteWindows) {
-                    if (!mute.enabled) continue
-                    val x = (mute.startMs / dur).coerceIn(0f, 1f) * w
-                    drawRect(
-                        color = muteTickColor,
-                        topLeft = Offset(x, 0f),
-                        size = Size(3f, h)
-                    )
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = pillBg,
+                contentColor = pillFg
+            ) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = formatScrubTimeMs(currentPosMs),
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (activeAd != null) {
+                                Text(
+                                    text = "• ${if (activeAd.isHighConfidence) "Sponsor" else "Suggested Ad"} (${formatScrubTimeMs(activeAd.startMs)}–${formatScrubTimeMs(activeAd.endMs)})",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1
+                                )
+                            } else if (activeMute != null) {
+                                Text(
+                                    text = "• Muted: ${activeMute.word}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        if (isDragging) {
+                            val speedLabel = when {
+                                scrubSpeed <= 0.15f -> "Fine 1/10x"
+                                scrubSpeed <= 0.25f -> "Fine 1/5x"
+                                scrubSpeed <= 0.55f -> "Fine ½x"
+                                else -> "Drag ↓ for fine"
+                            }
+                            Text(
+                                text = speedLabel,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = pillFg.copy(alpha = 0.78f)
+                            )
+                        }
+                    }
+
+                    // Zoomed ±90s mini-timeline around the current scrub position
+                    if (isDragging && durationMs > 0L) {
+                        val windowHalfMs = 90_000L
+                        val winStart = currentPosMs - windowHalfMs
+                        val winSpan = (windowHalfMs * 2L).toFloat()
+                        val zoomTrackBg = pillFg.copy(alpha = 0.15f)
+                        val zoomCursorColor = pillFg
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                        ) {
+                            val w = size.width
+                            val h = size.height
+                            drawRect(color = zoomTrackBg, size = Size(w, h))
+
+                            for (ad in adWindows) {
+                                if (ad.endMs < winStart || ad.startMs > winStart + windowHalfMs * 2L) continue
+                                val x0 = ((ad.startMs - winStart) / winSpan).coerceIn(0f, 1f) * w
+                                val x1 = ((ad.endMs - winStart) / winSpan).coerceIn(0f, 1f) * w
+                                drawRect(
+                                    color = if (ad.isHighConfidence) activeAdColor else suggestedAdColor,
+                                    topLeft = Offset(x0, 0f),
+                                    size = Size((x1 - x0).coerceAtLeast(3f), h)
+                                )
+                            }
+                            for (mute in muteWindows) {
+                                if (!mute.enabled) continue
+                                if (mute.startMs < winStart || mute.startMs > winStart + windowHalfMs * 2L) continue
+                                val x = ((mute.startMs - winStart) / winSpan).coerceIn(0f, 1f) * w
+                                drawRect(
+                                    color = muteTickColor,
+                                    topLeft = Offset(x - 1.5f, 0f),
+                                    size = Size(3f, h)
+                                )
+                            }
+                            // Center cursor needle
+                            drawRect(
+                                color = zoomCursorColor,
+                                topLeft = Offset(w * 0.5f - 1.5f, 0f),
+                                size = Size(3f, h)
+                            )
+                        }
+                    }
                 }
             }
         }
 
-        androidx.compose.material3.Slider(
-            modifier = Modifier.fillMaxWidth(),
-            value = value.coerceIn(0f, 1f),
-            onValueChange = onValueChange,
-            onValueChangeFinished = onValueChangeFinished,
-            colors = androidx.compose.material3.SliderDefaults.colors(
-                activeTrackColor = Color.Transparent,
-                inactiveTrackColor = Color.Transparent,
-                disabledActiveTrackColor = Color.Transparent,
-                disabledInactiveTrackColor = Color.Transparent
-            )
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp)
+                .pointerInput(durationMs) {
+                    val width = size.width.toFloat().coerceAtLeast(1f)
+                    val threshold1 = 36.dp.toPx()
+                    val threshold2 = 76.dp.toPx()
+                    val threshold3 = 120.dp.toPx()
+                    val edgePad = 10.dp.toPx()
+                    val trackW = (width - edgePad * 2f).coerceAtLeast(1f)
+
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        down.consume()
+                        isDragging = true
+                        scrubSpeed = 1f
+                        var currentFrac = ((down.position.x - edgePad) / trackW).coerceIn(0f, 1f)
+                        latestOnValueChange(currentFrac)
+
+                        var lastX = down.position.x
+                        val startY = down.position.y
+
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                                ?: event.changes.firstOrNull()
+                                ?: break
+
+                            if (!change.pressed) {
+                                change.consume()
+                                break
+                            }
+
+                            val dy = kotlin.math.abs(change.position.y - startY)
+                            val speed = when {
+                                dy >= threshold3 -> 0.1f
+                                dy >= threshold2 -> 0.2f
+                                dy >= threshold1 -> 0.5f
+                                else -> 1.0f
+                            }
+                            scrubSpeed = speed
+
+                            val dx = change.position.x - lastX
+                            lastX = change.position.x
+                            if (dx != 0f) {
+                                currentFrac = (currentFrac + (dx / trackW) * speed).coerceIn(0f, 1f)
+                                latestOnValueChange(currentFrac)
+                            }
+                            change.consume()
+                        }
+
+                        isDragging = false
+                        scrubSpeed = 1f
+                        latestOnValueChangeFinished()
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp)
+                    .height(trackHeight)
+                    .clip(RoundedCornerShape(7.dp))
+            ) {
+                val w = size.width
+                val h = size.height
+
+                drawRect(color = inactiveTrackColor, size = Size(w, h))
+                if (clampedVal > 0f) {
+                    drawRect(color = activeTrackColor, size = Size(w * clampedVal, h))
+                }
+
+                if (durationMs > 0L) {
+                    val dur = durationMs.toFloat().coerceAtLeast(1f)
+                    for (ad in adWindows) {
+                        val x0 = (ad.startMs / dur).coerceIn(0f, 1f) * w
+                        val x1 = (ad.endMs / dur).coerceIn(0f, 1f) * w
+                        val isActive = activeAd != null && activeAd.startMs == ad.startMs
+                        val color = when {
+                            isActive -> activeAdColor
+                            ad.isHighConfidence -> adColor
+                            else -> suggestedAdColor
+                        }
+                        drawRect(
+                            color = color,
+                            topLeft = Offset(x0, 0f),
+                            size = Size((x1 - x0).coerceAtLeast(5f), h)
+                        )
+                        if (isActive) {
+                            drawRect(
+                                color = thumbBorderColor,
+                                topLeft = Offset(x0, 0f),
+                                size = Size((x1 - x0).coerceAtLeast(5f), 2.dp.toPx())
+                            )
+                        }
+                    }
+                    for (mute in muteWindows) {
+                        if (!mute.enabled) continue
+                        val x = (mute.startMs / dur).coerceIn(0f, 1f) * w
+                        drawRect(
+                            color = muteTickColor,
+                            topLeft = Offset(x, 0f),
+                            size = Size(3f, h)
+                        )
+                    }
+                }
+            }
+
+            // Crisp pill thumb needle so the exact position & sponsor overlap remain visible
+            Canvas(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp)
+                    .height(28.dp)
+            ) {
+                val thumbX = clampedVal * size.width
+                val thumbW = if (isDragging) 6.dp.toPx() else 4.dp.toPx()
+                val thumbH = if (isDragging) 26.dp.toPx() else 20.dp.toPx()
+                val topY = (size.height - thumbH) / 2f
+                val corner = androidx.compose.ui.geometry.CornerRadius(thumbW / 2f, thumbW / 2f)
+                drawRoundRect(
+                    color = thumbBorderColor,
+                    topLeft = Offset(thumbX - thumbW / 2f - 1.5.dp.toPx(), topY - 1.5.dp.toPx()),
+                    size = Size(thumbW + 3.dp.toPx(), thumbH + 3.dp.toPx()),
+                    cornerRadius = corner
+                )
+                drawRoundRect(
+                    color = if (activeAd != null) thumbAdColor else thumbDefaultColor,
+                    topLeft = Offset(thumbX - thumbW / 2f, topY),
+                    size = Size(thumbW, thumbH),
+                    cornerRadius = corner
+                )
+            }
+        }
     }
+}
+
+private fun formatScrubTimeMs(ms: Long): String {
+    val totalSec = (ms.coerceAtLeast(0L)) / 1000L
+    val h = totalSec / 3600L
+    val m = (totalSec % 3600L) / 60L
+    val s = totalSec % 60L
+    return if (h > 0L) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
 
 @Composable

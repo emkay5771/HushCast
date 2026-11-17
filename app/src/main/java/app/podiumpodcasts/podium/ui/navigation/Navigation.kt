@@ -5,10 +5,15 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
@@ -100,6 +105,9 @@ fun Navigation(
     }
 
     NavDisplay(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
         backStack = backStack,
         onBack = onBack,
         entryDecorators = listOf(
@@ -111,20 +119,24 @@ fun Navigation(
                 .togetherWith(fadeOut(animationSpec = tween(150)))
         },
         popTransitionSpec = {
-            (fadeIn(animationSpec = tween(180)) +
-                    scaleIn(initialScale = 0.96f, animationSpec = tween(180)))
+            (fadeIn(initialAlpha = 0.85f, animationSpec = tween(180)) +
+                    slideInHorizontally(animationSpec = tween(180)) { -it / 12 })
                 .togetherWith(
-                    fadeOut(animationSpec = tween(150)) +
-                            scaleOut(targetScale = 0.92f, animationSpec = tween(150))
-                )
+                    fadeOut(animationSpec = tween(180)) +
+                            scaleOut(targetScale = 0.90f, animationSpec = tween(180))
+                ).apply {
+                    targetContentZIndex = -1f
+                }
         },
         predictivePopTransitionSpec = {
-            (fadeIn(animationSpec = tween(180)) +
-                    scaleIn(initialScale = 0.96f, animationSpec = tween(180)))
+            (fadeIn(initialAlpha = 0.85f, animationSpec = tween(180)) +
+                    slideInHorizontally(animationSpec = tween(180)) { -it / 12 })
                 .togetherWith(
-                    fadeOut(animationSpec = tween(150)) +
-                            scaleOut(targetScale = 0.92f, animationSpec = tween(150))
-                )
+                    fadeOut(animationSpec = tween(180)) +
+                            scaleOut(targetScale = 0.90f, animationSpec = tween(180))
+                ).apply {
+                    targetContentZIndex = -1f
+                }
         },
         entryProvider = { key ->
             when(key) {

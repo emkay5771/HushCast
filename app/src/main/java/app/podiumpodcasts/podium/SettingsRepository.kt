@@ -23,6 +23,26 @@ enum class AppThemeMode {
     DARK
 }
 
+enum class AppDarkThemeStyle(val label: String) {
+    DEFAULT("Default"),
+    DIM("Dim"),
+    AMOLED("AMOLED Black"),
+    MIDNIGHT("Midnight"),
+    WARM_DARK("Warm"),
+    FOREST("Forest")
+}
+
+enum class AppColorPalette(val label: String, val seedColorHex: Long) {
+    DEFAULT("Purple", 0xFF6750A4),
+    INDIGO("Indigo", 0xFF3F51B5),
+    OCEAN("Ocean", 0xFF0277BD),
+    TEAL("Teal", 0xFF00796B),
+    EMERALD("Emerald", 0xFF2E7D32),
+    AMBER("Amber", 0xFFEF6C00),
+    CORAL("Coral", 0xFFD84315),
+    ROSE("Rose", 0xFFC2185B)
+}
+
 enum class SubscriptionsLayout {
     LARGE_GRID,
     SMALL_GRID,
@@ -85,6 +105,8 @@ enum class PlayerToolbarAction(val label: String) {
 
 object SettingsKeys {
     val APPEARANCE_THEME_MODE = stringPreferencesKey("appearance_theme_mode")
+    val APPEARANCE_DARK_THEME_STYLE = stringPreferencesKey("appearance_dark_theme_style")
+    val APPEARANCE_COLOR_PALETTE = stringPreferencesKey("appearance_color_palette")
     val APPEARANCE_ENABLE_ARTWORK_COLORS = booleanPreferencesKey("appearance_enable_artwork_colors")
     val APPEARANCE_ENABLE_DYNAMIC_COLORS = booleanPreferencesKey("appearance_enable_dynamic_colors")
     val APPEARANCE_USE_ALTERNATIVE_BRANDING =
@@ -194,6 +216,28 @@ class SettingsRepository(val context: Context) {
 
         suspend fun setThemeMode(mode: AppThemeMode) = dataStore.edit { preferences ->
             preferences[SettingsKeys.APPEARANCE_THEME_MODE] = mode.name
+        }
+
+        val darkThemeStyle: Flow<AppDarkThemeStyle> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.APPEARANCE_DARK_THEME_STYLE]
+                runCatching { raw?.let { AppDarkThemeStyle.valueOf(it) } }.getOrNull()
+                    ?: AppDarkThemeStyle.DEFAULT
+            }
+
+        suspend fun setDarkThemeStyle(style: AppDarkThemeStyle) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_DARK_THEME_STYLE] = style.name
+        }
+
+        val colorPalette: Flow<AppColorPalette> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.APPEARANCE_COLOR_PALETTE]
+                runCatching { raw?.let { AppColorPalette.valueOf(it) } }.getOrNull()
+                    ?: AppColorPalette.DEFAULT
+            }
+
+        suspend fun setColorPalette(palette: AppColorPalette) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_COLOR_PALETTE] = palette.name
         }
 
         val enableArtworkColors: Flow<Boolean> = dataStore.data

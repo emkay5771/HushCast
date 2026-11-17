@@ -881,6 +881,11 @@ fun SettingsHushCastPane(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.End
                             ) {
+                                androidx.compose.material3.TextButton(onClick = {
+                                    HushCastEngineBridge.playSponsorSkipIndicator(context, forceTest = true)
+                                }) {
+                                    Text("Test chime")
+                                }
                                 androidx.compose.material3.TextButton(onClick = { skipSoundPicker.launch(arrayOf("audio/*")) }) {
                                     Text(if (sponsorSkipSoundUri != null) "Change sound" else "Custom sound")
                                 }

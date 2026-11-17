@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Colorize
@@ -75,13 +76,22 @@ fun SettingsAppearancePane(
                 val themeMode = vm.repository.appearance.themeMode.collectAsState(
                     AppThemeMode.AUTO
                 )
+                val darkThemeStyle = vm.repository.appearance.darkThemeStyle.collectAsState(
+                    app.podiumpodcasts.podium.AppDarkThemeStyle.DEFAULT
+                )
+                val colorPalette = vm.repository.appearance.colorPalette.collectAsState(
+                    app.podiumpodcasts.podium.AppColorPalette.DEFAULT
+                )
+                val enableDynamicColors =
+                    vm.repository.appearance.enableDynamicColors.collectAsState(true)
+
                 androidx.compose.foundation.layout.Column(
-                    modifier = Modifier.padding(bottom = 8.dp)
+                    modifier = Modifier.padding(bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
                         text = "Theme",
-                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(bottom = 8.dp)
+                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium
                     )
                     SingleChoiceSegmentedButtonRow(
                         modifier = Modifier.fillMaxSize()
@@ -105,6 +115,86 @@ fun SettingsAppearancePane(
                                 )
                             ) {
                                 Text(label)
+                            }
+                        }
+                    }
+
+                    if (themeMode.value != AppThemeMode.LIGHT) {
+                        Text(
+                            text = "Dark surface style",
+                            style = androidx.compose.material3.MaterialTheme.typography.titleSmall,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                        androidx.compose.foundation.layout.FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val swatchMap = mapOf(
+                                app.podiumpodcasts.podium.AppDarkThemeStyle.DEFAULT to androidx.compose.ui.graphics.Color(0xFF141218),
+                                app.podiumpodcasts.podium.AppDarkThemeStyle.DIM to androidx.compose.ui.graphics.Color(0xFF191D24),
+                                app.podiumpodcasts.podium.AppDarkThemeStyle.AMOLED to androidx.compose.ui.graphics.Color(0xFF000000),
+                                app.podiumpodcasts.podium.AppDarkThemeStyle.MIDNIGHT to androidx.compose.ui.graphics.Color(0xFF0B111E),
+                                app.podiumpodcasts.podium.AppDarkThemeStyle.WARM_DARK to androidx.compose.ui.graphics.Color(0xFF1A1614),
+                                app.podiumpodcasts.podium.AppDarkThemeStyle.FOREST to androidx.compose.ui.graphics.Color(0xFF0E1813)
+                            )
+                            app.podiumpodcasts.podium.AppDarkThemeStyle.entries.forEach { style ->
+                                androidx.compose.material3.FilterChip(
+                                    selected = darkThemeStyle.value == style,
+                                    onClick = {
+                                        scope.launch {
+                                            vm.repository.appearance.setDarkThemeStyle(style)
+                                        }
+                                    },
+                                    leadingIcon = {
+                                        androidx.compose.foundation.Canvas(
+                                            modifier = Modifier.size(14.dp)
+                                        ) {
+                                            drawCircle(
+                                                color = swatchMap[style] ?: androidx.compose.ui.graphics.Color.Black
+                                            )
+                                            drawCircle(
+                                                color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.35f),
+                                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1.5f)
+                                            )
+                                        }
+                                    },
+                                    label = { Text(style.label) }
+                                )
+                            }
+                        }
+                    }
+
+                    if (!enableDynamicColors.value) {
+                        Text(
+                            text = "Color palette",
+                            style = androidx.compose.material3.MaterialTheme.typography.titleSmall,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                        androidx.compose.foundation.layout.FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            app.podiumpodcasts.podium.AppColorPalette.entries.forEach { palette ->
+                                androidx.compose.material3.FilterChip(
+                                    selected = colorPalette.value == palette,
+                                    onClick = {
+                                        scope.launch {
+                                            vm.repository.appearance.setColorPalette(palette)
+                                        }
+                                    },
+                                    leadingIcon = {
+                                        androidx.compose.foundation.Canvas(
+                                            modifier = Modifier.size(14.dp)
+                                        ) {
+                                            drawCircle(
+                                                color = androidx.compose.ui.graphics.Color(palette.seedColorHex)
+                                            )
+                                        }
+                                    },
+                                    label = { Text(palette.label) }
+                                )
                             }
                         }
                     }

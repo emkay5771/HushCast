@@ -8,6 +8,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -105,7 +106,12 @@ sealed class DetailPaneKey : Parcelable {
 val enterSpec = fadeIn(animationSpec = tween(180)) +
         scaleIn(initialScale = 0.96f, animationSpec = tween(180))
 
+val listEnterSpec = fadeIn(initialAlpha = 0.85f, animationSpec = tween(180))
+
 val exitSpec = fadeOut(animationSpec = tween(150))
+
+val detailExitSpec = fadeOut(animationSpec = tween(180)) +
+        androidx.compose.animation.scaleOut(targetScale = 0.92f, animationSpec = tween(180))
 
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
@@ -239,7 +245,11 @@ fun Main(
         },
         currentNavKey = { backStack.last() }
     ) {
-        androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+        androidx.compose.foundation.layout.Box(
+            Modifier
+                .fillMaxSize()
+                .background(androidx.compose.material3.MaterialTheme.colorScheme.background)
+        ) {
             CompositionLocalProvider(
                 LocalFloatingMediaPlayerHeight provides (FloatingMediaPlayerHeight + 8.dp)
                         * floatingMediaPlayerHeightAnimation.value,
@@ -250,7 +260,7 @@ fun Main(
                     navigator = listDetailNavigator,
                     listPane = {
                         AnimatedPane(
-                            enterTransition = enterSpec,
+                            enterTransition = listEnterSpec,
                             exitTransition = exitSpec
                         ) {
                             Navigation(
@@ -432,50 +442,32 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
         .collectAsState(true)
 
     val scope = rememberCoroutineScope()
-    val backProgress = remember { androidx.compose.animation.core.Animatable(0f) }
-    val backSwipeEdge = remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val handleDetailBack = scaffoldNavigator.canNavigateBack(BackNavigationBehavior.PopLatest) &&
         backStack.size > 1
 
     androidx.activity.compose.PredictiveBackHandler(enabled = handleDetailBack) { progress ->
+        val contentKey = scaffoldNavigator.currentDestination?.contentKey
+        val behavior = if (contentKey is DetailPaneKey.SettingsKey) {
+            BackNavigationBehavior.PopUntilScaffoldValueChange
+        } else {
+            BackNavigationBehavior.PopLatest
+        }
         try {
             progress.collect { event ->
-                backSwipeEdge.intValue = event.swipeEdge
-                backProgress.snapTo(event.progress)
-            }
-            backProgress.snapTo(0f)
-            val contentKey = scaffoldNavigator.currentDestination?.contentKey
-            val behavior = if (contentKey is DetailPaneKey.SettingsKey) {
-                BackNavigationBehavior.PopUntilScaffoldValueChange
-            } else {
-                BackNavigationBehavior.PopLatest
+                scaffoldNavigator.seekBack(behavior, fraction = event.progress)
             }
             scaffoldNavigator.navigateBack(behavior)
         } catch (_: kotlinx.coroutines.CancellationException) {
-            backProgress.animateTo(0f)
+            scaffoldNavigator.seekBack(behavior, fraction = 0f)
         }
-    }
-
-    val predictiveModifier = if (backProgress.value > 0f) {
-        Modifier.graphicsLayer {
-            val p = backProgress.value
-            val scale = 1f - 0.08f * p
-            scaleX = scale
-            scaleY = scale
-            val dir = if (backSwipeEdge.intValue == 0) 1f else -1f
-            translationX = dir * size.width * 0.05f * p
-        }
-    } else {
-        Modifier
     }
 
     scaffoldNavigator.currentDestination?.contentKey?.let { contentKey ->
-        androidx.compose.foundation.layout.Box(modifier = predictiveModifier) {
         when(contentKey) {
             is DetailPaneKey.SettingsKey -> {
                 AnimatedPane(
                     enterTransition = enterSpec,
-                    exitTransition = exitSpec
+                    exitTransition = detailExitSpec
                 ) {
                     SettingsPane(
                         showBackButton = scaffoldNavigator.scaffoldValue.secondary == PaneAdaptedValue.Hidden,
@@ -502,7 +494,7 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
 
                 AnimatedPane(
                     enterTransition = enterSpec,
-                    exitTransition = exitSpec
+                    exitTransition = detailExitSpec
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxSize()
@@ -582,7 +574,7 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
 
                 AnimatedPane(
                     enterTransition = enterSpec,
-                    exitTransition = exitSpec
+                    exitTransition = detailExitSpec
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxSize()
@@ -619,7 +611,6 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
                     }
                 }
             }
-        }
         }
     }
 }

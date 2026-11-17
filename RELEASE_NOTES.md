@@ -1,3 +1,20 @@
+# HushCast v1.0.8-hushcast
+
+## What's New
+- **Predictive Back Preview Fix**:
+  - Updated [`Navigation`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/navigation/Navigation.kt) `popTransitionSpec` and `predictivePopTransitionSpec` with `targetContentZIndex = -1f`, `slideInHorizontally`, and high-opacity `fadeIn(initialAlpha = 0.85f)` so the previous destination renders underneath during back swipes instead of fading over a black screen.
+  - Updated [`Main`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/Main.kt) `DetailPane` to drive `scaffoldNavigator.seekBack(behavior, fraction)` during predictive back so the underlying list pane is revealed cleanly.
+- **Sponsor Skip Chime Fix**:
+  - Updated [`HushCastEngineBridge`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/background/HushCastEngineBridge.kt) to route the skip chime and custom skip sounds over `USAGE_MEDIA` / `CONTENT_TYPE_MUSIC` with higher gain and a longer buffer drain so it is clearly audible over headphones/Bluetooth, and added a **Test chime** button in [`SettingsHushCastPane`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/route/settings/pane/SettingsHushCastPane.kt).
+- **More Color Themes & Dark Surface Styles**:
+  - Added **Dim**, **AMOLED Black**, **Midnight**, **Warm**, and **Forest** dark surface styles plus 8 accent color palettes (`Purple`, `Indigo`, `Ocean`, `Teal`, `Emerald`, `Amber`, `Coral`, `Rose`) in [`Theme.kt`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/theme/Theme.kt) and [`SettingsAppearancePane`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/route/settings/pane/SettingsAppearancePane.kt).
+- **Material 3 Expressive Miniplayer**:
+  - Upgraded [`FloatingMediaPlayer`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/component/media/FloatingMediaPlayer.kt) with shape-morphing Play/Pause `FilledIconToggleButton`, tonal squircle skip buttons with press bounce & rotational spring kicks, animated artwork transitions, and `LinearWavyProgressIndicator`.
+- **Precision Podcast Scrubbing & Sponsor Spot Callout**:
+  - Upgraded [`AnnotatedPlaybackSlider`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/component/media/HushCastPlayerOverlays.kt) with vertical-drag variable scrub speed (`1x` → `½x` → `⅕x` → `1/10x`), haptic ticks when crossing sponsor boundaries, a highlighted active sponsor track/needle, and a live floating callout pill with a zoomed ±90s mini-timeline.
+
+---
+
 # HushCast v1.0.7-hushcast
 
 ## What's New

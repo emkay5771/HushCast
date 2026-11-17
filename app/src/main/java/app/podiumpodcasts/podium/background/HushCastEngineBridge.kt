@@ -154,8 +154,8 @@ object HushCastEngineBridge {
         }
     }
 
-    fun playSponsorSkipIndicator(context: android.content.Context) {
-        if (!sponsorSkipSoundEnabled) return
+    fun playSponsorSkipIndicator(context: android.content.Context, forceTest: Boolean = false) {
+        if (!forceTest && !sponsorSkipSoundEnabled) return
         val customUri = sponsorSkipSoundUri
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             if (!customUri.isNullOrBlank()) {
@@ -163,12 +163,12 @@ object HushCastEngineBridge {
                     val mp = android.media.MediaPlayer().apply {
                         setAudioAttributes(
                             android.media.AudioAttributes.Builder()
-                                .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
-                                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
                                 .build()
                         )
                         setDataSource(context, android.net.Uri.parse(customUri))
-                        setVolume(0.55f, 0.55f)
+                        setVolume(0.75f, 0.75f)
                         prepare()
                         setOnCompletionListener { it.release() }
                         setOnErrorListener { player, _, _ -> player.release(); true }
@@ -185,7 +185,7 @@ object HushCastEngineBridge {
     private fun playDefaultSkipChime() {
         runCatching {
             val sampleRate = 44100
-            val durationMs = 150
+            val durationMs = 220
             val numSamples = (sampleRate * durationMs) / 1000
             val samples = ShortArray(numSamples)
             val half = numSamples / 2
@@ -194,14 +194,14 @@ object HushCastEngineBridge {
                 val localIdx = if (i < half) i else (i - half)
                 val localLen = if (i < half) half else (numSamples - half)
                 val env = kotlin.math.sin(kotlin.math.PI * localIdx / localLen.coerceAtLeast(1))
-                val s = kotlin.math.sin(2.0 * kotlin.math.PI * freq * i / sampleRate) * env * 0.25
+                val s = kotlin.math.sin(2.0 * kotlin.math.PI * freq * i / sampleRate) * env * 0.55
                 samples[i] = (s * Short.MAX_VALUE).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
             }
             val track = android.media.AudioTrack.Builder()
                 .setAudioAttributes(
                     android.media.AudioAttributes.Builder()
-                        .setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
-                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
                         .build()
                 )
                 .setAudioFormat(
@@ -216,7 +216,8 @@ object HushCastEngineBridge {
                 .build()
             track.write(samples, 0, samples.size)
             track.play()
-            Thread.sleep(durationMs.toLong() + 40L)
+            Thread.sleep(durationMs.toLong() + 400L)
+            runCatching { track.stop() }
             track.release()
         }
     }
