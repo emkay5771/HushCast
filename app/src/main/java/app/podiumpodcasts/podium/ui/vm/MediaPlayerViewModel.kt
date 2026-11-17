@@ -338,6 +338,27 @@ class MediaPlayerViewModel : ViewModel() {
         return progressState
     }
 
+    @Composable
+    fun rememberLivePositionMs(intervalMs: Long = 500L): Long {
+        val posState = remember { mutableLongStateOf(currentPosition) }
+
+        LaunchedEffect(lastProgressUpdate, isPlaying, currentPosition, currentDuration, speed) {
+            val dur = currentDuration.coerceAtLeast(1L)
+            if (!isPlaying) {
+                posState.longValue = currentPosition.coerceIn(0L, dur)
+                return@LaunchedEffect
+            }
+            while (true) {
+                val difference = (System.currentTimeMillis() - lastProgressUpdate).coerceAtLeast(0L)
+                val realCurrentPosition = (currentPosition + (difference * speed).toLong()).coerceIn(0L, dur)
+                posState.longValue = realCurrentPosition
+                delay(intervalMs)
+            }
+        }
+
+        return posState.longValue
+    }
+
     /**
      * Returns sleep timer state (in minutes)
      */

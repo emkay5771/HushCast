@@ -80,4 +80,11 @@ class AdSkipPlaybackObserver {
         bypassedStartMs.add(event.adWindow.startMs)
         player.seekTo(event.jumpedFromMs)
     }
+
+    fun getActiveAutoSkipRanges(): List<SkipAwareSeekCalculator.SkipRange> {
+        if (policyMode != AdPolicyMode.AUTO_SKIP) return emptyList()
+        return adWindows
+            .filter { it.isHighConfidence && it.startMs !in bypassedStartMs }
+            .map { SkipAwareSeekCalculator.SkipRange(it.startMs, it.endMs) }
+    }
 }

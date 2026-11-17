@@ -44,6 +44,42 @@ object HushCastEngineBridge {
     @Volatile
     var currentEpisodeId: String? = null
 
+    @Volatile
+    private var skippedChapterRanges: List<app.hushcast.automute.dsp.SkipAwareSeekCalculator.SkipRange> = emptyList()
+
+    fun updateSkippedChapterRanges(
+        episodeId: String,
+        chapters: List<app.hushcast.automute.desktop.DesktopChapterDto>,
+        skippedStarts: Set<Long>,
+        durationMs: Long
+    ) {
+        if (episodeId != currentEpisodeId && !currentEpisodeId.isNullOrBlank()) return
+        if (chapters.isEmpty() || skippedStarts.isEmpty()) {
+            skippedChapterRanges = emptyList()
+            return
+        }
+        val sorted = chapters.sortedBy { it.startMs }
+        val ranges = ArrayList<app.hushcast.automute.dsp.SkipAwareSeekCalculator.SkipRange>()
+        for (i in sorted.indices) {
+            val ch = sorted[i]
+            if (ch.startMs in skippedStarts) {
+                val endMs = sorted.getOrNull(i + 1)?.startMs ?: durationMs.coerceAtLeast(ch.startMs)
+                if (endMs > ch.startMs) {
+                    ranges.add(app.hushcast.automute.dsp.SkipAwareSeekCalculator.SkipRange(ch.startMs, endMs))
+                }
+            }
+        }
+        skippedChapterRanges = ranges
+    }
+
+    fun clearSkippedChapterRanges() {
+        skippedChapterRanges = emptyList()
+    }
+
+    fun getActiveSkipRanges(): List<app.hushcast.automute.dsp.SkipAwareSeekCalculator.SkipRange> {
+        return adSkipObserver.getActiveAutoSkipRanges() + skippedChapterRanges
+    }
+
     fun notifyAdSkipped(event: AdSkipEvent) {
         _pendingUndoEvent.value = event
     }

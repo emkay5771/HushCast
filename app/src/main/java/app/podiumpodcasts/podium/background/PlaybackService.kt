@@ -169,7 +169,7 @@ class PlaybackService : MediaLibraryService() {
         val extractorsFactory = DefaultExtractorsFactory()
             .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)
 
-        val player = ExoPlayer.Builder(this, renderersFactory)
+        val exoPlayer = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(DefaultMediaSourceFactory(this, extractorsFactory))
             .setSeekBackIncrementMs(seekBackIncrement)
             .setSeekForwardIncrementMs(seekForwardIncrement)
@@ -183,10 +183,41 @@ class PlaybackService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
 
-        player.setPlaybackSpeed(playbackSpeed)
+        exoPlayer.setPlaybackSpeed(playbackSpeed)
+
+        val player = object : androidx.media3.common.ForwardingPlayer(exoPlayer) {
+            override fun seekForward() {
+                val skipRanges = HushCastEngineBridge.getActiveSkipRanges()
+                if (skipRanges.isEmpty()) {
+                    super.seekForward()
+                    return
+                }
+                val target = app.hushcast.automute.dsp.SkipAwareSeekCalculator.computeForwardTargetMs(
+                    fromMs = currentPosition,
+                    incrementMs = seekForwardIncrement,
+                    durationMs = duration,
+                    skipRanges = skipRanges
+                )
+                seekTo(target)
+            }
+
+            override fun seekBack() {
+                val skipRanges = HushCastEngineBridge.getActiveSkipRanges()
+                if (skipRanges.isEmpty()) {
+                    super.seekBack()
+                    return
+                }
+                val target = app.hushcast.automute.dsp.SkipAwareSeekCalculator.computeBackTargetMs(
+                    fromMs = currentPosition,
+                    incrementMs = seekBackIncrement,
+                    skipRanges = skipRanges
+                )
+                seekTo(target)
+            }
+        }
 
         mediaSession = MediaLibrarySession.Builder(this, player, MediaLibrarySessionCallback(this))
-            .setMediaButtonPreferences(buildMediaButtons(player))
+            .setMediaButtonPreferences(buildMediaButtons(exoPlayer))
             .setSessionActivity(
                 DeepLink.OpenMediaPlayer()
                     .asPendingIntent(this, 42)!!

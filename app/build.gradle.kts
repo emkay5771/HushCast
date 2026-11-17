@@ -25,8 +25,8 @@ android {
         applicationId = "app.podiumpodcasts.podium"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1000031
-        versionName = "0.1.29-hushcast"
+        versionCode = 1000032
+        versionName = "0.1.30-hushcast"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {

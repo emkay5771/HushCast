@@ -198,6 +198,7 @@ fun MediaPlayerBottomSheet(
                 runCatching {
                     kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
                         .decodeFromString<List<app.hushcast.automute.desktop.DesktopChapterDto>>(raw)
+                        .sortedBy { it.startMs }
                 }.getOrDefault(emptyList())
             } ?: emptyList()
             blob to chapters
@@ -231,10 +232,23 @@ fun MediaPlayerBottomSheet(
         }
     }
 
+    LaunchedEffect(episodeId, episodeChapters, skippedChapterStarts, vm.currentDuration) {
+        if (episodeId.isNotBlank()) {
+            HushCastEngineBridge.updateSkippedChapterRanges(
+                episodeId = episodeId,
+                chapters = episodeChapters,
+                skippedStarts = skippedChapterStarts,
+                durationMs = vm.currentDuration
+            )
+        }
+    }
+
+    val livePositionMs = vm.rememberLivePositionMs(500L)
+
     var lastAutoSkippedChapterStart by remember(episodeId) { mutableStateOf<Long?>(null) }
-    LaunchedEffect(episodeId, vm.currentPosition, episodeChapters, skippedChapterStarts) {
+    LaunchedEffect(episodeId, livePositionMs, episodeChapters, skippedChapterStarts) {
         if (episodeId.isBlank() || episodeChapters.isEmpty() || skippedChapterStarts.isEmpty()) return@LaunchedEffect
-        val posMs = vm.currentPosition
+        val posMs = livePositionMs
         val activeIdx = episodeChapters.indexOfLast { it.startMs <= posMs }
         if (activeIdx < 0) return@LaunchedEffect
         val active = episodeChapters[activeIdx]
@@ -1153,7 +1167,7 @@ private fun LiveSyncedTranscriptCard(
         words = words,
         muteWindows = muteWindows,
         adWindows = adWindows,
-        currentPositionMs = vm.currentPosition,
+        currentPositionMs = vm.rememberLivePositionMs(500L),
         onSeekToMs = onSeekToMs,
         onToggleWordMute = onToggleWordMute,
         onPlayAdSegment = onPlayAdSegment,
@@ -1169,7 +1183,7 @@ private fun ActiveChapterPill(
     chapters: List<app.hushcast.automute.desktop.DesktopChapterDto>,
     onClick: () -> Unit
 ) {
-    val posMs = vm.currentPosition
+    val posMs = vm.rememberLivePositionMs(500L)
     val activeChapter = remember(chapters, posMs) {
         chapters.lastOrNull { it.startMs <= posMs } ?: chapters.firstOrNull()
     } ?: return

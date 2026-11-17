@@ -1,3 +1,16 @@
+# HushCast v0.1.30-hushcast
+
+## What's New
+- **Skip-Aware Fast-Forward & Rewind**:
+  - Added [`SkipAwareSeekCalculator`](core/automute-engine/src/main/java/app/hushcast/automute/dsp/SkipAwareSeekCalculator.kt) and wrapped `ExoPlayer` in a `ForwardingPlayer` inside [`PlaybackService`](app/src/main/java/app/podiumpodcasts/podium/background/PlaybackService.kt) so fast-forward and rewind count unskipped content and jump cleanly over active auto-skip ad spans and skipped chapters (including from notifications and lockscreen controls).
+- **Smooth Live Chapter Tracking**:
+  - Added [`MediaPlayerViewModel.rememberLivePositionMs`](app/src/main/java/app/podiumpodcasts/podium/ui/vm/MediaPlayerViewModel.kt) so the active chapter pill, Chapters tab, and skipped-chapter auto-skip track playback position continuously instead of jumping only on seek/skip events.
+  - Sorted chapters chronologically in [`MediaPlayerBottomSheet`](app/src/main/java/app/podiumpodcasts/podium/ui/dialog/bottomsheet/media/MediaPlayerBottomSheet.kt) and [`pipeline.py`](desktop-worker/hushcast_worker/pipeline.py).
+- **Apple Podcasts-Style Transcript**:
+  - Updated [`SyncedTranscriptCard`](app/src/main/java/app/podiumpodcasts/podium/ui/component/media/HushCastPlayerOverlays.kt) to hide per-line timestamps and group segments into logical paragraphs split by speaker turns, natural pauses, and sentence boundaries, while keeping word-level tap-to-seek, long-press-to-mute, and live spoken-word highlighting.
+
+---
+
 # HushCast v0.1.29-hushcast
 
 ## What's New

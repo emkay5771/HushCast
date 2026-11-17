@@ -527,20 +527,14 @@ fun SyncedTranscriptCard(
             val activeRowIndex = remember(displayRows, currentPositionMs) {
                 val exact = displayRows.indexOfFirst { row ->
                     when (row) {
-                        is TranscriptDisplayRow.SpeechLine -> {
-                            val s = (row.segment.start * 1000.0).toLong()
-                            val e = (row.segment.end * 1000.0).toLong()
-                            currentPositionMs in s..e
-                        }
-                        is TranscriptDisplayRow.SponsorGroup -> {
-                            currentPositionMs in row.startMs..row.endMs
-                        }
+                        is TranscriptDisplayRow.ParagraphGroup -> currentPositionMs in row.startMs..row.endMs
+                        is TranscriptDisplayRow.SponsorGroup -> currentPositionMs in row.startMs..row.endMs
                     }
                 }
                 if (exact >= 0) exact
                 else displayRows.indexOfLast { row ->
                     val s = when (row) {
-                        is TranscriptDisplayRow.SpeechLine -> (row.segment.start * 1000.0).toLong()
+                        is TranscriptDisplayRow.ParagraphGroup -> row.startMs
                         is TranscriptDisplayRow.SponsorGroup -> row.startMs
                     }
                     s <= currentPositionMs
@@ -574,14 +568,14 @@ fun SyncedTranscriptCard(
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     itemsIndexed(
                         items = displayRows,
                         key = { idx, row ->
                             when (row) {
                                 is TranscriptDisplayRow.SponsorGroup -> "ad_${row.startMs}_${idx}"
-                                is TranscriptDisplayRow.SpeechLine -> "seg_${(row.segment.start * 1000.0).toLong()}_${idx}"
+                                is TranscriptDisplayRow.ParagraphGroup -> "para_${row.startMs}_${idx}"
                             }
                         }
                     ) { _, row ->
@@ -604,13 +598,13 @@ fun SyncedTranscriptCard(
                                         ) {
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
-                                                    text = "${row.displayLabel} • ${formatTranscriptTimestamp(row.startMs)} (${durSec}s)",
+                                                    text = "${row.displayLabel} (${durSec}s)",
                                                     style = MaterialTheme.typography.labelMedium,
                                                     fontWeight = FontWeight.SemiBold,
                                                     color = MaterialTheme.colorScheme.onTertiaryContainer
                                                 )
                                                 Text(
-                                                    text = if (expanded) "Tap to collapse (${row.segments.size} lines)" else "Tap to expand transcript (${row.segments.size} lines)",
+                                                    text = if (expanded) "Tap to collapse" else "Tap to expand",
                                                     style = MaterialTheme.typography.labelSmall,
                                                     color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
                                                 )
@@ -630,73 +624,56 @@ fun SyncedTranscriptCard(
                                         }
                                         if (expanded) {
                                             Spacer(Modifier.height(8.dp))
-                                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                row.segments.forEach { adSeg ->
-                                                    val adSegMs = (adSeg.start * 1000.0).toLong()
-                                                    Text(
-                                                        text = "[${formatTranscriptTimestamp(adSegMs)}] ${adSeg.text.trim()}",
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                                        modifier = Modifier.clickable { onSeekToMs(adSegMs) }
-                                                    )
-                                                }
-                                            }
+                                            Text(
+                                                text = row.segments.joinToString(" ") { it.text.trim() },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                                modifier = Modifier.clickable { onSeekToMs(row.startMs) }
+                                            )
                                         }
                                     }
                                 }
                             }
 
-                            is TranscriptDisplayRow.SpeechLine -> {
-                                val seg = row.segment
-                                val segStartMs = (seg.start * 1000.0).toLong()
-                                val segEndMs = (seg.end * 1000.0).toLong()
-                                val isActive = currentPositionMs in segStartMs..segEndMs
-                                val segWords = wordsBySegment[seg].orEmpty()
+                            is TranscriptDisplayRow.ParagraphGroup -> {
+                                val isActive = currentPositionMs in row.startMs..row.endMs
+                                val paragraphWords = remember(row, wordsBySegment) {
+                                    row.segments.flatMap { seg -> wordsBySegment[seg].orEmpty() }
+                                }
 
                                 Surface(
-                                    shape = RoundedCornerShape(12.dp),
+                                    shape = RoundedCornerShape(14.dp),
                                     color = if (isActive) {
-                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
                                     } else {
-                                        MaterialTheme.colorScheme.surfaceContainerLow
+                                        Color.Transparent
                                     },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clickable { onSeekToMs(segStartMs) }
+                                        .clickable { onSeekToMs(row.startMs) }
                                 ) {
-                                    Column(modifier = Modifier.padding(10.dp)) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
+                                    Column(
+                                        modifier = Modifier.padding(
+                                            horizontal = 10.dp,
+                                            vertical = 6.dp
+                                        )
+                                    ) {
+                                        if (row.showSpeakerLabel && row.speaker != null) {
+                                            val spkColor = transcriptSpeakerColors[row.speaker.coerceAtLeast(0) % transcriptSpeakerColors.size]
                                             Text(
-                                                text = formatTranscriptTimestamp(segStartMs),
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.primary
+                                                text = "Speaker ${row.speaker + 1}",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = spkColor,
+                                                fontWeight = FontWeight.SemiBold,
+                                                modifier = Modifier.padding(bottom = 4.dp)
                                             )
-                                            seg.speaker?.let { spk ->
-                                                val spkColor = transcriptSpeakerColors[spk.coerceAtLeast(0) % transcriptSpeakerColors.size]
-                                                Surface(
-                                                    shape = RoundedCornerShape(6.dp),
-                                                    color = spkColor.copy(alpha = 0.14f)
-                                                ) {
-                                                    Text(
-                                                        text = "Speaker ${spk + 1}",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = spkColor,
-                                                        fontWeight = FontWeight.Medium,
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                    )
-                                                }
-                                            }
                                         }
-                                        Spacer(Modifier.height(4.dp))
-                                        if (segWords.isNotEmpty()) {
+                                        if (paragraphWords.isNotEmpty()) {
                                             FlowRow(
                                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                                verticalArrangement = Arrangement.spacedBy(3.dp)
                                             ) {
-                                                segWords.forEach { w ->
+                                                paragraphWords.forEach { w ->
                                                     val ws = (w.start * 1000.0).toLong()
                                                     val we = (w.end * 1000.0).toLong()
                                                     val isMuted = isWordInMuteWindows(ws, we, activeMuteWindows)
@@ -715,24 +692,30 @@ fun SyncedTranscriptCard(
                                                     ) {
                                                         Text(
                                                             text = w.text.trim(),
-                                                            style = MaterialTheme.typography.bodyMedium.copy(
-                                                                fontWeight = if (isSpokenNow) FontWeight.Bold else FontWeight.Normal,
+                                                            style = MaterialTheme.typography.bodyLarge.copy(
+                                                                fontWeight = if (isSpokenNow) FontWeight.SemiBold else FontWeight.Normal,
                                                                 textDecoration = if (isMuted) TextDecoration.LineThrough else TextDecoration.None
                                                             ),
                                                             color = when {
                                                                 isMuted -> MaterialTheme.colorScheme.onErrorContainer
                                                                 isSpokenNow -> MaterialTheme.colorScheme.onPrimary
-                                                                else -> MaterialTheme.colorScheme.onSurface
+                                                                isActive -> MaterialTheme.colorScheme.onSurface
+                                                                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
                                                             },
-                                                            modifier = Modifier.padding(horizontal = 3.dp, vertical = 1.dp)
+                                                            modifier = Modifier.padding(horizontal = 2.dp, vertical = 1.dp)
                                                         )
                                                     }
                                                 }
                                             }
                                         } else {
                                             Text(
-                                                text = seg.text,
-                                                style = MaterialTheme.typography.bodyMedium
+                                                text = row.segments.joinToString(" ") { it.text.trim() },
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                color = if (isActive) {
+                                                    MaterialTheme.colorScheme.onSurface
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                                                }
                                             )
                                         }
                                     }
@@ -769,7 +752,14 @@ fun SyncedTranscriptCard(
 }
 
 private sealed interface TranscriptDisplayRow {
-    data class SpeechLine(val segment: Segment) : TranscriptDisplayRow
+    data class ParagraphGroup(
+        val segments: List<Segment>,
+        val speaker: Int?,
+        val showSpeakerLabel: Boolean,
+        val startMs: Long,
+        val endMs: Long
+    ) : TranscriptDisplayRow
+
     data class SponsorGroup(
         val ad: AdWindow,
         val segments: List<Segment>,
@@ -805,22 +795,53 @@ private fun extractSponsorName(text: String): String? {
     return null
 }
 
+private fun endsWithSentenceBoundary(text: String): Boolean {
+    val t = text.trimEnd()
+    if (t.isEmpty()) return false
+    return t.endsWith(".") || t.endsWith("!") || t.endsWith("?") ||
+        t.endsWith(".\"") || t.endsWith("!\"") || t.endsWith("?\"") ||
+        t.endsWith(".'") || t.endsWith("!'") || t.endsWith("?'")
+}
+
 private fun buildTranscriptDisplayRows(
     segments: List<Segment>,
     adWindows: List<AdWindow>
 ): List<TranscriptDisplayRow> {
-    if (adWindows.isEmpty()) return segments.map { TranscriptDisplayRow.SpeechLine(it) }
-
     val rows = ArrayList<TranscriptDisplayRow>()
     var pendingAd: AdWindow? = null
-    val pendingSegs = ArrayList<Segment>()
+    val pendingAdSegs = ArrayList<Segment>()
+    val pendingParaSegs = ArrayList<Segment>()
+    var pendingParaChars = 0
+    var lastEmittedSpeaker: Int? = null
+    var lastWasSponsor = false
 
-    fun flushPending() {
+    fun flushParagraph() {
+        if (pendingParaSegs.isEmpty()) return
+        val spk = pendingParaSegs.first().speaker
+        val showSpeaker = spk != null && (lastWasSponsor || spk != lastEmittedSpeaker)
+        val startMs = (pendingParaSegs.first().start * 1000.0).toLong()
+        val endMs = (pendingParaSegs.last().end * 1000.0).toLong().coerceAtLeast(startMs + 200L)
+        rows.add(
+            TranscriptDisplayRow.ParagraphGroup(
+                segments = pendingParaSegs.toList(),
+                speaker = spk,
+                showSpeakerLabel = showSpeaker,
+                startMs = startMs,
+                endMs = endMs
+            )
+        )
+        lastEmittedSpeaker = spk
+        lastWasSponsor = false
+        pendingParaSegs.clear()
+        pendingParaChars = 0
+    }
+
+    fun flushPendingAd() {
         val ad = pendingAd ?: return
-        if (pendingSegs.isEmpty()) return
-        val startMs = (pendingSegs.first().start * 1000.0).toLong()
-        val endMs = (pendingSegs.last().end * 1000.0).toLong().coerceAtLeast(startMs + 1000L)
-        val combined = pendingSegs.joinToString(" ") { it.text }
+        if (pendingAdSegs.isEmpty()) return
+        val startMs = (pendingAdSegs.first().start * 1000.0).toLong()
+        val endMs = (pendingAdSegs.last().end * 1000.0).toLong().coerceAtLeast(startMs + 1000L)
+        val combined = pendingAdSegs.joinToString(" ") { it.text }
         val sponsor = extractSponsorName(combined)
         val label = when {
             sponsor != null && ad.isHighConfidence -> "Sponsor: $sponsor"
@@ -830,36 +851,56 @@ private fun buildTranscriptDisplayRows(
         rows.add(
             TranscriptDisplayRow.SponsorGroup(
                 ad = ad,
-                segments = pendingSegs.toList(),
+                segments = pendingAdSegs.toList(),
                 displayLabel = label,
                 startMs = startMs,
                 endMs = endMs
             )
         )
         pendingAd = null
-        pendingSegs.clear()
+        pendingAdSegs.clear()
+        lastWasSponsor = true
     }
 
     for (seg in segments) {
         val sMs = (seg.start * 1000.0).toLong()
         val eMs = (seg.end * 1000.0).toLong()
-        val overlappingAd = adWindows.firstOrNull { ad -> sMs < ad.endMs && eMs > ad.startMs }
+        val overlappingAd = if (adWindows.isEmpty()) {
+            null
+        } else {
+            adWindows.firstOrNull { ad -> sMs < ad.endMs && eMs > ad.startMs }
+        }
         if (overlappingAd != null) {
+            flushParagraph()
             val curAd = pendingAd
-            val lastEndMs = pendingSegs.lastOrNull()?.let { (it.end * 1000.0).toLong() } ?: sMs
+            val lastEndMs = pendingAdSegs.lastOrNull()?.let { (it.end * 1000.0).toLong() } ?: sMs
             if (curAd != null && (sMs - lastEndMs) <= 8000L && curAd.isHighConfidence == overlappingAd.isHighConfidence) {
-                pendingSegs.add(seg)
+                pendingAdSegs.add(seg)
             } else {
-                flushPending()
+                flushPendingAd()
                 pendingAd = overlappingAd
-                pendingSegs.add(seg)
+                pendingAdSegs.add(seg)
             }
         } else {
-            flushPending()
-            rows.add(TranscriptDisplayRow.SpeechLine(seg))
+            flushPendingAd()
+            if (pendingParaSegs.isNotEmpty()) {
+                val prevSeg = pendingParaSegs.last()
+                val speakerChanged = seg.speaker != prevSeg.speaker
+                val longPause = (seg.start - prevSeg.end) >= 1.5
+                val paraDurationSec = prevSeg.end - pendingParaSegs.first().start
+                val sentenceReady = endsWithSentenceBoundary(prevSeg.text) &&
+                    (pendingParaChars >= 260 || pendingParaSegs.size >= 3 || paraDurationSec >= 12.0)
+                val hardCap = pendingParaChars >= 500
+                if (speakerChanged || longPause || sentenceReady || hardCap) {
+                    flushParagraph()
+                }
+            }
+            pendingParaSegs.add(seg)
+            pendingParaChars += seg.text.trim().length + 1
         }
     }
-    flushPending()
+    flushPendingAd()
+    flushParagraph()
     return rows
 }
 

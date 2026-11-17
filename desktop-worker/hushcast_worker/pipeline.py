@@ -869,15 +869,18 @@ def _generate_chapters_and_summary(
             if m:
                 parsed = json.loads(m.group(0))
                 llm_summary = str(parsed.get("summary") or "").strip() or None
-                llm_chapters = [
-                    DesktopChapterDto(
-                        startMs=max(0, int(float(c.get("startSec", 0)) * 1000)),
-                        title=str(c.get("title", "Chapter")).strip()[:80],
-                        source="auto",
-                    )
-                    for c in (parsed.get("chapters") or [])
-                    if str(c.get("title", "")).strip()
-                ]
+                llm_chapters = sorted(
+                    [
+                        DesktopChapterDto(
+                            startMs=max(0, int(float(c.get("startSec", 0)) * 1000)),
+                            title=str(c.get("title", "Chapter")).strip()[:80],
+                            source="auto",
+                        )
+                        for c in (parsed.get("chapters") or [])
+                        if str(c.get("title", "")).strip()
+                    ],
+                    key=lambda ch: ch.startMs,
+                )
                 final_chapters = embedded_chapters if len(embedded_chapters) >= 2 else llm_chapters
                 if llm_summary and final_chapters:
                     return llm_summary, final_chapters
