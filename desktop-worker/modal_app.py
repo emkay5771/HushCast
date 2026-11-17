@@ -42,9 +42,10 @@ volume = modal.Volume.from_name("hushcast-data", create_if_missing=True)
 
 _AD_TAGGER_URL = (
     "https://raw.githubusercontent.com/emkay5771/HushCast/main/"
-    "core/automute-engine/src/main/assets/ad_tagger.onnx"
+    "model/ad_tagger.onnx"
 )
 _LOCAL_AD_TAGGER_CANDIDATES = [
+    Path(__file__).resolve().parent.parent / "model/ad_tagger.onnx",
     Path(__file__).resolve().parent.parent / "core/automute-engine/src/main/assets/ad_tagger.onnx",
     Path(__file__).resolve().parent / "ad_tagger.onnx",
     Path.home() / ".hushcast-worker/models/ad_tagger.onnx",
@@ -68,7 +69,7 @@ _base_image = (
         "zeroconf==0.146.5",
         "numpy==2.2.5",
         "onnxruntime-gpu==1.20.1",
-        "av==14.3.0",
+        "av==14.4.0",
     )
     .pip_install(
         "pywhispercpp==1.3.0",
