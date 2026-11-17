@@ -4,6 +4,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
@@ -112,12 +113,18 @@ fun Navigation(
         popTransitionSpec = {
             (fadeIn(animationSpec = tween(180)) +
                     scaleIn(initialScale = 0.96f, animationSpec = tween(180)))
-                .togetherWith(fadeOut(animationSpec = tween(150)))
+                .togetherWith(
+                    fadeOut(animationSpec = tween(150)) +
+                            scaleOut(targetScale = 0.92f, animationSpec = tween(150))
+                )
         },
         predictivePopTransitionSpec = {
             (fadeIn(animationSpec = tween(180)) +
                     scaleIn(initialScale = 0.96f, animationSpec = tween(180)))
-                .togetherWith(fadeOut(animationSpec = tween(150)))
+                .togetherWith(
+                    fadeOut(animationSpec = tween(150)) +
+                            scaleOut(targetScale = 0.92f, animationSpec = tween(150))
+                )
         },
         entryProvider = { key ->
             when(key) {

@@ -166,55 +166,12 @@ def generate_chapters_and_summary(
     if len(non_ad_indices) < 4:
         return None, embedded_chapters
 
-    if chat_model_path is not None and chat_model_path.exists():
-        try:
-            from llama_cpp import Llama
-
-            step = max(1, len(non_ad_indices) // 60)
-            sampled = [segments[i] for i in non_ad_indices[::step]][:60]
-            transcript_sample = "\n".join(
-                f"[{int(s.start // 60):02d}:{int(s.start % 60):02d}] {s.text.strip()}"
-                for s in sampled
-            )[:6000]
-            prompt = (
-                "Summarize this podcast episode in 2-3 concise sentences and generate 4-8 "
-                "chronological chapter titles with timestamps in seconds.\n"
-                "Return ONLY valid JSON: "
-                '{"summary": "...", "chapters": [{"startSec": 0, "title": "..."}]}\n\n'
-                f"Transcript:\n{transcript_sample}\n\nJSON:"
-            )
-            chat_llm = Llama(
-                model_path=str(chat_model_path),
-                n_ctx=4096,
-                n_gpu_layers=-1,
-                verbose=False,
-            )
-            out = chat_llm.create_completion(prompt, max_tokens=512, temperature=0.2)
-            raw_text = out["choices"][0]["text"].strip()
-            m = re.search(r"\{.*\}", raw_text, flags=re.DOTALL)
-            if m:
-                parsed = json.loads(m.group(0))
-                llm_summary = str(parsed.get("summary") or "").strip() or None
-                llm_chapters = sorted(
-                    [
-                        DesktopChapterDto(
-                            startMs=max(0, int(float(c.get("startSec", 0)) * 1000)),
-                            title=str(c.get("title", "Chapter")).strip()[:80],
-                            source="auto",
-                        )
-                        for c in (parsed.get("chapters") or [])
-                        if str(c.get("title", "")).strip()
-                    ],
-                    key=lambda ch: ch.startMs,
-                )
-                final_chapters = embedded_chapters if len(embedded_chapters) >= 2 else llm_chapters
-                if llm_summary and final_chapters:
-                    return llm_summary, final_chapters
-        except Exception:
-            logger.exception("Chat model summary/chapters failed; falling back to extractive")
-
     sub_emb = embeddings[non_ad_indices]
     m = len(non_ad_indices)
+    total_dur_sec = max(
+        0.0,
+        float(segments[non_ad_indices[-1]].end) - float(segments[non_ad_indices[0]].start),
+    )
     win = min(6, max(2, m // 12))
     boundaries: list[int] = [non_ad_indices[0]]
     if m > win * 2 + 2:
@@ -228,8 +185,8 @@ def generate_chapters_and_summary(
             sims.append((k, sim))
 
         sims.sort(key=lambda x: x[1])
-        min_gap_sec = 180.0
-        max_chapters = 7
+        max_chapters = min(9, max(4, int(round(total_dur_sec / 360.0)) + 1))
+        min_gap_sec = max(120.0, min(240.0, total_dur_sec / max(1, max_chapters + 2)))
         selected_times: list[float] = [segments[non_ad_indices[0]].start]
         for k, _ in sims:
             seg_idx = non_ad_indices[k]
@@ -260,15 +217,89 @@ def generate_chapters_and_summary(
                     tset.add(f"{low} {toks[ti + 1][0]}")
         all_chunk_token_sets.append(tset)
 
+    chapter_starts_ms: list[int] = []
+    for b_pos, start_idx in enumerate(boundaries):
+        raw_start = float(segments[start_idx].start)
+        if b_pos == 0 and raw_start < 15.0:
+            raw_start = 0.0
+        chapter_starts_ms.append(max(0, int(round(raw_start * 1000.0))))
+
+    if chat_model_path is not None and chat_model_path.exists():
+        try:
+            from llama_cpp import Llama
+
+            chapter_blocks: list[str] = []
+            for b_pos, txts in enumerate(chapter_texts_list):
+                non_empty = [t.strip() for t in txts if t.strip()]
+                if non_empty:
+                    step_c = max(1, len(non_empty) // 4)
+                    excerpt = " ".join(non_empty[::step_c][:4])[:320]
+                else:
+                    excerpt = ""
+                start_sec = chapter_starts_ms[b_pos] // 1000
+                chapter_blocks.append(
+                    f"Chapter {b_pos + 1} [{start_sec // 60:02d}:{start_sec % 60:02d}]: {excerpt}"
+                )
+            chapters_prompt_text = "\n".join(chapter_blocks)
+            n_ch = len(boundaries)
+            prompt = (
+                "Summarize this podcast episode in 2-3 concise sentences, and write a distinct "
+                f"short 3-7 word topic title for each of the {n_ch} chapters below.\n"
+                "Return ONLY valid JSON: "
+                '{"summary": "...", "titles": ["Title 1", "Title 2"]}\n\n'
+                f"Chapters:\n{chapters_prompt_text}\n\nJSON:"
+            )
+            chat_llm = Llama(
+                model_path=str(chat_model_path),
+                n_ctx=4096,
+                n_gpu_layers=-1,
+                verbose=False,
+            )
+            out = chat_llm.create_completion(prompt, max_tokens=512, temperature=0.2)
+            raw_text = out["choices"][0]["text"].strip()
+            m_json = re.search(r"\{.*\}", raw_text, flags=re.DOTALL)
+            if m_json:
+                parsed = json.loads(m_json.group(0))
+                llm_summary = str(parsed.get("summary") or "").strip() or None
+                raw_titles = parsed.get("titles") or []
+                seen_titles: set[str] = set()
+                llm_chapters: list[DesktopChapterDto] = []
+                for b_pos in range(n_ch):
+                    candidate = (
+                        str(raw_titles[b_pos]).strip()[:80]
+                        if b_pos < len(raw_titles)
+                        else ""
+                    )
+                    norm_cand = candidate.lower()
+                    if not candidate or norm_cand in seen_titles:
+                        candidate = _name_chapter_from_tfidf(
+                            chapter_texts_list[b_pos], all_chunk_token_sets, b_pos
+                        )
+                    if candidate.lower() in seen_titles:
+                        candidate = f"{candidate[:72]} ({b_pos + 1})"
+                    seen_titles.add(candidate.lower())
+                    llm_chapters.append(
+                        DesktopChapterDto(
+                            startMs=chapter_starts_ms[b_pos],
+                            title=candidate,
+                            source="auto",
+                        )
+                    )
+                final_chapters = embedded_chapters if len(embedded_chapters) >= 2 else llm_chapters
+                if llm_summary and final_chapters:
+                    return llm_summary, final_chapters
+        except Exception:
+            logger.exception("Chat model summary/chapters failed; falling back to extractive")
+
     if embedded_chapters:
         chapters = embedded_chapters
     else:
         chapters = []
-        for b_pos, start_idx in enumerate(boundaries):
+        for b_pos in range(len(boundaries)):
             title = _name_chapter_from_tfidf(chapter_texts_list[b_pos], all_chunk_token_sets, b_pos)
             chapters.append(
                 DesktopChapterDto(
-                    startMs=max(0, int(round(segments[start_idx].start * 1000))),
+                    startMs=chapter_starts_ms[b_pos],
                     title=title,
                     source="auto",
                 )

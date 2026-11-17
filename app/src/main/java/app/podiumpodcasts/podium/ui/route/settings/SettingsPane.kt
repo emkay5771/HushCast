@@ -1,7 +1,6 @@
 package app.podiumpodcasts.podium.ui.route.settings
 
 import android.annotation.SuppressLint
-import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
@@ -42,10 +41,6 @@ fun SettingsPane(
 
     onClose: () -> Unit
 ) {
-    BackHandler {
-        onClose()
-    }
-
     @Composable
     fun NavigationIcon() {
         if(showBackButton) BackButton {

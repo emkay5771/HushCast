@@ -1,3 +1,16 @@
+# HushCast v1.0.4-hushcast
+
+## What's New
+- **Predictive Back Gestures Across All Pages**:
+  - Removed the unconditional `BackHandler` in [`SettingsPane`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/route/settings/SettingsPane.kt) so `NavigableListDetailPaneScaffold` drives native predictive back animations on all Settings sub-panes.
+  - Added `scaleOut` + `fadeOut` to `popTransitionSpec` and `predictivePopTransitionSpec` in [`Navigation`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/navigation/Navigation.kt) for Material 3 predictive back transitions across all routes.
+  - Added a `PredictiveBackHandler` in [`Main`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/Main.kt) `DetailPane` when `backStack.size > 1` so `NavDisplay` in the background list pane doesn't intercept predictive back gestures from open podcast/episode/settings detail panes.
+- **Auto-Created Chapter Timestamp Fix (Desktop & Cloud Worker)**:
+  - Fixed [`generate_chapters_and_summary`](https://github.com/emkay5771/HushCast/blob/main/desktop-worker/hushcast_worker/chapters.py) so chapter timestamps are grounded in the embedding-based topic-shift boundaries from actual transcript segment timestamps rather than asking the 1.5B chat LLM to convert `[MM:SS]` into seconds (which previously compressed 50+ minute episodes into `0:00–6:15` and produced duplicate chapters).
+  - The LLM now writes only the episode summary and distinct per-chapter titles for each grounded chapter boundary, with automatic TF-IDF + disambiguation fallback.
+
+---
+
 # HushCast v1.0.3-hushcast
 
 ## What's New
