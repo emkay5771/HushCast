@@ -1,3 +1,17 @@
+# HushCast v0.1.31-hushcast
+
+## What's New
+- **Full-Screen Player Sheet & Queue Badge**:
+  - Updated [`MediaPlayerBottomSheet`](app/src/main/java/app/podiumpodcasts/podium/ui/dialog/bottomsheet/media/MediaPlayerBottomSheet.kt) to open full-screen by default with vertically centered content, larger artwork (`260.dp`), and refined spacing.
+  - Added a theme-matched queue count badge (capped at `99+`) on the queue button.
+- **Reliable Seek & Queue Restoration**:
+  - Updated [`MediaPlayerViewModel.seek`](app/src/main/java/app/podiumpodcasts/podium/ui/vm/MediaPlayerViewModel.kt) to clamp seek positions to `0..currentDuration` and immediately update UI progress state.
+  - Updated [`MediaPlayerViewModel.restoreQueueIfNeeded`](app/src/main/java/app/podiumpodcasts/podium/ui/vm/MediaPlayerViewModel.kt) and [`registerMediaController`](app/src/main/java/app/podiumpodcasts/podium/ui/vm/MediaPlayerViewModel.kt) to re-restore an emptied queue while guarding against concurrent restoration runs.
+- **Transcript Opens at Active Segment**:
+  - Updated [`SyncedTranscriptCard`](app/src/main/java/app/podiumpodcasts/podium/ui/component/media/HushCastPlayerOverlays.kt) to initialize `rememberLazyListState` at `activeRowIndex` so the transcript opens directly on the currently playing segment.
+
+---
+
 # HushCast v0.1.30-hushcast
 
 ## What's New
