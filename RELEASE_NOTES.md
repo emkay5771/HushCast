@@ -1,3 +1,14 @@
+# HushCast v1.0.6-hushcast
+
+## What's New
+- **Miniplayer Redesign & Blocked Content Markers**:
+  - Updated [`FloatingMediaPlayer`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/component/media/FloatingMediaPlayer.kt) to an uncluttered Pocket Casts-style layout with Material 3 Expressive styling: rounded-square artwork on the left, centered Skip Back / Play-Pause / Skip Forward controls, and a queue count pill on the right.
+  - Added ad-skip and word-mute marker overlays directly on the miniplayer's bottom progress bar.
+- **System Player Speed Value**:
+  - Updated [`PlaybackService`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/background/PlaybackService.kt) to render the actual playback speed value (`0.5x`–`3.0x`) on the Android system media player button and refresh it live whenever speed changes.
+
+---
+
 # HushCast v1.0.5-hushcast
 
 ## What's New

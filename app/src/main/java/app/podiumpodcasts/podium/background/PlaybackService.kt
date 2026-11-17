@@ -476,13 +476,53 @@ class PlaybackService : MediaLibraryService() {
             .setDisplayName(getString(R.string.common_action_seek_forward))
             .build()
 
+        val currentSpeed = player.playbackParameters.speed
+        val speedLabel = if (kotlin.math.abs(currentSpeed * 100f - kotlin.math.round(currentSpeed * 100f)) < 0.1f && kotlin.math.round(currentSpeed * 100f).toInt() % 10 != 0) {
+            String.format(java.util.Locale.US, "%.2fx", currentSpeed)
+        } else {
+            String.format(java.util.Locale.US, "%.1fx", currentSpeed)
+        }
         val playbackSpeed = CommandButton.Builder(CommandButton.ICON_PLAYBACK_SPEED)
             .setSessionCommand(SessionCommand(COMMAND_CYCLE_SPEED, Bundle.EMPTY))
-            .setCustomIconResId(R.drawable.ic_playback_speed)
-            .setDisplayName(getString(R.string.common_action_toggle_playback_speed))
+            .setCustomIconResId(speedIconResId(currentSpeed))
+            .setDisplayName("${getString(R.string.common_action_toggle_playback_speed)} ($speedLabel)")
             .build()
 
         return listOf(seekBack, seekForward, playbackSpeed)
+    }
+
+    private fun speedIconResId(speed: Float): Int {
+        val candidates = listOf(
+            0.50f to R.drawable.ic_speed_0_5,
+            0.60f to R.drawable.ic_speed_0_6,
+            0.70f to R.drawable.ic_speed_0_7,
+            0.75f to R.drawable.ic_speed_0_75,
+            0.80f to R.drawable.ic_speed_0_8,
+            0.90f to R.drawable.ic_speed_0_9,
+            1.00f to R.drawable.ic_speed_1_0,
+            1.10f to R.drawable.ic_speed_1_1,
+            1.20f to R.drawable.ic_speed_1_2,
+            1.25f to R.drawable.ic_speed_1_25,
+            1.30f to R.drawable.ic_speed_1_3,
+            1.40f to R.drawable.ic_speed_1_4,
+            1.50f to R.drawable.ic_speed_1_5,
+            1.60f to R.drawable.ic_speed_1_6,
+            1.70f to R.drawable.ic_speed_1_7,
+            1.75f to R.drawable.ic_speed_1_75,
+            1.80f to R.drawable.ic_speed_1_8,
+            1.90f to R.drawable.ic_speed_1_9,
+            2.00f to R.drawable.ic_speed_2_0,
+            2.25f to R.drawable.ic_speed_2_25,
+            2.50f to R.drawable.ic_speed_2_5,
+            2.75f to R.drawable.ic_speed_2_75,
+            3.00f to R.drawable.ic_speed_3_0,
+        )
+        val best = candidates.minByOrNull { kotlin.math.abs(it.first - speed) }
+        return if (best != null && kotlin.math.abs(best.first - speed) <= 0.04f) {
+            best.second
+        } else {
+            R.drawable.ic_playback_speed
+        }
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
@@ -647,6 +687,7 @@ class PlaybackService : MediaLibraryService() {
 
             override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
                 scope.launch { settingsRepository.behavior.setPlayerPlaybackSpeed(playbackParameters.speed) }
+                mediaSession?.setCustomLayout(buildMediaButtons(exoPlayer))
                 super.onPlaybackParametersChanged(playbackParameters)
             }
         })

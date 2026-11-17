@@ -86,6 +86,11 @@ fun FloatingMediaPlayer(
 ) {
     val settingsRepository = LocalSettingsRepository.current
     val vm = viewModel<MediaPlayerViewModel>()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val autoMuteDb = remember(context) { app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context) }
+    val episodeId = vm.metadataEpisodeId ?: ""
+    val muteEntities = autoMuteDb.dao().observeMuteSegmentsByEpisode(episodeId).collectAsState(initial = emptyList())
+    val adEntities = autoMuteDb.dao().observeAdSegmentsByEpisode(episodeId).collectAsState(initial = emptyList())
 
     val enableArtworkColors = settingsRepository.appearance.enableArtworkColors.collectAsState(true)
 
@@ -166,7 +171,7 @@ fun FloatingMediaPlayer(
                                                         .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)),
 
                                                     model = mediaMetadata?.artworkUri,
-                                                    contentDescription = null,
+                                                    contentDescription = mediaMetadata?.title?.toString(),
 
                                                     contentScale = ContentScale.Crop
                                                 )
@@ -175,42 +180,29 @@ fun FloatingMediaPlayer(
                                     }
                                 }
 
-                                Spacer(Modifier.width(12.dp))
-
-                                Column(
-                                    Modifier
-                                        .weight(1f)
-                                        .fillMaxWidth(),
-                                    verticalArrangement = Arrangement.Center
-                                ) {
-                                    AnimatedContent(vm.mediaMetadata) { mediaMetadata ->
-                                        Column {
-                                            Text(
-                                                text = mediaMetadata?.title?.toString().orEmpty(),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                style = Typography.titleMediumEmphasized
-                                            )
-
-                                            Text(
-                                                text = mediaMetadata?.subtitle?.toString().orEmpty(),
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                style = Typography.bodySmall
-                                            )
-                                        }
-                                    }
-                                }
-
-                                Spacer(Modifier.width(6.dp))
-
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                    modifier = Modifier.weight(1f),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    FilledTonalIconToggleButton(
+                                    IconButton(
                                         modifier = Modifier.size(40.dp),
+                                        onClick = { vm.seekBack() }
+                                    ) {
+                                        Icon(
+                                            modifier = Modifier.size(26.dp),
+                                            imageVector = when(vm.seekBackIncrement) {
+                                                5000L -> Icons.Rounded.Replay5
+                                                10000L -> Icons.Rounded.Replay10
+                                                30000L -> Icons.Rounded.Replay30
+                                                else -> Icons.Rounded.Replay
+                                            },
+                                            contentDescription = "Skip back"
+                                        )
+                                    }
+
+                                    FilledTonalIconToggleButton(
+                                        modifier = Modifier.size(46.dp),
                                         checked = vm.isPlaying,
                                         onCheckedChange = {
                                             if(vm.isPlaying) {
@@ -220,24 +212,59 @@ fun FloatingMediaPlayer(
                                             }
                                         }
                                     ) {
-                                        AnimatedContent(vm.isPlaying) {
+                                        AnimatedContent(vm.isPlaying) { playing ->
                                             Icon(
-                                                imageVector = when(it) {
+                                                modifier = Modifier.size(28.dp),
+                                                imageVector = when(playing) {
                                                     true -> Icons.Rounded.Pause
                                                     false -> Icons.Rounded.PlayArrow
                                                 },
-                                                contentDescription = null
+                                                contentDescription = if (playing) "Pause" else "Play"
                                             )
                                         }
                                     }
 
-                                    onOpenQueue?.let { openQueue ->
-                                        IconButton(
-                                            modifier = Modifier.size(36.dp),
-                                            onClick = openQueue
+                                    IconButton(
+                                        modifier = Modifier.size(40.dp),
+                                        onClick = { vm.seekForward() }
+                                    ) {
+                                        Icon(
+                                            modifier = Modifier.size(26.dp),
+                                            imageVector = when(vm.seekForwardIncrement) {
+                                                5000L -> Icons.Rounded.Forward5
+                                                10000L -> Icons.Rounded.Forward10
+                                                30000L -> Icons.Rounded.Forward30
+                                                else -> Icons.Rounded.Forward
+                                            },
+                                            contentDescription = "Skip forward"
+                                        )
+                                    }
+                                }
+
+                                onOpenQueue?.let { openQueue ->
+                                    androidx.compose.material3.Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        onClick = openQueue
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(
+                                                horizontal = if (vm.queue.isNotEmpty()) 10.dp else 8.dp,
+                                                vertical = 6.dp
+                                            ),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
+                                            if (vm.queue.isNotEmpty()) {
+                                                Text(
+                                                    text = if (vm.queue.size > 999) "999+" else vm.queue.size.toString(),
+                                                    style = MaterialTheme.typography.labelMedium,
+                                                    maxLines = 1
+                                                )
+                                            }
                                             Icon(
-                                                modifier = Modifier.size(20.dp),
+                                                modifier = Modifier.size(18.dp),
                                                 imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
                                                 contentDescription = "Up Next"
                                             )
@@ -246,14 +273,48 @@ fun FloatingMediaPlayer(
                                 }
                             }
 
-                            androidx.compose.material3.LinearProgressIndicator(
-                                progress = { progressState.value },
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(2.5.dp),
-                                color = MaterialTheme.colorScheme.primary,
-                                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
-                            )
+                                    .height(3.5.dp)
+                            ) {
+                                androidx.compose.material3.LinearProgressIndicator(
+                                    progress = { progressState.value },
+                                    modifier = Modifier.fillMaxSize(),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                                )
+
+                                val durMs = vm.currentDuration
+                                if (durMs > 0L && (adEntities.value.isNotEmpty() || muteEntities.value.isNotEmpty())) {
+                                    val adColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.75f)
+                                    val suggestedAdColor = Color(0xFFFFB300).copy(alpha = 0.8f)
+                                    val muteTickColor = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
+                                    androidx.compose.foundation.Canvas(modifier = Modifier.matchParentSize()) {
+                                        val w = size.width
+                                        val h = size.height
+                                        val dur = durMs.toFloat().coerceAtLeast(1f)
+                                        for (ad in adEntities.value) {
+                                            val x0 = (ad.startMs / dur).coerceIn(0f, 1f) * w
+                                            val x1 = (ad.endMs / dur).coerceIn(0f, 1f) * w
+                                            drawRect(
+                                                color = if (ad.confidence >= 0.7f) adColor else suggestedAdColor,
+                                                topLeft = androidx.compose.ui.geometry.Offset(x0, 0f),
+                                                size = androidx.compose.ui.geometry.Size((x1 - x0).coerceAtLeast(3f), h)
+                                            )
+                                        }
+                                        for (mute in muteEntities.value) {
+                                            if (!mute.enabled) continue
+                                            val x = (mute.startMs / dur).coerceIn(0f, 1f) * w
+                                            drawRect(
+                                                color = muteTickColor,
+                                                topLeft = androidx.compose.ui.geometry.Offset(x, 0f),
+                                                size = androidx.compose.ui.geometry.Size(3f, h)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
