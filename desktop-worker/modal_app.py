@@ -59,7 +59,8 @@ _base_image = (
     .apt_install("ffmpeg", "cmake", "build-essential", "git", "curl")
     .env({
         "GGML_CUDA": "1",
-        "CMAKE_ARGS": "-DGGML_CUDA=1 -DCMAKE_CUDA_ARCHITECTURES=75",
+        "CMAKE_ARGS": "-DGGML_CUDA=1 -DCMAKE_CUDA_ARCHITECTURES=75 -DCMAKE_POLICY_VERSION_MINIMUM=3.5",
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
     })
     .pip_install(
         "fastapi==0.115.12",
