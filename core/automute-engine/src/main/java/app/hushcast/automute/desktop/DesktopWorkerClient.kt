@@ -197,21 +197,6 @@ object DesktopWorkerClient {
         }
     }
 
-    suspend fun cancelJob(
-        baseUrl: String,
-        token: String,
-        jobId: String,
-        certFingerprint: String = ""
-    ) = withContext(Dispatchers.IO) {
-        val normalized = normalizeUrl(baseUrl)
-        val conn = openConnection("$normalized/v1/jobs/$jobId", token, timeoutMs = 8_000, certFingerprint = certFingerprint)
-        try {
-            conn.requestMethod = "DELETE"
-            conn.responseCode
-        } finally {
-            conn.disconnect()
-        }
-    }
 
     suspend fun fetchBundle(
         baseUrl: String,
