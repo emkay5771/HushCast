@@ -232,12 +232,14 @@ class LocalMlBackend:
             candidate = self.models_dir / env_chat
             if candidate.exists():
                 return candidate
-        for p in sorted(self.models_dir.glob("*.gguf")):
-            lower = p.name.lower()
-            if "embedding" in lower:
-                continue
-            if any(k in lower for k in ("instruct", "chat", "qwen2.5", "llama-3", "gemma", "mistral")):
-                return p
+        candidates = [
+            p for p in self.models_dir.glob("*.gguf")
+            if "embedding" not in p.name.lower()
+            and any(k in p.name.lower() for k in ("instruct", "chat", "qwen2.5", "qwen3", "llama-3", "gemma", "mistral"))
+        ]
+        if candidates:
+            candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
+            return candidates[0]
         return None
 
     def chat_model_ready(self) -> bool:

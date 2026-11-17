@@ -65,7 +65,7 @@ class ChaptersTimestampTest(unittest.TestCase):
             def __init__(self, **kwargs):
                 pass
 
-            def create_completion(self, prompt, max_tokens=512, temperature=0.2):
+            def create_chat_completion(self, messages, max_tokens=512, temperature=0.2):
                 payload = {
                     "summary": "Ben Shapiro discusses the American dream, AI in education, and tech policy.",
                     "titles": [
@@ -77,7 +77,7 @@ class ChaptersTimestampTest(unittest.TestCase):
                         "Texas Infrastructure",
                     ],
                 }
-                return {"choices": [{"text": json.dumps(payload)}]}
+                return {"choices": [{"message": {"content": json.dumps(payload)}}]}
 
         fake_llama_mod = types.ModuleType("llama_cpp")
         fake_llama_mod.Llama = FakeLlama

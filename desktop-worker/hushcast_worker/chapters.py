@@ -255,8 +255,25 @@ def generate_chapters_and_summary(
                 n_gpu_layers=-1,
                 verbose=False,
             )
-            out = chat_llm.create_completion(prompt, max_tokens=512, temperature=0.2)
-            raw_text = out["choices"][0]["text"].strip()
+            if hasattr(chat_llm, "create_chat_completion"):
+                out = chat_llm.create_chat_completion(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a concise podcast editor. Return ONLY valid JSON with no "
+                                "markdown fences or extra commentary."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    max_tokens=512,
+                    temperature=0.2,
+                )
+                raw_text = out["choices"][0]["message"]["content"].strip()
+            else:
+                out = chat_llm.create_completion(prompt, max_tokens=512, temperature=0.2)
+                raw_text = out["choices"][0]["text"].strip()
             m_json = re.search(r"\{.*\}", raw_text, flags=re.DOTALL)
             if m_json:
                 parsed = json.loads(m_json.group(0))
