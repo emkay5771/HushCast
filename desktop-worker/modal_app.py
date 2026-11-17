@@ -77,7 +77,7 @@ _base_image = (
         extra_options="--no-binary pywhispercpp",
     )
     .pip_install(
-        "llama-cpp-python==0.3.8",
+        "llama-cpp-python==0.3.19",
         extra_options="--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124",
     )
     .run_commands(
