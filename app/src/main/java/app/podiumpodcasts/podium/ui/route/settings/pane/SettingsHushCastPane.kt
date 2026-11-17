@@ -143,10 +143,14 @@ fun SettingsHushCastPane(
                 )
             }
 
-            // 1. On-Device AI Models Card (collapsible when Desktop Companion is active)
+            // 1. On-Device AI Models Card (collapsible when Desktop/Cloud Worker is active)
             item {
+                val desktopActive = remember {
+                    app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) &&
+                        app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+                }
                 var showLocalModels by remember {
-                    mutableStateOf(!app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context))
+                    mutableStateOf(!desktopActive)
                 }
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -175,17 +179,21 @@ fun SettingsHushCastPane(
                         }
                         if (!showLocalModels) {
                             Text(
-                                text = if (modelsReady) "Ready ($downloadedMb MB local). Tap to manage." else "Tap to download or manage on-device models.",
+                                text = when {
+                                    modelsReady -> "Ready ($downloadedMb MB local). Tap to manage."
+                                    desktopActive -> "Optional offline fallback. Your Cloud / Desktop Worker handles analysis."
+                                    else -> "Tap to download or manage on-device models."
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         } else {
                             Spacer(Modifier.height(4.dp))
                         Text(
-                            if (modelsReady) {
-                                "All models ready ($downloadedMb MB stored locally). $0 server cost, 100% private."
-                            } else {
-                                "Download Whisper base.en q5_1 (58 MB), Silero VAD (2 MB), and Qwen3-Embedding Q4 (395 MB) over Wi-Fi."
+                            when {
+                                modelsReady -> "All models ready ($downloadedMb MB stored locally). $0 server cost, 100% private."
+                                desktopActive -> "Optional offline fallback: your Cloud / Desktop Worker is active, so on-device models aren't needed unless you want offline analysis."
+                                else -> "Download Whisper base.en q5_1 (58 MB), Silero VAD (2 MB), and Qwen3-Embedding Q4 (395 MB) over Wi-Fi."
                             },
                             style = MaterialTheme.typography.bodySmall
                         )

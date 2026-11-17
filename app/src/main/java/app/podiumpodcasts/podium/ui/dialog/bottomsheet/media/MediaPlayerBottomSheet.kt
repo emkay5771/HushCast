@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CloseFullscreen
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.Download
@@ -40,6 +41,7 @@ import androidx.compose.material.icons.rounded.Forward30
 import androidx.compose.material.icons.rounded.Forward5
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.Pause
@@ -52,6 +54,8 @@ import androidx.compose.material.icons.rounded.Replay5
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.Tune
+import app.podiumpodcasts.podium.PlayerToolbarAction
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -290,6 +294,124 @@ fun MediaPlayerBottomSheet(
 
         after()
         onDismiss()
+    }
+
+    val setupCompleted by settingsRepository.hushCast.setupCompleted.collectAsState(initial = false)
+    val shieldBadge = remember(analysisStatus?.badge) {
+        runCatching { analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) } }.getOrNull()
+            ?: ReadinessBadge.NOT_PROCESSED
+    }
+    val isFavorite by remember(episodeId) {
+        if (episodeId.isNotBlank()) appDb.listItems().isFavorite(episodeId)
+        else kotlinx.coroutines.flow.flowOf(false)
+    }.collectAsState(initial = false)
+    val isDownloaded = remember(episodeId, currentEpisodeBundle, currentEpisodeBundle?.download) {
+        currentEpisodeBundle?.episode?.craftDownloadFile(context)?.exists() == true
+    }
+
+    var showRearrangeActionsSheet by remember { mutableStateOf(false) }
+    val availablePlayerActions = remember {
+        listOf(
+            PlayerToolbarAction.HUSHCAST,
+            PlayerToolbarAction.SPEED,
+            PlayerToolbarAction.SLEEP,
+            PlayerToolbarAction.FAVORITE,
+            PlayerToolbarAction.DOWNLOAD,
+            PlayerToolbarAction.GO_TO_PODCAST,
+            PlayerToolbarAction.EPISODE_DETAILS,
+            PlayerToolbarAction.MARK_PLAYED,
+            PlayerToolbarAction.ANALYZE
+        )
+    }
+    val configuredToolbarActions by settingsRepository.behavior.playerToolbarActions.collectAsState(
+        initial = listOf(
+            PlayerToolbarAction.HUSHCAST,
+            PlayerToolbarAction.SPEED,
+            PlayerToolbarAction.SLEEP,
+            PlayerToolbarAction.FAVORITE
+        )
+    )
+    val shortcutActions = remember(configuredToolbarActions) {
+        configuredToolbarActions.filter { it in availablePlayerActions }.take(4).ifEmpty {
+            listOf(
+                PlayerToolbarAction.HUSHCAST,
+                PlayerToolbarAction.SPEED,
+                PlayerToolbarAction.SLEEP,
+                PlayerToolbarAction.FAVORITE
+            )
+        }
+    }
+
+    fun performToolbarAction(action: PlayerToolbarAction) {
+        when (action) {
+            PlayerToolbarAction.HUSHCAST -> {
+                if (!setupCompleted) showSetupSheet = true
+                else showHushCastSheet = true
+            }
+            PlayerToolbarAction.SPEED -> showSpeedBottomSheet = true
+            PlayerToolbarAction.SLEEP -> showSleepTimerBottomSheet = true
+            PlayerToolbarAction.FAVORITE -> {
+                if (episodeId.isNotBlank()) {
+                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        appDb.lists().createFavorites()
+                        if (isFavorite) {
+                            appDb.listItems().get(-2, episodeId)?.let { item ->
+                                appDb.listItems().deleteAndReindex(-2, item.id, item.position)
+                            }
+                        } else {
+                            val pos = appDb.listItems().getNextPosition(-2) ?: 0
+                            appDb.listItems().addListItemAndRefreshItemCount(
+                                listId = -2,
+                                contentId = episodeId,
+                                isPodcast = false,
+                                position = pos
+                            )
+                        }
+                    }
+                }
+            }
+            PlayerToolbarAction.DOWNLOAD -> {
+                val ep = currentEpisodeBundle?.episode ?: return
+                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    if (isDownloaded) {
+                        app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
+                            context = context,
+                            db = appDb,
+                            episode = ep
+                        )
+                    } else {
+                        app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                            context = context,
+                            db = appDb,
+                            episodeId = ep.id
+                        )
+                    }
+                }
+            }
+            PlayerToolbarAction.GO_TO_PODCAST -> {
+                val origin = vm.metadataOrigin
+                if (onOpenPodcast != null && origin != null) {
+                    dismissGracefully { onOpenPodcast(origin) }
+                }
+            }
+            PlayerToolbarAction.EPISODE_DETAILS -> {
+                val origin = vm.metadataOrigin
+                val id = vm.metadataEpisodeId
+                if (origin != null && id != null) {
+                    dismissGracefully { onOpenEpisode(origin, id) }
+                }
+            }
+            PlayerToolbarAction.MARK_PLAYED -> {
+                if (episodeId.isNotBlank()) {
+                    scope.launch {
+                        appDb.podcastEpisodePlayStates().savePlayed(episodeId, true)
+                    }
+                }
+            }
+            PlayerToolbarAction.ANALYZE -> {
+                triggerAnalyzeNow()
+            }
+        }
     }
 
     var isFullScreen by remember { mutableStateOf(true) }
@@ -632,84 +754,13 @@ fun MediaPlayerBottomSheet(
                                         } else Modifier
                                     )
 
-                                    Spacer(Modifier.height(10.dp))
-
-                                    val badge = runCatching {
-                                        analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) }
-                                    }.getOrNull() ?: ReadinessBadge.NOT_PROCESSED
-
-                                    FlowRow(
-                                        horizontalArrangement = Arrangement.spacedBy(
-                                            8.dp,
-                                            if (compactLayout) Alignment.Start else Alignment.CenterHorizontally
-                                        ),
-                                        verticalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        when (vm.mediaSourceType) {
-                                            is SourceTypeState.Downloaded -> {
-                                                Surface(
-                                                    shape = CircleShape,
-                                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                                ) {
-                                                    Row(
-                                                        Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                                    ) {
-                                                        Icon(
-                                                            modifier = Modifier.size(14.dp),
-                                                            imageVector = Icons.Rounded.Download,
-                                                            contentDescription = stringResource(R.string.common_downloaded)
-                                                        )
-                                                        Text(
-                                                            text = stringResource(R.string.common_downloaded),
-                                                            style = MaterialTheme.typography.labelSmall
-                                                        )
-                                                    }
-                                                }
-                                            }
-
-                                            is SourceTypeState.Streaming -> {
-                                                Surface(
-                                                    shape = CircleShape,
-                                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                                                ) {
-                                                    Row(
-                                                        Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                                    ) {
-                                                        Icon(
-                                                            modifier = Modifier.size(14.dp),
-                                                            imageVector = Icons.Rounded.Podcasts,
-                                                            contentDescription = stringResource(R.string.common_streaming)
-                                                        )
-                                                        Text(
-                                                            text = stringResource(R.string.common_streaming),
-                                                            style = MaterialTheme.typography.labelSmall
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        EpisodeReadinessBadge(
-                                            badge = badge,
-                                            progressPercent = analysisStatus?.progressPercent ?: 0,
-                                            onAnalyzeNowClick = if (episodeId.isNotBlank()) {
-                                                { triggerAnalyzeNow() }
-                                            } else null
+                                    if (episodeChapters.isNotEmpty()) {
+                                        Spacer(Modifier.height(10.dp))
+                                        ActiveChapterPill(
+                                            vm = vm,
+                                            chapters = episodeChapters,
+                                            onClick = { selectedTab = MediaPlayerTab.CHAPTERS }
                                         )
-
-                                        if (episodeChapters.isNotEmpty()) {
-                                            ActiveChapterPill(
-                                                vm = vm,
-                                                chapters = episodeChapters,
-                                                onClick = { selectedTab = MediaPlayerTab.CHAPTERS }
-                                            )
-                                        }
                                     }
                                 }
                             }
@@ -934,12 +985,6 @@ fun MediaPlayerBottomSheet(
                     }
                 }
 
-                val setupCompleted by settingsRepository.hushCast.setupCompleted.collectAsState(initial = false)
-                val shieldBadge = remember(analysisStatus?.badge) {
-                    runCatching { analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) } }.getOrNull()
-                        ?: ReadinessBadge.NOT_PROCESSED
-                }
-
                 Surface(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -954,115 +999,123 @@ fun MediaPlayerBottomSheet(
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // 1. HushCast 4-state shield
-                        IconButton(
-                            onClick = {
-                                if (!setupCompleted) showSetupSheet = true
-                                else showHushCastSheet = true
-                            }
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                when {
-                                    !setupCompleted -> {
-                                        Icon(
-                                            imageVector = androidx.compose.material.icons.Icons.Outlined.Shield,
-                                            contentDescription = "Set up HushCast",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                    shieldBadge == ReadinessBadge.ANALYZING -> {
-                                        androidx.compose.material3.CircularProgressIndicator(
-                                            progress = { (analysisStatus?.progressPercent ?: 0) / 100f },
-                                            modifier = Modifier.size(28.dp),
-                                            strokeWidth = 2.dp
-                                        )
-                                        Icon(
-                                            imageVector = androidx.compose.material.icons.Icons.Outlined.Shield,
-                                            contentDescription = "Processing with HushCast",
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                    shieldBadge == ReadinessBadge.READY || shieldBadge == ReadinessBadge.WORD_MUTE_READY -> {
-                                        Icon(
-                                            imageVector = androidx.compose.material.icons.Icons.Rounded.Shield,
-                                            contentDescription = "HushCast active",
-                                            tint = MaterialTheme.colorScheme.primary
-                                        )
-                                    }
-                                    else -> {
-                                        androidx.compose.material3.BadgedBox(
-                                            badge = {
-                                                androidx.compose.material3.Badge(
-                                                    containerColor = MaterialTheme.colorScheme.primary
-                                                )
+                        shortcutActions.forEach { action ->
+                            when (action) {
+                                PlayerToolbarAction.HUSHCAST -> {
+                                    IconButton(onClick = { performToolbarAction(action) }) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            when {
+                                                !setupCompleted -> {
+                                                    Icon(
+                                                        imageVector = androidx.compose.material.icons.Icons.Outlined.Shield,
+                                                        contentDescription = "Set up HushCast",
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                                shieldBadge == ReadinessBadge.ANALYZING -> {
+                                                    androidx.compose.material3.CircularProgressIndicator(
+                                                        progress = { (analysisStatus?.progressPercent ?: 0) / 100f },
+                                                        modifier = Modifier.size(28.dp),
+                                                        strokeWidth = 2.dp
+                                                    )
+                                                    Icon(
+                                                        imageVector = androidx.compose.material.icons.Icons.Outlined.Shield,
+                                                        contentDescription = "Processing with HushCast",
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(18.dp)
+                                                    )
+                                                }
+                                                shieldBadge == ReadinessBadge.READY || shieldBadge == ReadinessBadge.WORD_MUTE_READY -> {
+                                                    Icon(
+                                                        imageVector = androidx.compose.material.icons.Icons.Rounded.Shield,
+                                                        contentDescription = "HushCast active",
+                                                        tint = MaterialTheme.colorScheme.primary
+                                                    )
+                                                }
+                                                else -> {
+                                                    androidx.compose.material3.BadgedBox(
+                                                        badge = {
+                                                            androidx.compose.material3.Badge(
+                                                                containerColor = MaterialTheme.colorScheme.primary
+                                                            )
+                                                        }
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = androidx.compose.material.icons.Icons.Outlined.Shield,
+                                                            contentDescription = "Process episode with HushCast",
+                                                            tint = MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                    }
+                                                }
                                             }
-                                        ) {
-                                            Icon(
-                                                imageVector = androidx.compose.material.icons.Icons.Outlined.Shield,
-                                                contentDescription = "Process episode with HushCast",
-                                                tint = MaterialTheme.colorScheme.onSurface
-                                            )
                                         }
                                     }
                                 }
-                            }
-                        }
-
-                        // 2. Speed
-                        androidx.compose.material3.TextButton(onClick = { showSpeedBottomSheet = true }) {
-                            Text(
-                                text = String.format(Locale.getDefault(), "%.1f×", vm.speed),
-                                style = Typography.labelLargeEmphasized,
-                                color = if(vm.speed != 1f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        // 3. Sleep timer
-                        androidx.compose.material3.IconButton(onClick = { showSleepTimerBottomSheet = true }) {
-                            Icon(
-                                imageVector = Icons.Filled.Bedtime,
-                                contentDescription = stringResource(R.string.common_sleep_timer),
-                                tint = if(sleepTimerState.value != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-
-                        // 4. Favorite
-                        val isFavorite by remember(episodeId) {
-                            if (episodeId.isNotBlank()) appDb.listItems().isFavorite(episodeId)
-                            else kotlinx.coroutines.flow.flowOf(false)
-                        }.collectAsState(initial = false)
-                        androidx.compose.material3.IconButton(
-                            onClick = {
-                                if (episodeId.isNotBlank()) {
-                                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                        appDb.lists().createFavorites()
-                                        if (isFavorite) {
-                                            appDb.listItems().get(-2, episodeId)?.let { item ->
-                                                appDb.listItems().deleteAndReindex(-2, item.id, item.position)
-                                            }
-                                        } else {
-                                            val pos = appDb.listItems().getNextPosition(-2) ?: 0
-                                            appDb.listItems().addListItemAndRefreshItemCount(
-                                                listId = -2,
-                                                contentId = episodeId,
-                                                isPodcast = false,
-                                                position = pos
-                                            )
-                                        }
+                                PlayerToolbarAction.SPEED -> {
+                                    androidx.compose.material3.TextButton(onClick = { performToolbarAction(action) }) {
+                                        Text(
+                                            text = String.format(Locale.getDefault(), "%.1f×", vm.speed),
+                                            style = Typography.labelLargeEmphasized,
+                                            color = if (vm.speed != 1f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
                                     }
                                 }
+                                PlayerToolbarAction.SLEEP -> {
+                                    IconButton(onClick = { performToolbarAction(action) }) {
+                                        Icon(
+                                            imageVector = Icons.Filled.Bedtime,
+                                            contentDescription = stringResource(R.string.common_sleep_timer),
+                                            tint = if (sleepTimerState.value != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                                PlayerToolbarAction.FAVORITE -> {
+                                    IconButton(onClick = { performToolbarAction(action) }) {
+                                        Icon(
+                                            imageVector = if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                                            contentDescription = "Favorite",
+                                            tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                                PlayerToolbarAction.DOWNLOAD -> {
+                                    IconButton(onClick = { performToolbarAction(action) }) {
+                                        Icon(
+                                            imageVector = if (isDownloaded) Icons.Rounded.DeleteOutline else Icons.Rounded.Download,
+                                            contentDescription = if (isDownloaded) "Remove downloaded file" else "Download episode",
+                                            tint = if (isDownloaded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+                                }
+                                PlayerToolbarAction.GO_TO_PODCAST -> {
+                                    IconButton(
+                                        enabled = onOpenPodcast != null && vm.metadataOrigin != null,
+                                        onClick = { performToolbarAction(action) }
+                                    ) {
+                                        Icon(Icons.Rounded.Podcasts, contentDescription = "Go to Podcast")
+                                    }
+                                }
+                                PlayerToolbarAction.EPISODE_DETAILS -> {
+                                    IconButton(onClick = { performToolbarAction(action) }) {
+                                        Icon(Icons.Rounded.Info, contentDescription = "Episode Details & Notes")
+                                    }
+                                }
+                                PlayerToolbarAction.MARK_PLAYED -> {
+                                    IconButton(onClick = { performToolbarAction(action) }) {
+                                        Icon(Icons.Rounded.Done, contentDescription = "Mark as Played")
+                                    }
+                                }
+                                PlayerToolbarAction.ANALYZE -> {
+                                    IconButton(onClick = { performToolbarAction(action) }) {
+                                        Icon(Icons.Rounded.AutoAwesome, contentDescription = "Analyze with HushCast AI")
+                                    }
+                                }
+                                else -> Unit
                             }
-                        ) {
-                            Icon(
-                                imageVector = if (isFavorite) androidx.compose.material.icons.Icons.Rounded.Star else androidx.compose.material.icons.Icons.Rounded.StarBorder,
-                                contentDescription = "Favorite",
-                                tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                            )
                         }
 
-                        // 5. More
-                        androidx.compose.material3.IconButton(onClick = { showMoreSheet = true }) {
+                        // Pinned More button
+                        IconButton(onClick = { showMoreSheet = true }) {
                             Icon(
                                 imageVector = Icons.Rounded.MoreHoriz,
                                 contentDescription = "More"
@@ -1075,12 +1128,18 @@ fun MediaPlayerBottomSheet(
 
 
         if (showMoreSheet) {
+            val overflowActions = availablePlayerActions.filter { action ->
+                action !in shortcutActions &&
+                    (action != PlayerToolbarAction.GO_TO_PODCAST || (onOpenPodcast != null && vm.metadataOrigin != null))
+            }
+            val totalRows = overflowActions.size + 1
             ModalBottomSheet(
                 onDismissRequest = { showMoreSheet = false }
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
                 ) {
@@ -1089,58 +1148,184 @@ fun MediaPlayerBottomSheet(
                         style = Typography.titleLargeEmphasized,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
-                    if (onOpenPodcast != null && vm.metadataOrigin != null) {
+                    overflowActions.forEachIndexed { idx, action ->
+                        val label = when (action) {
+                            PlayerToolbarAction.DOWNLOAD -> if (isDownloaded) "Remove Downloaded File" else "Download Episode"
+                            PlayerToolbarAction.FAVORITE -> if (isFavorite) "Remove from Favorites" else "Star Episode"
+                            PlayerToolbarAction.SPEED -> "Playback Speed (${String.format(Locale.getDefault(), "%.1f×", vm.speed)})"
+                            else -> action.label
+                        }
+                        val description = when (action) {
+                            PlayerToolbarAction.GO_TO_PODCAST -> vm.mediaMetadata?.subtitle?.toString() ?: ""
+                            PlayerToolbarAction.ANALYZE -> "Scan for muted words and sponsor segments"
+                            else -> null
+                        }
+                        val iconVec = when (action) {
+                            PlayerToolbarAction.HUSHCAST -> Icons.Rounded.Shield
+                            PlayerToolbarAction.SPEED -> Icons.Filled.Speed
+                            PlayerToolbarAction.SLEEP -> Icons.Filled.Bedtime
+                            PlayerToolbarAction.FAVORITE -> if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder
+                            PlayerToolbarAction.DOWNLOAD -> if (isDownloaded) Icons.Rounded.DeleteOutline else Icons.Rounded.Download
+                            PlayerToolbarAction.GO_TO_PODCAST -> Icons.Rounded.Podcasts
+                            PlayerToolbarAction.EPISODE_DETAILS -> Icons.Rounded.Info
+                            PlayerToolbarAction.MARK_PLAYED -> Icons.Rounded.Done
+                            PlayerToolbarAction.ANALYZE -> Icons.Rounded.AutoAwesome
+                            else -> Icons.Rounded.MoreHoriz
+                        }
                         SettingsListItem(
-                            icon = { Icon(Icons.Rounded.Podcasts, "Go to Podcast") },
-                            label = "Go to Podcast",
-                            description = vm.mediaMetadata?.subtitle?.toString() ?: "",
-                            index = 0,
-                            count = 4,
+                            icon = { Icon(iconVec, contentDescription = label) },
+                            label = label,
+                            description = description,
+                            index = idx,
+                            count = totalRows,
                             onClick = {
                                 showMoreSheet = false
-                                dismissGracefully { onOpenPodcast(vm.metadataOrigin!!) }
+                                performToolbarAction(action)
                             }
                         )
                     }
                     SettingsListItem(
-                        icon = { Icon(Icons.Rounded.Info, "Episode Details") },
-                        label = "Episode Details & Notes",
-                        index = if (onOpenPodcast != null && vm.metadataOrigin != null) 1 else 0,
-                        count = if (onOpenPodcast != null && vm.metadataOrigin != null) 4 else 3,
+                        icon = { Icon(Icons.Rounded.Tune, contentDescription = "Rearrange Actions") },
+                        label = "Rearrange Actions",
+                        description = "Customize shortcuts on the player action bar",
+                        index = overflowActions.size,
+                        count = totalRows,
                         onClick = {
                             showMoreSheet = false
-                            val origin = vm.metadataOrigin
-                            val id = vm.metadataEpisodeId
-                            if (origin != null && id != null) {
-                                dismissGracefully { onOpenEpisode(origin, id) }
-                            }
+                            showRearrangeActionsSheet = true
                         }
                     )
-                    SettingsListItem(
-                        icon = { Icon(Icons.Rounded.Done, "Mark as Played") },
-                        label = "Mark as Played",
-                        index = if (onOpenPodcast != null && vm.metadataOrigin != null) 2 else 1,
-                        count = if (onOpenPodcast != null && vm.metadataOrigin != null) 4 else 3,
-                        onClick = {
-                            showMoreSheet = false
-                            if (episodeId.isNotBlank()) {
-                                scope.launch {
-                                    appDb.podcastEpisodePlayStates().savePlayed(episodeId, true)
+                }
+            }
+        }
+
+        if (showRearrangeActionsSheet) {
+            val morePool = availablePlayerActions.filter { it !in shortcutActions }
+            ModalBottomSheet(
+                onDismissRequest = { showRearrangeActionsSheet = false }
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Rearrange Actions",
+                        style = Typography.titleLargeEmphasized
+                    )
+                    Text(
+                        text = "Shortcut on player (up to 4)",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                    shortcutActions.forEachIndexed { idx, action ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = action.label,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(
+                                        enabled = idx > 0,
+                                        onClick = {
+                                            val updated = shortcutActions.toMutableList()
+                                            val item = updated.removeAt(idx)
+                                            updated.add(idx - 1, item)
+                                            scope.launch {
+                                                settingsRepository.behavior.setPlayerToolbarActions(updated)
+                                            }
+                                        }
+                                    ) {
+                                        Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move up")
+                                    }
+                                    IconButton(
+                                        enabled = idx < shortcutActions.lastIndex,
+                                        onClick = {
+                                            val updated = shortcutActions.toMutableList()
+                                            val item = updated.removeAt(idx)
+                                            updated.add(idx + 1, item)
+                                            scope.launch {
+                                                settingsRepository.behavior.setPlayerToolbarActions(updated)
+                                            }
+                                        }
+                                    ) {
+                                        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move down")
+                                    }
+                                    if (shortcutActions.size > 1) {
+                                        androidx.compose.material3.TextButton(
+                                            onClick = {
+                                                val updated = shortcutActions.toMutableList().apply { removeAt(idx) }
+                                                scope.launch {
+                                                    settingsRepository.behavior.setPlayerToolbarActions(updated)
+                                                }
+                                            }
+                                        ) {
+                                            Text("Hide")
+                                        }
+                                    }
                                 }
                             }
                         }
+                    }
+
+                    Text(
+                        text = "More actions",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 8.dp)
                     )
-                    SettingsListItem(
-                        icon = { Icon(Icons.Rounded.AutoAwesome, "Re-analyze Audio") },
-                        label = "Analyze with HushCast AI",
-                        description = "Scan for muted words and sponsor segments",
-                        index = if (onOpenPodcast != null && vm.metadataOrigin != null) 3 else 2,
-                        count = if (onOpenPodcast != null && vm.metadataOrigin != null) 4 else 3,
-                        onClick = {
-                            showMoreSheet = false
-                            triggerAnalyzeNow()
+                    morePool.forEach { action ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerLow,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = action.label,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        val updated = shortcutActions.toMutableList()
+                                        if (updated.size >= 4) {
+                                            updated[updated.lastIndex] = action
+                                        } else {
+                                            updated.add(action)
+                                        }
+                                        scope.launch {
+                                            settingsRepository.behavior.setPlayerToolbarActions(updated)
+                                        }
+                                    }
+                                ) {
+                                    Text(if (shortcutActions.size >= 4) "Swap in" else "Add")
+                                }
+                            }
                         }
-                    )
+                    }
+                    Spacer(Modifier.height(12.dp))
                 }
             }
         }

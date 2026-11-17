@@ -1,3 +1,21 @@
+# HushCast v1.0.1-hushcast
+
+## What's New
+- **Player Action Bar & Overflow**:
+  - Made the player action bar customizable (up to 4 shortcuts + pinned **More**) with a Pocket Casts-style **Rearrange Actions** sheet (`SettingsRepository.behavior.playerToolbarActions`).
+  - Removed the status and Downloaded/Streaming chips from the player header (the 4-state HushCast shield in the action bar now serves as the status indicator) and added **Download Episode / Remove Downloaded File** to the overflow menu (and customizable action bar).
+- **Analysis Pipeline & Live Activity**:
+  - Increased Cloud/Modal HTTPS read timeout from 35s to 90s in [`DesktopWorkerClient`](https://github.com/emkay5771/HushCast/blob/main/core/automute-engine/src/main/java/app/hushcast/automute/desktop/DesktopWorkerClient.kt) so cold-starting GPU containers don't time out during job submission.
+  - Skipped doomed on-device analysis fallback when local models aren't downloaded, and updated Live Activity progress labels to clear, plain-English messages.
+  - Clarified on-device model messaging in [`SettingsHushCastPane`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/route/settings/pane/SettingsHushCastPane.kt) when Cloud/Desktop Worker is active.
+- **Backup, Restore, Permissions & Up Next**:
+  - Fixed the `SQLiteDatabase: attempt to re-open an already-closed object` crash in [`RestoreRoute`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/route/restore/RestoreRoute.kt) by removing premature `db.close()` on screen entry and cancelling WorkManager jobs before replacing DB files.
+  - Extended backup & restore in [`DatabaseManager`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/manager/DatabaseManager.kt) to include portable `HushCastPrefs` AI/Worker configuration (including re-encrypted worker tokens) and playback state alongside `podiumDB`, `AutoMuteDatabase`, and DataStore settings.
+  - Added startup `POST_NOTIFICATIONS` permission request on Android 13+ in [`AppActivity`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/AppActivity.kt).
+  - Updated [`MediaPlayerViewModel`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/vm/MediaPlayerViewModel.kt) so adding an episode to Up Next when nothing is playing loads it as the first item and opens the player sheet.
+
+---
+
 # HushCast v1.0.0-hushcast
 
 ## What's New

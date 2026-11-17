@@ -6,9 +6,15 @@ import android.net.Uri
 import android.text.format.DateFormat
 import androidx.core.content.FileProvider
 import androidx.room.Room
+import androidx.work.WorkManager
+import app.hushcast.automute.engine.DownloadAnalysisMethod
+import app.hushcast.automute.engine.HushCastPrefs
 import app.hushcast.automute.storage.AutoMuteDatabase
 import app.podiumpodcasts.podium.api.db.ALL_MIGRATIONS
 import app.podiumpodcasts.podium.api.db.AppDatabase
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -20,6 +26,7 @@ import java.util.zip.ZipOutputStream
 const val DATABASE_NAME = "podiumDB"
 const val AUTOMUTE_DATABASE_NAME = "hushcast_automute.db"
 const val SETTINGS_BACKUP_NAME = "settings.preferences_pb"
+const val HUSHCAST_CONFIG_BACKUP_NAME = "hushcast_config.json"
 const val DATABASE_EXTENSION = "podiumdb"
 
 val DATABASE_BACKUP_FILES = arrayOf(
@@ -31,10 +38,28 @@ val DATABASE_BACKUP_FILES = arrayOf(
     "$AUTOMUTE_DATABASE_NAME-wal"
 )
 
+@Serializable
+data class HushCastBackupConfig(
+    val fastModelEnabled: Boolean = false,
+    val fastAttentionEnabled: Boolean = false,
+    val analyzeOnlyWhileCharging: Boolean = false,
+    val desktopWorkerEnabled: Boolean = false,
+    val desktopWorkerUrl: String = "",
+    val desktopWorkerToken: String = "",
+    val desktopWorkerFingerprint: String = "",
+    val autoDownloadMethod: String = DownloadAnalysisMethod.AUTO.name,
+    val lastPlayingEpisodeId: String? = null
+)
+
 class DatabaseManager {
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        private val backupJson = Json {
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+        }
 
         fun build(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -93,6 +118,19 @@ class DatabaseManager {
                 }
 
                 val dataStoreFile = File(appCtx.filesDir, "datastore/settings.preferences_pb")
+                val playbackPrefs = appCtx.getSharedPreferences("hushcast_playback_state", Context.MODE_PRIVATE)
+                val hushCastConfig = HushCastBackupConfig(
+                    fastModelEnabled = HushCastPrefs.isFastModelEnabled(appCtx),
+                    fastAttentionEnabled = HushCastPrefs.isFastAttentionEnabled(appCtx),
+                    analyzeOnlyWhileCharging = HushCastPrefs.isAnalyzeOnlyWhileCharging(appCtx),
+                    desktopWorkerEnabled = HushCastPrefs.isDesktopWorkerEnabled(appCtx),
+                    desktopWorkerUrl = HushCastPrefs.getDesktopWorkerUrl(appCtx),
+                    desktopWorkerToken = HushCastPrefs.getDesktopWorkerToken(appCtx),
+                    desktopWorkerFingerprint = HushCastPrefs.getDesktopWorkerFingerprint(appCtx),
+                    autoDownloadMethod = HushCastPrefs.getAutoDownloadMethod(appCtx).name,
+                    lastPlayingEpisodeId = playbackPrefs.getString("last_playing_episode_id", null)
+                )
+                val configBytes = backupJson.encodeToString(hushCastConfig).toByteArray(Charsets.UTF_8)
 
                 FileOutputStream(file).use { outputStream ->
                     ZipOutputStream(BufferedOutputStream(outputStream)).use { zipOut ->
@@ -108,6 +146,9 @@ class DatabaseManager {
                             dataStoreFile.inputStream().use { it.copyTo(zipOut) }
                             zipOut.closeEntry()
                         }
+                        zipOut.putNextEntry(ZipEntry(HUSHCAST_CONFIG_BACKUP_NAME))
+                        zipOut.write(configBytes)
+                        zipOut.closeEntry()
                     }
                 }
             } finally {
@@ -144,6 +185,12 @@ class DatabaseManager {
             return true
         }
 
+        private fun isRawSqliteBackup(context: Context, uri: Uri): Boolean {
+            val header = ByteArray(16)
+            val read = context.contentResolver.openInputStream(uri)?.use { it.read(header) } ?: 0
+            return read == 16 && String(header, Charsets.US_ASCII) == "SQLite format 3\u0000"
+        }
+
         fun isRestoreFileValid(context: Context, uri: Uri): Boolean {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 ZipInputStream(input).use { zipInputStream ->
@@ -156,12 +203,13 @@ class DatabaseManager {
                 }
             }
 
-            return false
+            return isRawSqliteBackup(context, uri)
         }
 
         fun restoreFromBackup(context: Context, uri: Uri) {
             val appCtx = context.applicationContext
-            // F10: Close all open Room instances and clear WAL/SHM before replacing database files
+            // Cancel background workers before closing Room instances so they don't touch closed DBs
+            runCatching { WorkManager.getInstance(appCtx).cancelAllWork() }
             closeInstance()
             AutoMuteDatabase.closeInstance()
 
@@ -178,11 +226,13 @@ class DatabaseManager {
             }
 
             val dsDir = File(appCtx.filesDir, "datastore").apply { mkdirs() }
+            var restoredAnyZipEntry = false
 
             appCtx.contentResolver.openInputStream(uri)?.use { inputStream ->
                 ZipInputStream(inputStream).use { zipInputStream ->
                     var entry = zipInputStream.nextEntry
                     while (entry != null) {
+                        restoredAnyZipEntry = true
                         when (entry.name) {
                             in DATABASE_BACKUP_FILES -> {
                                 val destination = File(dbDir, entry.name)
@@ -196,9 +246,41 @@ class DatabaseManager {
                                     zipInputStream.copyTo(outputStream)
                                 }
                             }
+                            HUSHCAST_CONFIG_BACKUP_NAME -> {
+                                val raw = zipInputStream.readBytes().toString(Charsets.UTF_8)
+                                runCatching {
+                                    val cfg = backupJson.decodeFromString<HushCastBackupConfig>(raw)
+                                    HushCastPrefs.setFastModelEnabled(appCtx, cfg.fastModelEnabled)
+                                    HushCastPrefs.setFastAttentionEnabled(appCtx, cfg.fastAttentionEnabled)
+                                    HushCastPrefs.setAnalyzeOnlyWhileCharging(appCtx, cfg.analyzeOnlyWhileCharging)
+                                    HushCastPrefs.setDesktopWorkerEnabled(appCtx, cfg.desktopWorkerEnabled)
+                                    HushCastPrefs.setDesktopWorkerUrl(appCtx, cfg.desktopWorkerUrl)
+                                    HushCastPrefs.setDesktopWorkerToken(appCtx, cfg.desktopWorkerToken)
+                                    HushCastPrefs.setDesktopWorkerFingerprint(appCtx, cfg.desktopWorkerFingerprint)
+                                    runCatching {
+                                        DownloadAnalysisMethod.valueOf(cfg.autoDownloadMethod)
+                                    }.getOrNull()?.let { method ->
+                                        HushCastPrefs.setAutoDownloadMethod(appCtx, method)
+                                    }
+                                    val playbackPrefs = appCtx.getSharedPreferences("hushcast_playback_state", Context.MODE_PRIVATE)
+                                    if (cfg.lastPlayingEpisodeId != null) {
+                                        playbackPrefs.edit().putString("last_playing_episode_id", cfg.lastPlayingEpisodeId).apply()
+                                    } else {
+                                        playbackPrefs.edit().remove("last_playing_episode_id").apply()
+                                    }
+                                }
+                            }
                         }
                         zipInputStream.closeEntry()
                         entry = zipInputStream.nextEntry
+                    }
+                }
+            }
+
+            if (!restoredAnyZipEntry && isRawSqliteBackup(appCtx, uri)) {
+                appCtx.contentResolver.openInputStream(uri)?.use { input ->
+                    File(dbDir, DATABASE_NAME).outputStream().use { output ->
+                        input.copyTo(output)
                     }
                 }
             }

@@ -30,7 +30,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -42,7 +41,6 @@ import app.podiumpodcasts.podium.ui.component.common.BackButton
 import app.podiumpodcasts.podium.ui.component.layout.ErrorLayout
 import app.podiumpodcasts.podium.ui.component.layout.InfoLayout
 import app.podiumpodcasts.podium.ui.component.layout.LoadingLayout
-import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.vm.RestoreViewModel
 import app.podiumpodcasts.podium.ui.vm.State
 
@@ -52,7 +50,6 @@ fun RestoreRoute() {
     val activity = LocalActivity.current
 
     val context = LocalContext.current
-    val db = LocalDatabase.current
 
     val vm = viewModel<RestoreViewModel>()
 
@@ -61,8 +58,6 @@ fun RestoreRoute() {
     ) { uri: Uri? ->
         uri?.let { vm.selectFile(context, uri) }
     }
-
-    LaunchedEffect(Unit) { db.close() }
 
     @Composable
     fun SelectBackupFileButton() {
@@ -209,6 +204,21 @@ fun RestoreRoute() {
                                 )
                             }
                         )
+                    }
+
+                    is State.Error -> {
+                        ErrorLayout(
+                            title = { stringResource(R.string.route_restore_invalid_backup_file) }
+                        ) {
+                            Text(
+                                text = state.reason,
+                                textAlign = TextAlign.Center
+                            )
+
+                            Spacer(Modifier.height(32.dp))
+
+                            SelectBackupFileButton()
+                        }
                     }
 
                     is State.Restart -> {

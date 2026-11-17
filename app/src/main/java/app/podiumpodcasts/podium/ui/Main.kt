@@ -125,6 +125,13 @@ fun Main(
             defaultShowMediaPlayerBottomSheet = false
         )
     }
+    val playerVm = viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+    LaunchedEffect(playerVm.openPlayerSheetNonce) {
+        if (playerVm.openPlayerSheetNonce > 0L) {
+            vm.showMediaPlayerBottomSheet.value = true
+            playerVm.openPlayerSheetNonce = 0L
+        }
+    }
 
     val settingsRepository = LocalSettingsRepository.current
     val bottomBarRaw = settingsRepository.appearance.bottomBarItemsRaw

@@ -66,14 +66,15 @@ enum class HeadsetPrevAction(val label: String) {
 }
 
 enum class PlayerToolbarAction(val label: String) {
-    SPEED("Speed"),
     HUSHCAST("HushCast"),
+    SPEED("Speed"),
     SLEEP("Sleep timer"),
-    CHAPTERS("Chapters"),
-    SHARE("Share"),
-    DOWNLOAD("Download"),
     FAVORITE("Favorite"),
-    MARK_PLAYED("Mark played")
+    DOWNLOAD("Download"),
+    GO_TO_PODCAST("Go to Podcast"),
+    EPISODE_DETAILS("Episode Details & Notes"),
+    MARK_PLAYED("Mark played"),
+    ANALYZE("Analyze with HushCast AI")
 }
 
 object SettingsKeys {
@@ -513,16 +514,15 @@ class SettingsRepository(val context: Context) {
         val playerToolbarActions: Flow<List<PlayerToolbarAction>> = dataStore.data
             .map { preferences ->
                 val raw = preferences[SettingsKeys.BEHAVIOR_PLAYER_TOOLBAR_ACTIONS]
-                    ?: "SPEED,HUSHCAST,SLEEP,CHAPTERS,SHARE"
+                    ?: "HUSHCAST,SPEED,SLEEP,FAVORITE"
                 raw.split(",").mapNotNull { token ->
                     runCatching { PlayerToolbarAction.valueOf(token.trim()) }.getOrNull()
                 }.ifEmpty {
                     listOf(
-                        PlayerToolbarAction.SPEED,
                         PlayerToolbarAction.HUSHCAST,
+                        PlayerToolbarAction.SPEED,
                         PlayerToolbarAction.SLEEP,
-                        PlayerToolbarAction.CHAPTERS,
-                        PlayerToolbarAction.SHARE
+                        PlayerToolbarAction.FAVORITE
                     )
                 }
             }

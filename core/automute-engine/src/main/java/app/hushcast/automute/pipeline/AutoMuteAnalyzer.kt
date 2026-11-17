@@ -179,7 +179,7 @@ class AutoMuteAnalyzer(
                     val pct = (5 + (fraction * 54f).toInt()).coerceIn(5, 59)
                     if (pct > lastPct) {
                         lastPct = pct
-                        onProgress(AnalysisProgress(pct, "Extracting acoustic features ($pct%)", ReadinessBadge.WORD_MUTE_READY))
+                        onProgress(AnalysisProgress(pct, "Preparing audio ($pct%)", ReadinessBadge.WORD_MUTE_READY))
                     }
                 }
                 encoderDelayMs = info.encoderDelayMs
@@ -334,7 +334,7 @@ class AutoMuteAnalyzer(
                 val pct = (70 + (fraction * 19f).toInt()).coerceIn(70, 89)
                 if (pct > lastEmbedPct) {
                     lastEmbedPct = pct
-                    onProgress(AnalysisProgress(pct, "Embedding sentences ($pct%)", ReadinessBadge.WORD_MUTE_READY))
+                    onProgress(AnalysisProgress(pct, "Scanning for ads ($pct%)", ReadinessBadge.WORD_MUTE_READY))
                 }
             }
             peakRssMb = maxOf(peakRssMb, currentRssMb())

@@ -1,11 +1,15 @@
 package app.podiumpodcasts.podium
 
+import android.Manifest
 import android.content.ComponentName
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -16,6 +20,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.content.ContextCompat
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import app.podiumpodcasts.podium.background.PlaybackService
@@ -50,11 +55,16 @@ class AppActivity : ComponentActivity() {
     private var pendingPairing by mutableStateOf<PendingWorkerPairing?>(null)
     private var pairingErrorMessage by mutableStateOf<String?>(null)
 
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         if (savedInstanceState == null) {
             handleWorkerPairingIntent(intent)
+            requestNotificationPermissionIfNeeded()
         }
 
         val deepLink = intent.extractDeepLink()
@@ -182,6 +192,17 @@ class AppActivity : ComponentActivity() {
             host = host,
             token = token
         )
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            return
+        }
+        val prefs = getSharedPreferences("hushcast_startup", MODE_PRIVATE)
+        if (prefs.getBoolean("requested_post_notifications", false)) return
+        prefs.edit().putBoolean("requested_post_notifications", true).apply()
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
     private fun isPrivateLanOrLocalHost(host: String): Boolean {

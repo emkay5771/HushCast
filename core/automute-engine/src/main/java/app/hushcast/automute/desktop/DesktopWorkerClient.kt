@@ -333,7 +333,7 @@ object DesktopWorkerClient {
             conn.sslSocketFactory = sslCtx.socketFactory
             conn.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true }
         }
-        conn.connectTimeout = timeoutMs
+        conn.connectTimeout = timeoutMs.coerceAtMost(20_000)
         conn.readTimeout = timeoutMs
         if (token.isNotBlank()) {
             conn.setRequestProperty("Authorization", "Bearer $token")

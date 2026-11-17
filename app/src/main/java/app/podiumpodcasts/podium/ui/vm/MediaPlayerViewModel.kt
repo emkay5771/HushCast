@@ -62,6 +62,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
     private var mediaController: MediaController? = null
 
     var isPlayerVisible by mutableStateOf(false)
+    var openPlayerSheetNonce by mutableLongStateOf(0L)
 
     var isPlaying by mutableStateOf(false)
     var isLoading by mutableStateOf(false)
@@ -190,14 +191,45 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     private fun oldIdNotBlank(id: String?): Boolean = !id.isNullOrBlank()
 
+    private fun loadAsFirstAndOpenPlayer(
+        context: Context,
+        bundle: PodcastEpisodeBundle
+    ) {
+        val controller = mediaController ?: return
+        appContext = context.applicationContext
+        saveLastPlayingEpisodeId(bundle.episode.id)
+
+        if (bundle.episode.new) {
+            viewModelScope.launch(Dispatchers.IO) {
+                db.podcastEpisodes().unnewAndUpdateNewEpisodesCount(
+                    origin = bundle.episode.origin,
+                    episodeId = bundle.episode.id
+                )
+            }
+        }
+
+        val mediaItem = bundle.episode.createMediaItem(context, bundle.playState)
+        val startPosMs = ((bundle.playState?.state ?: 0) * 1000L).coerceAtLeast(0L)
+        controller.setMediaItem(mediaItem, startPosMs)
+        controller.prepare()
+        syncQueue(persist = true)
+        openPlayerSheetNonce = System.currentTimeMillis().coerceAtLeast(openPlayerSheetNonce + 1L)
+        autoDownloadIfEnabled(context, bundle)
+    }
+
     fun enqueue(
         context: Context,
         bundle: PodcastEpisodeBundle
     ) {
+        val controller = mediaController ?: return
+        if (controller.mediaItemCount == 0) {
+            loadAsFirstAndOpenPlayer(context, bundle)
+            return
+        }
         if (bundle.episode.id == metadataEpisodeId || queue.contains(bundle.episode.id)) return
         val mediaItem = bundle.episode.createMediaItem(context, bundle.playState)
 
-        mediaController?.addMediaItem(mediaItem)
+        controller.addMediaItem(mediaItem)
         syncQueue(persist = true)
         autoDownloadIfEnabled(context, bundle)
     }
@@ -206,11 +238,14 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         context: Context,
         bundle: PodcastEpisodeBundle
     ) {
-        if (bundle.episode.id == metadataEpisodeId || queue.contains(bundle.episode.id)) return
         val controller = mediaController ?: return
+        if (controller.mediaItemCount == 0) {
+            loadAsFirstAndOpenPlayer(context, bundle)
+            return
+        }
+        if (bundle.episode.id == metadataEpisodeId || queue.contains(bundle.episode.id)) return
         val mediaItem = bundle.episode.createMediaItem(context, bundle.playState)
-        val insertIndex = if (controller.mediaItemCount == 0) 0
-        else (controller.currentMediaItemIndex + 1).coerceIn(0, controller.mediaItemCount)
+        val insertIndex = (controller.currentMediaItemIndex + 1).coerceIn(0, controller.mediaItemCount)
 
         controller.addMediaItem(insertIndex, mediaItem)
         syncQueue(persist = true)
@@ -219,8 +254,14 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     fun playNextMediaItem(mediaItem: MediaItem) {
         val controller = mediaController ?: return
-        val insertIndex = if (controller.mediaItemCount == 0) 0
-        else (controller.currentMediaItemIndex + 1).coerceIn(0, controller.mediaItemCount)
+        if (controller.mediaItemCount == 0) {
+            controller.setMediaItem(mediaItem)
+            controller.prepare()
+            syncQueue(persist = true)
+            openPlayerSheetNonce = System.currentTimeMillis().coerceAtLeast(openPlayerSheetNonce + 1L)
+            return
+        }
+        val insertIndex = (controller.currentMediaItemIndex + 1).coerceIn(0, controller.mediaItemCount)
         controller.addMediaItem(insertIndex, mediaItem)
         syncQueue(persist = true)
     }
