@@ -341,6 +341,7 @@ class PodcastEpisodeDownloadWork(
                 bundle = bundle,
                 defaultActionMode = app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode
             )
+            app.hushcast.automute.worker.EpisodeAnalysisWorker.analysisCompletedEvents.tryEmit(episodeId)
 
             db.podcastEpisodeDownloads().registerDownload(episodeId, destFile.absolutePath, destFile.length())
             app.podiumpodcasts.podium.background.PlaybackService.notifyEpisodeDownloaded(episodeId)

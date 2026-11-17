@@ -1,3 +1,15 @@
+# HushCast v1.0.13-hushcast
+
+## What's New
+- **Upgraded HushCast Action Bar Sheet**:
+  - Added a prominent **Refresh AI Analysis** / **Analyze with HushCast AI** action inside the HushCast sheet in `MediaPlayerBottomSheet`.
+  - Fixed **Cancel processing** in the HushCast sheet so it cancels both `EpisodeAnalysisWorker` and `PodcastEpisodeDownloadWorker` and immediately resets the episode's `ANALYZING` status in `AutoMuteDatabase`.
+  - Organized all HushCast controls into clean Material 3 Expressive cards: AI analysis status, **Mute words** + **Mute style** (`Silence`, `Bleep`, `Duck`), and **Sponsor skipping** (`Auto-Skip`, `Show Only`, `Off`), **Auto-skip confidence** (`High (80%+)`, `Balanced`, `All Ads`), and **Sponsor skip chime**.
+- **Desktop / Cloud Analysis Live Reload Fix**:
+  - Emitted `EpisodeAnalysisWorker.analysisCompletedEvents` after `DesktopWorkerClient.ingestBundleIntoDb` in `PodcastEpisodeDownloadWork` so active playback immediately loads newly ingested mute words, sponsor segments, and chapters.
+
+---
+
 # HushCast v1.0.12-hushcast
 
 ## What's New

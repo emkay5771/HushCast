@@ -1633,7 +1633,16 @@ fun MediaPlayerBottomSheet(
 
         if (showHushCastSheet) {
             val wordMutingEnabled by settingsRepository.hushCast.wordMutingEnabled.collectAsState(initial = true)
-            val adPolicyMode by settingsRepository.hushCast.adPolicyMode.collectAsState(initial = app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP)
+            val muteActionMode by settingsRepository.hushCast.muteActionMode.collectAsState(
+                initial = app.hushcast.automute.dsp.MuteActionMode.HARD_SILENCE
+            )
+            val adPolicyMode by settingsRepository.hushCast.adPolicyMode.collectAsState(
+                initial = app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP
+            )
+            val adAutoSkipScope by settingsRepository.hushCast.adAutoSkipScope.collectAsState(
+                initial = app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY
+            )
+            val sponsorSkipSoundEnabled by settingsRepository.hushCast.sponsorSkipSoundEnabled.collectAsState(initial = true)
             val sheetBadge = runCatching {
                 analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) }
             }.getOrNull() ?: ReadinessBadge.NOT_PROCESSED
@@ -1645,51 +1654,183 @@ fun MediaPlayerBottomSheet(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        text = "HushCast",
-                        style = Typography.titleLargeEmphasized
-                    )
-
-                    when (sheetBadge) {
-                        ReadinessBadge.ANALYZING -> {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Shield,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
                             Text(
-                                text = analysisStatus?.stageLabel?.takeIf { it.isNotBlank() } ?: "Processing audio…",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                text = "HushCast",
+                                style = Typography.titleLargeEmphasized
                             )
-                            androidx.compose.material3.LinearProgressIndicator(
-                                progress = { (analysisStatus?.progressPercent ?: 0) / 100f },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            androidx.compose.material3.OutlinedButton(
-                                onClick = {
-                                    if (episodeId.isNotBlank()) {
-                                        EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
-                                    }
-                                    showHushCastSheet = false
+                        }
+                        val statusChipText = when (sheetBadge) {
+                            ReadinessBadge.ANALYZING -> "Analyzing ${analysisStatus?.progressPercent ?: 0}%"
+                            ReadinessBadge.READY -> "Ready"
+                            ReadinessBadge.WORD_MUTE_READY -> "Word-Mute Ready"
+                            else -> "Not Analyzed"
+                        }
+                        Surface(
+                            shape = RoundedCornerShape(999.dp),
+                            color = when (sheetBadge) {
+                                ReadinessBadge.READY, ReadinessBadge.WORD_MUTE_READY -> MaterialTheme.colorScheme.primaryContainer
+                                ReadinessBadge.ANALYZING -> MaterialTheme.colorScheme.secondaryContainer
+                                else -> MaterialTheme.colorScheme.surfaceContainerHighest
+                            }
+                        ) {
+                            Text(
+                                text = statusChipText,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = when (sheetBadge) {
+                                    ReadinessBadge.READY, ReadinessBadge.WORD_MUTE_READY -> MaterialTheme.colorScheme.onPrimaryContainer
+                                    ReadinessBadge.ANALYZING -> MaterialTheme.colorScheme.onSecondaryContainer
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
                                 },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Cancel processing")
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    // 1. AI Analysis Card
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            when (sheetBadge) {
+                                ReadinessBadge.ANALYZING -> {
+                                    Text(
+                                        text = analysisStatus?.stageLabel?.takeIf { it.isNotBlank() } ?: "Processing audio…",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    androidx.compose.material3.LinearProgressIndicator(
+                                        progress = { (analysisStatus?.progressPercent ?: 0) / 100f },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    androidx.compose.material3.OutlinedButton(
+                                        onClick = {
+                                            if (episodeId.isNotBlank()) {
+                                                EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
+                                                app.podiumpodcasts.podium.background.worker.PodcastEpisodeDownloadWorker.stopDownload(
+                                                    context,
+                                                    episodeId
+                                                )
+                                                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                                    val existing = autoMuteDb.dao().getStatus(episodeId)
+                                                    if (existing != null) {
+                                                        autoMuteDb.dao().upsertStatus(
+                                                            existing.copy(
+                                                                badge = ReadinessBadge.NOT_PROCESSED.name,
+                                                                progressPercent = 0,
+                                                                stageLabel = "Cancelled"
+                                                            )
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            showHushCastSheet = false
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Cancel processing")
+                                    }
+                                }
+                                ReadinessBadge.READY, ReadinessBadge.WORD_MUTE_READY -> {
+                                    val savedSec = adEntities.sumOf { (it.endMs - it.startMs).coerceAtLeast(0L) } / 1000L
+                                    val activeMuteCount = muteEntities.count { it.enabled }
+                                    Text(
+                                        text = "${adEntities.size} sponsor segments (${savedSec}s) · $activeMuteCount muted words",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    androidx.compose.material3.FilledTonalButton(
+                                        onClick = {
+                                            showHushCastSheet = false
+                                            triggerAnalyzeNow()
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.AutoAwesome,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Refresh AI Analysis")
+                                    }
+                                }
+                                else -> {
+                                    Text(
+                                        text = if (isDownloaded) "This episode is downloaded and ready for HushCast AI analysis."
+                                        else "Download and analyze this episode to mute words, skip sponsors, and generate chapters.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Button(
+                                        onClick = {
+                                            showHushCastSheet = false
+                                            triggerAnalyzeNow()
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.AutoAwesome,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(if (isDownloaded) "Analyze with HushCast AI" else "Download & Analyze with AI")
+                                    }
+                                }
                             }
                         }
-                        ReadinessBadge.READY, ReadinessBadge.WORD_MUTE_READY -> {
-                            val savedSec = adEntities.sumOf { (it.endMs - it.startMs).coerceAtLeast(0L) } / 1000L
-                            val activeMuteCount = muteEntities.count { it.enabled }
-                            Text(
-                                text = "${adEntities.size} sponsor segments (${savedSec}s) · $activeMuteCount muted words",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                    }
+
+                    // 2. Word Muting Card
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Mute words", style = MaterialTheme.typography.bodyLarge)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Mute words", style = MaterialTheme.typography.bodyLarge)
+                                    Text(
+                                        text = "Silence or bleep flagged words in real time",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                                 androidx.compose.material3.Switch(
                                     checked = wordMutingEnabled,
                                     onCheckedChange = { enabled ->
@@ -1697,49 +1838,129 @@ fun MediaPlayerBottomSheet(
                                     }
                                 )
                             }
+                            if (wordMutingEnabled) {
+                                Text(
+                                    text = "Mute style",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val styleOptions = listOf(
+                                        app.hushcast.automute.dsp.MuteActionMode.HARD_SILENCE to "Silence",
+                                        app.hushcast.automute.dsp.MuteActionMode.BEEP to "Bleep",
+                                        app.hushcast.automute.dsp.MuteActionMode.VOLUME_DUCK to "Duck"
+                                    )
+                                    styleOptions.forEach { (mode, label) ->
+                                        androidx.compose.material3.FilterChip(
+                                            selected = muteActionMode == mode,
+                                            onClick = {
+                                                scope.launch {
+                                                    settingsRepository.hushCast.setMuteActionMode(mode)
+                                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                        autoMuteDb.dao().updateAllRulesActionMode(mode.name)
+                                                        autoMuteDb.dao().updateAllMuteSegmentsActionMode(mode.name)
+                                                        val currentEpId = HushCastEngineBridge.currentEpisodeId
+                                                        if (!currentEpId.isNullOrBlank()) {
+                                                            val sha = autoMuteDb.dao().getStatus(currentEpId)?.fileSha256
+                                                            if (!sha.isNullOrBlank()) {
+                                                                val updated = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
+                                                                HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            },
+                                            label = { Text(label) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Sponsor Skipping Card
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "Sponsor skipping",
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val adModes = listOf(
+                                    app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP to "Auto-Skip",
+                                    app.hushcast.automute.dsp.AdPolicyMode.MARK_ONLY to "Show Only",
+                                    app.hushcast.automute.dsp.AdPolicyMode.OFF to "Off"
+                                )
+                                adModes.forEach { (mode, label) ->
+                                    androidx.compose.material3.FilterChip(
+                                        selected = adPolicyMode == mode,
+                                        onClick = {
+                                            scope.launch { settingsRepository.hushCast.setAdPolicyMode(mode) }
+                                        },
+                                        label = { Text(label) }
+                                    )
+                                }
+                            }
+                            if (adPolicyMode == app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP) {
+                                Text(
+                                    text = "Auto-skip confidence",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val scopes = listOf(
+                                        app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY to "High (80%+)",
+                                        app.hushcast.automute.dsp.AdAutoSkipScope.MODERATE_AND_HIGH to "Balanced",
+                                        app.hushcast.automute.dsp.AdAutoSkipScope.ALL_DETECTED to "All Ads"
+                                    )
+                                    scopes.forEach { (sc, label) ->
+                                        androidx.compose.material3.FilterChip(
+                                            selected = adAutoSkipScope == sc,
+                                            onClick = {
+                                                scope.launch { settingsRepository.hushCast.setAdAutoSkipScope(sc) }
+                                            },
+                                            label = { Text(label) }
+                                        )
+                                    }
+                                }
+                            }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("Skip sponsors", style = MaterialTheme.typography.bodyLarge)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Sponsor skip chime", style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        text = "Play a subtle tone when an ad is skipped",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                                 androidx.compose.material3.Switch(
-                                    checked = adPolicyMode == app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP,
-                                    onCheckedChange = { skip ->
-                                        scope.launch {
-                                            settingsRepository.hushCast.setAdPolicyMode(
-                                                if (skip) app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP
-                                                else app.hushcast.automute.dsp.AdPolicyMode.OFF
-                                            )
-                                        }
+                                    checked = sponsorSkipSoundEnabled,
+                                    onCheckedChange = { enabled ->
+                                        scope.launch { settingsRepository.hushCast.setSponsorSkipSoundEnabled(enabled) }
                                     }
                                 )
-                            }
-                            androidx.compose.material3.OutlinedButton(
-                                onClick = {
-                                    showHushCastSheet = false
-                                    triggerAnalyzeNow()
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Re-analyze episode")
-                            }
-                        }
-                        else -> {
-                            Text(
-                                text = if (isDownloaded) "This episode is downloaded and ready for HushCast analysis."
-                                else "Download and process this episode to mute words and skip sponsors.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Button(
-                                onClick = {
-                                    showHushCastSheet = false
-                                    triggerAnalyzeNow()
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(if (isDownloaded) "Process episode" else "Download and process")
                             }
                         }
                     }
