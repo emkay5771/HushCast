@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
+import androidx.paging.cachedIn
 import app.podiumpodcasts.podium.api.db.AppDatabase
 import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeBundle
 import kotlinx.coroutines.launch
@@ -21,7 +22,7 @@ class NewEpisodesViewModel(
         )
     ) {
         db.podcastEpisodes().allNew()
-    }.flow
+    }.flow.cachedIn(viewModelScope)
 
     fun unnew(item: PodcastEpisodeBundle) {
         viewModelScope.launch {

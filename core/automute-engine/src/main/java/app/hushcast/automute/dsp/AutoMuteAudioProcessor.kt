@@ -31,7 +31,7 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
         private const val RAMP_MS_DROP = 12.0
         private const val DUCK_FLOOR = 0.10f
         private const val BEEP_FREQ_HZ = 1000.0
-        private const val BEEP_AMPLITUDE = 0.22f
+        private const val BEEP_AMPLITUDE = 0.34f
         private const val VOLUME_BOOST_GAIN = 1.85f
         const val DEFAULT_ENCODER_DELAY_MS = 30L
     }

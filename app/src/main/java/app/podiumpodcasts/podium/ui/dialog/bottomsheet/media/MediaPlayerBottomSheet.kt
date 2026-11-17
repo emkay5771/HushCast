@@ -917,6 +917,10 @@ fun MediaPlayerBottomSheet(
                                                             .height
                                                     )
                                                     .width(targetSizeWidth),
+                                                colors = IconButtonDefaults.filledIconButtonColors(
+                                                    containerColor = MaterialTheme.colorScheme.primary,
+                                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                                ),
                                                 shapes = IconButtonDefaults.shapes(
                                                     shape = IconButtonDefaults.largeSquareShape,
                                                     pressedShape = IconButtonDefaults.largePressedShape
@@ -1027,6 +1031,32 @@ fun MediaPlayerBottomSheet(
                                         onDismiss = { HushCastEngineBridge.clearPendingUndo() }
                                     )
                                 }
+
+                                if (pendingUndo == null && adEntities.isNotEmpty()) {
+                                    val livePosMs = vm.rememberLivePositionMs()
+                                    var dismissedAdStarts by remember(episodeId) {
+                                        mutableStateOf(emptySet<Long>())
+                                    }
+                                    val activeAd = remember(adEntities, livePosMs, dismissedAdStarts) {
+                                        adEntities.firstOrNull { seg ->
+                                            livePosMs in seg.startMs until (seg.endMs - 400L) &&
+                                                seg.startMs !in dismissedAdStarts
+                                        }?.toDomain()
+                                    }
+                                    activeAd?.let { ad ->
+                                        app.podiumpodcasts.podium.ui.component.media.ActiveAdSkipToastBanner(
+                                            adWindow = ad,
+                                            currentPositionMs = livePosMs,
+                                            onSkip = {
+                                                vm.seek(ad.endMs)
+                                                HushCastEngineBridge.playSponsorSkipIndicator(context)
+                                            },
+                                            onDismiss = {
+                                                dismissedAdStarts = dismissedAdStarts + ad.startMs
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -1071,6 +1101,11 @@ fun MediaPlayerBottomSheet(
                                     )
                                 }
                                 FilledIconButton(
+                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary
+                                    ),
+                                    shapes = IconButtonDefaults.shapes(),
                                     onClick = { if (vm.isPlaying) vm.pause() else vm.play() }
                                 ) {
                                     Icon(

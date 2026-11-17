@@ -52,12 +52,13 @@ fun FolderCard(
     folder: PodcastFolder,
     items: List<PodcastSubscriptionBundle>,
     badgeMode: SubscriptionsBadgeMode = SubscriptionsBadgeMode.UNPLAYED_COUNT,
+    unplayedCounts: Map<String, Int> = emptyMap(),
     showTitles: Boolean = true,
     compact: Boolean = false,
     onClick: () -> Unit
 ) {
     val bgColor = folderPalette[folder.colorIndex.mod(folderPalette.size)]
-    val totalUnread = items.sumOf { it.subscription.newEpisodes }
+    val totalUnread = items.sumOf { unplayedCounts[it.podcast.origin] ?: it.subscription.newEpisodes }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Box(modifier = Modifier.fillMaxWidth()) {

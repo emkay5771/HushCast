@@ -383,15 +383,14 @@ fun PodcastEpisodeListItem(
                             playerVm.play(context, bundle)
                         }
                     },
-                    shape = CircleShape,
-                    color = if (isActivelyPlaying) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        Color.Transparent
+                    shape = if (isActivelyPlaying) RoundedCornerShape(10.dp) else CircleShape,
+                    color = when {
+                        isActivelyPlaying -> MaterialTheme.colorScheme.primary
+                        else -> MaterialTheme.colorScheme.primaryContainer
                     },
                     border = if (!hasProgress || isActivelyPlaying) {
                         BorderStroke(
-                            width = 1.75.dp,
+                            width = 1.5.dp,
                             color = MaterialTheme.colorScheme.primary
                         )
                     } else null,
@@ -409,10 +408,9 @@ fun PodcastEpisodeListItem(
                                 isPlayed -> "Replay"
                                 else -> "Play"
                             },
-                            tint = if (isActivelyPlaying) {
-                                MaterialTheme.colorScheme.onPrimary
-                            } else {
-                                MaterialTheme.colorScheme.primary
+                            tint = when {
+                                isActivelyPlaying -> MaterialTheme.colorScheme.onPrimary
+                                else -> MaterialTheme.colorScheme.onPrimaryContainer
                             },
                             modifier = Modifier.size(20.dp)
                         )

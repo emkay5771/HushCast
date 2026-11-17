@@ -22,9 +22,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -199,71 +201,53 @@ fun SettingsPlaybackPane(
             }
 
             item {
-                val swipeRightAction = vm.repository.behavior.episodeSwipeRightAction.collectAsState(
+                val swipeRightPrimary by vm.repository.behavior.episodeSwipeRightAction.collectAsState(
                     app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
                 )
-                val showPicker = remember { mutableStateOf(false) }
+                val swipeRightSecondary by vm.repository.behavior.episodeSwipeRightSecondaryAction.collectAsState(
+                    app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST
+                )
+                val swipeLeftPrimary by vm.repository.behavior.episodeSwipeLeftAction.collectAsState(
+                    app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED
+                )
+                val swipeLeftSecondary by vm.repository.behavior.episodeSwipeLeftSecondaryAction.collectAsState(
+                    app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD
+                )
+                val showSwipeSheet = remember { mutableStateOf(false) }
 
                 app.podiumpodcasts.podium.ui.component.settings.SettingsListItem(
                     icon = {
                         Icon(
                             Icons.AutoMirrored.Rounded.PlaylistAdd,
-                            "Swipe right action"
+                            "Row swipe actions"
                         )
                     },
-                    label = "Episode swipe right action",
-                    description = swipeRightAction.value.label,
-                    onClick = { showPicker.value = true },
+                    label = "Row swipe actions",
+                    description = "Right: ${swipeRightPrimary.label} • Left: ${swipeLeftPrimary.label}",
+                    onClick = { showSwipeSheet.value = true },
                     index = 4,
                     count = 8
                 )
 
-                if (showPicker.value) {
-                    SwipeActionPickerDialog(
-                        title = "Episode swipe right action",
-                        selected = swipeRightAction.value,
-                        onSelect = { action ->
-                            showPicker.value = false
-                            scope.launch {
-                                vm.repository.behavior.setEpisodeSwipeRightAction(action)
-                            }
+                if (showSwipeSheet.value) {
+                    PocketCastsSwipeActionsSheet(
+                        rightPrimary = swipeRightPrimary,
+                        rightSecondary = swipeRightSecondary,
+                        leftPrimary = swipeLeftPrimary,
+                        leftSecondary = swipeLeftSecondary,
+                        onRightPrimaryChange = { action ->
+                            scope.launch { vm.repository.behavior.setEpisodeSwipeRightAction(action) }
                         },
-                        onDismiss = { showPicker.value = false }
-                    )
-                }
-            }
-
-            item {
-                val swipeLeftAction = vm.repository.behavior.episodeSwipeLeftAction.collectAsState(
-                    app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED
-                )
-                val showPicker = remember { mutableStateOf(false) }
-
-                app.podiumpodcasts.podium.ui.component.settings.SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.AutoMirrored.Rounded.PlaylistAdd,
-                            "Swipe left action"
-                        )
-                    },
-                    label = "Episode swipe left action",
-                    description = swipeLeftAction.value.label,
-                    onClick = { showPicker.value = true },
-                    index = 5,
-                    count = 8
-                )
-
-                if (showPicker.value) {
-                    SwipeActionPickerDialog(
-                        title = "Episode swipe left action",
-                        selected = swipeLeftAction.value,
-                        onSelect = { action ->
-                            showPicker.value = false
-                            scope.launch {
-                                vm.repository.behavior.setEpisodeSwipeLeftAction(action)
-                            }
+                        onRightSecondaryChange = { action ->
+                            scope.launch { vm.repository.behavior.setEpisodeSwipeRightSecondaryAction(action) }
                         },
-                        onDismiss = { showPicker.value = false }
+                        onLeftPrimaryChange = { action ->
+                            scope.launch { vm.repository.behavior.setEpisodeSwipeLeftAction(action) }
+                        },
+                        onLeftSecondaryChange = { action ->
+                            scope.launch { vm.repository.behavior.setEpisodeSwipeLeftSecondaryAction(action) }
+                        },
+                        onDismiss = { showSwipeSheet.value = false }
                     )
                 }
             }
@@ -442,44 +426,205 @@ fun SettingsPlaybackPane(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SwipeActionPickerDialog(
-    title: String,
-    selected: app.podiumpodcasts.podium.EpisodeSwipeAction,
-    onSelect: (app.podiumpodcasts.podium.EpisodeSwipeAction) -> Unit,
+private fun PocketCastsSwipeActionsSheet(
+    rightPrimary: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    rightSecondary: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    leftPrimary: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    leftSecondary: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    onRightPrimaryChange: (app.podiumpodcasts.podium.EpisodeSwipeAction) -> Unit,
+    onRightSecondaryChange: (app.podiumpodcasts.podium.EpisodeSwipeAction) -> Unit,
+    onLeftPrimaryChange: (app.podiumpodcasts.podium.EpisodeSwipeAction) -> Unit,
+    onLeftSecondaryChange: (app.podiumpodcasts.podium.EpisodeSwipeAction) -> Unit,
     onDismiss: () -> Unit
 ) {
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            androidx.compose.foundation.layout.Column {
-                app.podiumpodcasts.podium.EpisodeSwipeAction.entries.forEach { action ->
+    var editingSlot by remember { mutableStateOf<String?>(null) }
+
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+        androidx.compose.foundation.layout.Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = "Row Swipe Actions",
+                style = androidx.compose.material3.MaterialTheme.typography.titleLarge
+            )
+            Text(
+                text = "Swipe halfway to reveal both actions, or swipe all the way across to trigger the primary action.",
+                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            // Live Pocket Casts-style Row Preview
+            androidx.compose.material3.Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh
+            ) {
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(10.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
                     androidx.compose.foundation.layout.Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelect(action) }
-                            .padding(vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
                     ) {
-                        androidx.compose.material3.RadioButton(
-                            selected = action == selected,
-                            onClick = { onSelect(action) }
-                        )
-                        androidx.compose.foundation.layout.Spacer(Modifier.padding(horizontal = 4.dp))
-                        Text(
-                            text = action.label,
-                            style = androidx.compose.material3.MaterialTheme.typography.bodyMedium
-                        )
+                        SwipeActionPreviewBadge(rightPrimary, primary = true)
+                        if (rightSecondary != app.podiumpodcasts.podium.EpisodeSwipeAction.NONE) {
+                            SwipeActionPreviewBadge(rightSecondary, primary = false)
+                        }
+                    }
+                    Text(
+                        text = "Episode Row",
+                        style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
+                    )
+                    androidx.compose.foundation.layout.Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        if (leftSecondary != app.podiumpodcasts.podium.EpisodeSwipeAction.NONE) {
+                            SwipeActionPreviewBadge(leftSecondary, primary = false)
+                        }
+                        SwipeActionPreviewBadge(leftPrimary, primary = true)
                     }
                 }
             }
-        },
-        confirmButton = {},
-        dismissButton = {
-            androidx.compose.material3.TextButton(onClick = onDismiss) {
-                Text("Cancel")
-            }
+
+            SwipeConfigSlotRow(
+                title = "Swipe Right (Primary / Full Swipe)",
+                action = rightPrimary,
+                onClick = { editingSlot = "RIGHT_PRIMARY" }
+            )
+            SwipeConfigSlotRow(
+                title = "Swipe Right (Secondary)",
+                action = rightSecondary,
+                onClick = { editingSlot = "RIGHT_SECONDARY" }
+            )
+            SwipeConfigSlotRow(
+                title = "Swipe Left (Primary / Full Swipe)",
+                action = leftPrimary,
+                onClick = { editingSlot = "LEFT_PRIMARY" }
+            )
+            SwipeConfigSlotRow(
+                title = "Swipe Left (Secondary)",
+                action = leftSecondary,
+                onClick = { editingSlot = "LEFT_SECONDARY" }
+            )
+
+            androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 16.dp))
         }
-    )
+    }
+
+    editingSlot?.let { slot ->
+        val (title, current, onSelect) = when (slot) {
+            "RIGHT_PRIMARY" -> Triple("Swipe Right (Primary)", rightPrimary, onRightPrimaryChange)
+            "RIGHT_SECONDARY" -> Triple("Swipe Right (Secondary)", rightSecondary, onRightSecondaryChange)
+            "LEFT_PRIMARY" -> Triple("Swipe Left (Primary)", leftPrimary, onLeftPrimaryChange)
+            else -> Triple("Swipe Left (Secondary)", leftSecondary, onLeftSecondaryChange)
+        }
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { editingSlot = null },
+            title = { Text(title) },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    app.podiumpodcasts.podium.EpisodeSwipeAction.entries.forEach { action ->
+                        androidx.compose.foundation.layout.Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onSelect(action)
+                                    editingSlot = null
+                                }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        ) {
+                            androidx.compose.material3.RadioButton(
+                                selected = action == current,
+                                onClick = {
+                                    onSelect(action)
+                                    editingSlot = null
+                                }
+                            )
+                            androidx.compose.foundation.layout.Spacer(Modifier.padding(horizontal = 4.dp))
+                            Text(
+                                text = action.label,
+                                style = androidx.compose.material3.MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { editingSlot = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun SwipeActionPreviewBadge(
+    action: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    primary: Boolean
+) {
+    val (bg, fg) = when (action) {
+        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT ->
+            androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer to androidx.compose.material3.MaterialTheme.colorScheme.onPrimaryContainer
+        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST ->
+            androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer to androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer
+        app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD ->
+            androidx.compose.material3.MaterialTheme.colorScheme.tertiaryContainer to androidx.compose.material3.MaterialTheme.colorScheme.onTertiaryContainer
+        app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED ->
+            androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant to androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+        app.podiumpodcasts.podium.EpisodeSwipeAction.NONE ->
+            androidx.compose.material3.MaterialTheme.colorScheme.surface to androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    androidx.compose.material3.Surface(
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
+        color = if (primary) bg else bg.copy(alpha = 0.75f),
+        contentColor = fg
+    ) {
+        Text(
+            text = action.label,
+            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
+    }
+}
+
+@Composable
+private fun SwipeConfigSlotRow(
+    title: String,
+    action: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    onClick: () -> Unit
+) {
+    androidx.compose.material3.Surface(
+        onClick = onClick,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerLow,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        androidx.compose.foundation.layout.Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                style = androidx.compose.material3.MaterialTheme.typography.bodyMedium
+            )
+            SwipeActionPreviewBadge(action, primary = true)
+        }
+    }
 }

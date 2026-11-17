@@ -26,6 +26,9 @@ class AdSkipPlaybackObserver {
     var policyMode: AdPolicyMode = AdPolicyMode.AUTO_SKIP
 
     @Volatile
+    var autoSkipScope: AdAutoSkipScope = AdAutoSkipScope.HIGH_CONFIDENCE_ONLY
+
+    @Volatile
     private var adWindows: List<AdWindow> = emptyList()
 
     private val autoSkippedStartMs = ConcurrentHashMap.newKeySet<Long>()
@@ -33,6 +36,14 @@ class AdSkipPlaybackObserver {
 
     private val _skipEvents = MutableSharedFlow<AdSkipEvent>(extraBufferCapacity = 4)
     val skipEvents: SharedFlow<AdSkipEvent> = _skipEvents.asSharedFlow()
+
+    fun shouldAutoSkip(ad: AdWindow): Boolean {
+        return when (autoSkipScope) {
+            AdAutoSkipScope.HIGH_CONFIDENCE_ONLY -> ad.isHighConfidence || ad.confidence >= 0.80f
+            AdAutoSkipScope.MODERATE_AND_HIGH -> ad.isHighConfidence || ad.confidence >= 0.65f
+            AdAutoSkipScope.ALL_DETECTED -> true
+        }
+    }
 
     fun setEpisodeAds(windows: List<AdWindow>, policy: AdPolicyMode) {
         policyMode = policy
@@ -50,7 +61,7 @@ class AdSkipPlaybackObserver {
     fun getAdWindows(): List<AdWindow> = adWindows
 
     /**
-     * Checks whether [pos] is inside an active high-confidence sponsor ad and triggers an auto-skip.
+     * Checks whether [pos] is inside an active sponsor ad matching [autoSkipScope] and triggers an auto-skip.
      * Used both by PlayerMessage callbacks (P5) and on position discontinuities.
      */
     fun checkPosition(player: Player, leadToleranceMs: Long = 0L): Boolean {
@@ -59,7 +70,7 @@ class AdSkipPlaybackObserver {
 
         val pos = player.currentPosition
         for (ad in adWindows) {
-            if (!ad.isHighConfidence) continue
+            if (!shouldAutoSkip(ad)) continue
             if (ad.startMs in userBypassedStartMs) continue
             val effectiveStart = (ad.startMs - leadToleranceMs).coerceAtLeast(0L)
             if (pos in effectiveStart until (ad.endMs - 500L)) {
@@ -94,7 +105,7 @@ class AdSkipPlaybackObserver {
     fun getActiveAutoSkipRanges(): List<SkipAwareSeekCalculator.SkipRange> {
         if (policyMode != AdPolicyMode.AUTO_SKIP) return emptyList()
         return adWindows
-            .filter { it.isHighConfidence && it.startMs !in userBypassedStartMs }
+            .filter { shouldAutoSkip(it) && it.startMs !in userBypassedStartMs }
             .map { SkipAwareSeekCalculator.SkipRange(it.startMs, it.endMs) }
     }
 }

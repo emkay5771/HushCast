@@ -17,11 +17,13 @@ fun SubscriptionCard(
     modifier: Modifier = Modifier,
     bundle: PodcastSubscriptionBundle,
     badgeMode: SubscriptionsBadgeMode = SubscriptionsBadgeMode.UNPLAYED_COUNT,
+    unplayedCountOverride: Int? = null,
     fillCell: Boolean = true,
     showTitles: Boolean = true,
     compact: Boolean = false,
     onClick: () -> Unit
 ) {
+    val badgeCount = unplayedCountOverride ?: bundle.subscription.newEpisodes
     PodcastCard(
         modifier = modifier,
         podcast = bundle.podcast,
@@ -29,13 +31,13 @@ fun SubscriptionCard(
         showTitles = showTitles,
         compact = compact,
         badge = {
-            if(bundle.subscription.newEpisodes > 0) {
+            if(badgeCount > 0) {
                 when(badgeMode) {
                     SubscriptionsBadgeMode.UNPLAYED_COUNT -> Badge(
                         Modifier.offset((-4).dp, 4.dp)
                     ) {
                         Text(
-                            text = bundle.subscription.newEpisodes.toString()
+                            text = if (badgeCount > 99) "99+" else badgeCount.toString()
                         )
                     }
                     SubscriptionsBadgeMode.LATEST_ONLY -> Badge(

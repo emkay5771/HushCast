@@ -131,8 +131,12 @@ object SettingsKeys {
         booleanPreferencesKey("behavior_tap_up_next_to_play")
     val BEHAVIOR_EPISODE_SWIPE_RIGHT_ACTION =
         stringPreferencesKey("behavior_episode_swipe_right_action")
+    val BEHAVIOR_EPISODE_SWIPE_RIGHT_SECONDARY_ACTION =
+        stringPreferencesKey("behavior_episode_swipe_right_secondary_action")
     val BEHAVIOR_EPISODE_SWIPE_LEFT_ACTION =
         stringPreferencesKey("behavior_episode_swipe_left_action")
+    val BEHAVIOR_EPISODE_SWIPE_LEFT_SECONDARY_ACTION =
+        stringPreferencesKey("behavior_episode_swipe_left_secondary_action")
     val BEHAVIOR_DISCOVER_COUNTRY_CODE =
         stringPreferencesKey("behavior_discover_country_code")
     val BEHAVIOR_PLAYER_SEEK_BACK_INCREMENT =
@@ -169,6 +173,7 @@ object SettingsKeys {
     val HUSHCAST_SPONSOR_SKIP_SOUND_ENABLED = booleanPreferencesKey("hushcast_sponsor_skip_sound_enabled")
     val HUSHCAST_SPONSOR_SKIP_SOUND_URI = stringPreferencesKey("hushcast_sponsor_skip_sound_uri")
     val HUSHCAST_AD_POLICY_MODE = stringPreferencesKey("hushcast_ad_policy_mode")
+    val HUSHCAST_AD_AUTO_SKIP_SCOPE = stringPreferencesKey("hushcast_ad_auto_skip_scope")
     val HUSHCAST_SETUP_COMPLETED = booleanPreferencesKey("hushcast_setup_completed")
     val HUSHCAST_SHIELD_HINT_SEEN = booleanPreferencesKey("hushcast_shield_hint_seen")
     val HUSHCAST_AUTO_DOWNLOAD_UP_NEXT = booleanPreferencesKey("hushcast_auto_download_up_next")
@@ -386,6 +391,17 @@ class SettingsRepository(val context: Context) {
             preferences[SettingsKeys.BEHAVIOR_EPISODE_SWIPE_RIGHT_ACTION] = action.name
         }
 
+        val episodeSwipeRightSecondaryAction: Flow<EpisodeSwipeAction> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.BEHAVIOR_EPISODE_SWIPE_RIGHT_SECONDARY_ACTION]
+                runCatching { raw?.let { EpisodeSwipeAction.valueOf(it) } }.getOrNull()
+                    ?: EpisodeSwipeAction.PLAY_LAST
+            }
+
+        suspend fun setEpisodeSwipeRightSecondaryAction(action: EpisodeSwipeAction) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_EPISODE_SWIPE_RIGHT_SECONDARY_ACTION] = action.name
+        }
+
         val episodeSwipeLeftAction: Flow<EpisodeSwipeAction> = dataStore.data
             .map { preferences ->
                 val raw = preferences[SettingsKeys.BEHAVIOR_EPISODE_SWIPE_LEFT_ACTION]
@@ -395,6 +411,17 @@ class SettingsRepository(val context: Context) {
 
         suspend fun setEpisodeSwipeLeftAction(action: EpisodeSwipeAction) = dataStore.edit { preferences ->
             preferences[SettingsKeys.BEHAVIOR_EPISODE_SWIPE_LEFT_ACTION] = action.name
+        }
+
+        val episodeSwipeLeftSecondaryAction: Flow<EpisodeSwipeAction> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.BEHAVIOR_EPISODE_SWIPE_LEFT_SECONDARY_ACTION]
+                runCatching { raw?.let { EpisodeSwipeAction.valueOf(it) } }.getOrNull()
+                    ?: EpisodeSwipeAction.DOWNLOAD
+            }
+
+        suspend fun setEpisodeSwipeLeftSecondaryAction(action: EpisodeSwipeAction) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_EPISODE_SWIPE_LEFT_SECONDARY_ACTION] = action.name
         }
 
         fun podcastAutoAddToUpNext(origin: String): Flow<AutoAddUpNextMode> {
@@ -673,6 +700,16 @@ class SettingsRepository(val context: Context) {
 
         suspend fun setAdPolicyMode(mode: app.hushcast.automute.dsp.AdPolicyMode) = dataStore.edit { preferences ->
             preferences[SettingsKeys.HUSHCAST_AD_POLICY_MODE] = mode.name
+        }
+
+        val adAutoSkipScope: Flow<app.hushcast.automute.dsp.AdAutoSkipScope> = dataStore.data.map { preferences ->
+            val raw = preferences[SettingsKeys.HUSHCAST_AD_AUTO_SKIP_SCOPE]
+            runCatching { raw?.let { app.hushcast.automute.dsp.AdAutoSkipScope.valueOf(it) } }.getOrNull()
+                ?: app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY
+        }
+
+        suspend fun setAdAutoSkipScope(scope: app.hushcast.automute.dsp.AdAutoSkipScope) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.HUSHCAST_AD_AUTO_SKIP_SCOPE] = scope.name
         }
 
         val setupCompleted: Flow<Boolean> = dataStore.data.map { preferences ->

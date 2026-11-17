@@ -320,6 +320,12 @@ fun FloatingMediaPlayer(
                                                 scaleY = playScale
                                             },
                                         shape = RoundedCornerShape(playCorner),
+                                        colors = IconButtonDefaults.filledIconToggleButtonColors(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                                            checkedContainerColor = MaterialTheme.colorScheme.primary,
+                                            checkedContentColor = MaterialTheme.colorScheme.onPrimary
+                                        ),
                                         interactionSource = playInteraction,
                                         checked = vm.isPlaying,
                                         onCheckedChange = {

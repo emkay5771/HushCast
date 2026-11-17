@@ -563,6 +563,75 @@ fun OneTapUndoAdSkipBanner(
 }
 
 @Composable
+fun ActiveAdSkipToastBanner(
+    adWindow: AdWindow,
+    currentPositionMs: Long,
+    onSkip: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val remainingSec = ((adWindow.endMs - currentPositionMs).coerceAtLeast(0L) / 1000L)
+    val isSuggested = !adWindow.isHighConfidence
+    val containerColor = if (isSuggested) {
+        MaterialTheme.colorScheme.tertiaryContainer
+    } else {
+        MaterialTheme.colorScheme.secondaryContainer
+    }
+    val contentColor = if (isSuggested) {
+        MaterialTheme.colorScheme.onTertiaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    }
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = containerColor,
+        contentColor = contentColor,
+        shape = RoundedCornerShape(16.dp),
+        shadowElevation = 6.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(Icons.Rounded.SkipNext, contentDescription = null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Column {
+                    Text(
+                        text = if (isSuggested) "Suggested Ad" else "Sponsor / Ad",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "${remainingSec}s remaining",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = contentColor.copy(alpha = 0.8f)
+                    )
+                }
+            }
+            FilledTonalButton(
+                onClick = onSkip,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("Skip Ad")
+            }
+            androidx.compose.material3.IconButton(onClick = onDismiss) {
+                Icon(
+                    Icons.Rounded.Close,
+                    contentDescription = "Dismiss",
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun CastingBypassNoticeBanner(modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier.fillMaxWidth(),

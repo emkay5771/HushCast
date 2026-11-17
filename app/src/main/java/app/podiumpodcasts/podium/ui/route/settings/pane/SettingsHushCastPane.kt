@@ -101,6 +101,7 @@ fun SettingsHushCastPane(
     val wordMutingEnabled by settingsRepository.hushCast.wordMutingEnabled.collectAsState(initial = HushCastEngineBridge.wordMutingEnabled)
     val selectedActionMode by settingsRepository.hushCast.muteActionMode.collectAsState(initial = HushCastEngineBridge.defaultActionMode)
     val selectedAdPolicy by settingsRepository.hushCast.adPolicyMode.collectAsState(initial = HushCastEngineBridge.defaultAdPolicy)
+    val selectedAutoSkipScope by settingsRepository.hushCast.adAutoSkipScope.collectAsState(initial = HushCastEngineBridge.autoSkipScope)
     val muteCustomSoundUri by settingsRepository.hushCast.muteCustomSoundUri.collectAsState(initial = null)
     val sponsorSkipSoundEnabled by settingsRepository.hushCast.sponsorSkipSoundEnabled.collectAsState(initial = HushCastEngineBridge.sponsorSkipSoundEnabled)
     val sponsorSkipSoundUri by settingsRepository.hushCast.sponsorSkipSoundUri.collectAsState(initial = HushCastEngineBridge.sponsorSkipSoundUri)
@@ -788,7 +789,21 @@ fun SettingsHushCastPane(
                                     selected = selectedActionMode == mode,
                                     onClick = {
                                         HushCastEngineBridge.defaultActionMode = mode
-                                        scope.launch { settingsRepository.hushCast.setMuteActionMode(mode) }
+                                        scope.launch {
+                                            settingsRepository.hushCast.setMuteActionMode(mode)
+                                            withContext(Dispatchers.IO) {
+                                                autoMuteDb.dao().updateAllRulesActionMode(mode.name)
+                                                autoMuteDb.dao().updateAllMuteSegmentsActionMode(mode.name)
+                                                val currentEpId = HushCastEngineBridge.currentEpisodeId
+                                                if (!currentEpId.isNullOrBlank()) {
+                                                    val sha = autoMuteDb.dao().getStatus(currentEpId)?.fileSha256
+                                                    if (!sha.isNullOrBlank()) {
+                                                        val updated = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
+                                                        HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
+                                                    }
+                                                }
+                                            }
+                                        }
                                     },
                                     label = { Text(label) }
                                 )
@@ -851,6 +866,43 @@ fun SettingsHushCastPane(
                                     shape = SegmentedButtonDefaults.itemShape(idx, policies.size)
                                 ) {
                                     Text(label)
+                                }
+                            }
+                        }
+                        if (selectedAdPolicy == AdPolicyMode.AUTO_SKIP) {
+                            Spacer(Modifier.height(12.dp))
+                            Text("Auto-Skip When", style = MaterialTheme.typography.labelMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = when (selectedAutoSkipScope) {
+                                    app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY ->
+                                        "Only skip high-confidence sponsor reads (80%+). Suggested ads show a Skip button."
+                                    app.hushcast.automute.dsp.AdAutoSkipScope.MODERATE_AND_HIGH ->
+                                        "Skip likely and high-confidence ads (65%+)."
+                                    app.hushcast.automute.dsp.AdAutoSkipScope.ALL_DETECTED ->
+                                        "Skip all detected ads, including suggested ads."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            val scopes = listOf(
+                                app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY to "High (80%+)",
+                                app.hushcast.automute.dsp.AdAutoSkipScope.MODERATE_AND_HIGH to "Balanced",
+                                app.hushcast.automute.dsp.AdAutoSkipScope.ALL_DETECTED to "All Ads"
+                            )
+                            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                scopes.forEachIndexed { idx, (scopeVal, label) ->
+                                    SegmentedButton(
+                                        selected = selectedAutoSkipScope == scopeVal,
+                                        onClick = {
+                                            HushCastEngineBridge.autoSkipScope = scopeVal
+                                            scope.launch { settingsRepository.hushCast.setAdAutoSkipScope(scopeVal) }
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(idx, scopes.size)
+                                    ) {
+                                        Text(label)
+                                    }
                                 }
                             }
                         }

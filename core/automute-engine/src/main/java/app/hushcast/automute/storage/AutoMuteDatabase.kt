@@ -258,6 +258,12 @@ interface AutoMuteDao {
     @Query("UPDATE mute_rules SET enabled = :enabled WHERE id = :ruleId")
     suspend fun setRuleEnabled(ruleId: Long, enabled: Boolean)
 
+    @Query("UPDATE mute_rules SET actionMode = :actionMode")
+    suspend fun updateAllRulesActionMode(actionMode: String)
+
+    @Query("UPDATE mute_segments SET actionMode = :actionMode")
+    suspend fun updateAllMuteSegmentsActionMode(actionMode: String)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertPodcastAdPolicy(policy: PodcastAdPolicyEntity)
 

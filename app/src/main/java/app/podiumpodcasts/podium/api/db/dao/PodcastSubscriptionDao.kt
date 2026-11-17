@@ -8,6 +8,11 @@ import app.podiumpodcasts.podium.api.db.model.PodcastSubscriptionBundle
 import app.podiumpodcasts.podium.api.db.model.PodcastSubscriptionModel
 import kotlinx.coroutines.flow.Flow
 
+data class OriginUnplayedCount(
+    val origin: String,
+    val count: Int
+)
+
 @Dao
 interface PodcastSubscriptionDao {
     @Transaction
@@ -31,6 +36,17 @@ interface PodcastSubscriptionDao {
         """
     )
     fun allByNewEpisodesFlow(): Flow<List<PodcastSubscriptionBundle>>
+
+    @Query(
+        """
+        SELECT e.origin AS origin, COUNT(*) AS count
+        FROM podcastEpisode e
+        LEFT JOIN podcastEpisodePlayState ps ON ps.episodeId = e.id
+        WHERE COALESCE(ps.played, 0) = 0
+        GROUP BY e.origin
+        """
+    )
+    fun unplayedCountsFlow(): Flow<List<OriginUnplayedCount>>
 
     @Transaction
     @Query(

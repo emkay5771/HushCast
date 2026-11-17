@@ -55,7 +55,11 @@ fun NewEpisodesRoute(
     val scope = rememberCoroutineScope()
 
     val db = LocalDatabase.current
-    val vm = viewModel { NewEpisodesViewModel(db) }
+    val activity = androidx.activity.compose.LocalActivity.current as androidx.activity.ComponentActivity
+    val vm = viewModel(
+        viewModelStoreOwner = activity,
+        key = "NEW_EPISODES"
+    ) { NewEpisodesViewModel(db) }
 
     val newEpisodes = vm.newEpisodes.collectAsLazyPagingItems()
 
@@ -79,7 +83,7 @@ fun NewEpisodesRoute(
                 },
                 actions = {
                     if(newEpisodes.itemCount > 0) {
-                        val playerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+                        val playerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>(viewModelStoreOwner = activity)
                         val context = androidx.compose.ui.platform.LocalContext.current
                         app.podiumpodcasts.podium.ui.component.common.BubbleButton(
                             icon = androidx.compose.material.icons.Icons.Rounded.PlayArrow,
@@ -131,10 +135,7 @@ fun NewEpisodesRoute(
                 Modifier
                     .padding(inset)
                     .fillMaxSize(),
-                state = when(newEpisodes.itemCount) {
-                    0 -> LazyListState()
-                    else -> vm.lazyListState
-                },
+                state = vm.lazyListState,
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
             ) {
@@ -151,13 +152,9 @@ fun NewEpisodesRoute(
 
                     val markedAsSeen = stringResource(R.string.snackbar_marked_as_seen)
 
-                    val secondaryRightType = when (itemSwipeRightAction) {
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT -> app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST -> app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED -> app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD -> app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.NONE -> app.podiumpodcasts.podium.EpisodeSwipeAction.NONE
-                    }
+                    val secondaryRightType = itemSettings.behavior.episodeSwipeRightSecondaryAction.collectAsState(
+                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST
+                    ).value
 
                     SwipeableItem(
                         scope = scope,

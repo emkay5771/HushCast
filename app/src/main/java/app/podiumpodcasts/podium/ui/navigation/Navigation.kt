@@ -118,19 +118,35 @@ fun Navigation(
             rememberSaveableStateHolderNavEntryDecorator()
         ),
         transitionSpec = {
-            (slideInHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { it / 10 } +
-                    fadeIn(animationSpec = tween(200, delayMillis = 40)))
+            (slideInHorizontally(
+                animationSpec = tween(
+                    durationMillis = 200,
+                    easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
+                )
+            ) { it / 12 } + fadeIn(animationSpec = tween(110)))
                 .togetherWith(
-                    slideOutHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { -it / 12 } +
-                            fadeOut(animationSpec = tween(150))
+                    slideOutHorizontally(
+                        animationSpec = tween(
+                            durationMillis = 200,
+                            easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
+                        )
+                    ) { -it / 16 }
                 )
         },
         popTransitionSpec = {
-            (slideInHorizontally(animationSpec = tween(240, easing = FastOutSlowInEasing)) { -it / 12 } +
-                    fadeIn(initialAlpha = 0.85f, animationSpec = tween(200)))
+            (slideInHorizontally(
+                animationSpec = tween(
+                    durationMillis = 200,
+                    easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
+                )
+            ) { -it / 14 })
                 .togetherWith(
-                    slideOutHorizontally(animationSpec = tween(240, easing = FastOutSlowInEasing)) { it / 8 } +
-                            fadeOut(animationSpec = tween(180))
+                    slideOutHorizontally(
+                        animationSpec = tween(
+                            durationMillis = 200,
+                            easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
+                        )
+                    ) { it / 10 } + fadeOut(animationSpec = tween(140))
                 ).apply {
                     targetContentZIndex = -1f
                 }

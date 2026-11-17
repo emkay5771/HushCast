@@ -1,3 +1,25 @@
+# HushCast v1.0.10-hushcast
+
+## What's New
+- **Pocket Casts–Style Row Swipe Actions**:
+  - Added a **Row swipe actions** configurator in **Settings → Playback** with a live episode row preview and independent primary/secondary selectors for both Swipe Right and Swipe Left (`Play Next`, `Play Last`, `Download`, `Mark Played`, `None`), wired into `NewEpisodesRoute` and `PodcastDetailView`.
+- **Higher-Contrast Material 3 Expressive Play Buttons**:
+  - Upgraded play/pause buttons in `FloatingMediaPlayer`, `MediaPlayerBottomSheet`, and `PodcastEpisodeListItem` with high-contrast `primary`/`onPrimary` and `primaryContainer` colors alongside M3E shape-morphing.
+- **Smoother Page Entry Frame Rate**:
+  - Removed the initial `fadeIn` delay and reduced offscreen alpha/scale compositing overhead on forward navigation in `Navigation` and `Main` while keeping native predictive back intact.
+- **In-Place List Refresh & Zero Empty Flash**:
+  - Cached `NewEpisodesViewModel` with `cachedIn(viewModelScope)` and scoped `SubscriptionsViewModel` and `NewEpisodesViewModel` to the activity so **Home** and **New Episodes** stay populated, preserve scroll position, and refresh in place without flashing empty.
+  - Pre-seeded `PodcastDetailView` subscription state from the cached subscriptions list so the subscribed status never flashes on open.
+- **Home Badges (Count & Dot) Fix**:
+  - Added live `unplayedCountsFlow` in `PodcastSubscriptionDao` and wired it into `HomeRoute`, `SubscriptionCard`, and `FolderCard` so toggling **Count** and **Dot** in the Home options sheet immediately updates podcast tiles, folders, and list rows.
+- **Word-Mute Bleep Fix**:
+  - Switching **Action Mode** (including **Bleep**) in `SettingsHushCastPane` now updates existing mute rules and pre-analyzed mute segments in `AutoMuteDatabase` and refreshes the active `AutoMuteAudioProcessor` immediately, with a crisper bleep amplitude.
+- **Auto-Skip Confidence Thresholds & Ad-Skip Toast**:
+  - Added **Auto-Skip When** (`High (80%+)`, `Balanced`, `All Ads`) via `AdAutoSkipScope` in `AdSkipPlaybackObserver`, `SettingsRepository`, and `SettingsHushCastPane`.
+  - Added `ActiveAdSkipToastBanner` in the player overlay toast section to offer a one-tap **Skip Ad** button whenever playback enters a suggested or non-auto-skipped confirmed ad.
+
+---
+
 # HushCast v1.0.9-hushcast
 
 ## What's New

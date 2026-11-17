@@ -103,17 +103,19 @@ sealed class DetailPaneKey : Parcelable {
     ) : DetailPaneKey()
 }
 
-val enterSpec = androidx.compose.animation.slideInHorizontally(animationSpec = tween(240)) { it / 10 } +
-        fadeIn(animationSpec = tween(200))
+val enterSpec = androidx.compose.animation.slideInHorizontally(
+    animationSpec = tween(200, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f))
+) { it / 12 } + fadeIn(animationSpec = tween(110))
 
-val listEnterSpec = androidx.compose.animation.slideInHorizontally(animationSpec = tween(240)) { -it / 16 } +
-        fadeIn(initialAlpha = 0.85f, animationSpec = tween(200))
+val listEnterSpec = androidx.compose.animation.slideInHorizontally(
+    animationSpec = tween(200, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f))
+) { -it / 16 }
 
-val exitSpec = fadeOut(targetAlpha = 0.85f, animationSpec = tween(200))
+val exitSpec = fadeOut(targetAlpha = 0.94f, animationSpec = tween(160))
 
-val detailExitSpec = androidx.compose.animation.slideOutHorizontally(animationSpec = tween(240)) { it / 10 } +
-        androidx.compose.animation.scaleOut(targetScale = 0.90f, animationSpec = tween(240)) +
-        fadeOut(targetAlpha = 0.35f, animationSpec = tween(240))
+val detailExitSpec = androidx.compose.animation.slideOutHorizontally(
+    animationSpec = tween(200, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f))
+) { it / 10 } + fadeOut(targetAlpha = 0.5f, animationSpec = tween(160))
 
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")

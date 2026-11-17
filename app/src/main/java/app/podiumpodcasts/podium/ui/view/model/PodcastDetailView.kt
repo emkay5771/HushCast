@@ -171,10 +171,20 @@ fun PodcastDetailView(
     val vm = viewModel(key = podcast.origin) {
         PodcastDetailViewModel(db, podcast)
     }
+    val subscriptionsVm = viewModel<app.podiumpodcasts.podium.ui.vm.home.SubscriptionsViewModel>(
+        viewModelStoreOwner = activity,
+        key = "HOME_SUBSCRIPTIONS"
+    ) {
+        app.podiumpodcasts.podium.ui.vm.home.SubscriptionsViewModel(db)
+    }
+    val cachedSubscriptions by subscriptionsVm.subscriptionsState.collectAsState()
+    val cachedSubModel = remember(cachedSubscriptions, podcast.origin) {
+        cachedSubscriptions?.firstOrNull { it.podcast.origin == podcast.origin }?.subscription
+    }
     val playerVm = viewModel<MediaPlayerViewModel>()
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    val subscription = vm.subscription.collectAsState(null)
+    val subscription = vm.subscription.collectAsState(initial = cachedSubModel)
     val episodePager = vm.episodePager.collectAsLazyPagingItems()
     val selectedEpisodeIds = remember(podcast.origin) { androidx.compose.runtime.mutableStateListOf<String>() }
 
@@ -868,24 +878,15 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                     val itemSwipeRightAction = itemSettings.behavior.episodeSwipeRightAction.collectAsState(
                         app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
                     ).value
+                    val secondaryRightType = itemSettings.behavior.episodeSwipeRightSecondaryAction.collectAsState(
+                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST
+                    ).value
                     val itemSwipeLeftAction = itemSettings.behavior.episodeSwipeLeftAction.collectAsState(
                         app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED
                     ).value
-
-                    val secondaryRightType = when (itemSwipeRightAction) {
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT -> app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST -> app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED -> app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD -> app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.NONE -> app.podiumpodcasts.podium.EpisodeSwipeAction.NONE
-                    }
-                    val secondaryLeftType = when (itemSwipeLeftAction) {
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED -> app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD -> app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT -> app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST -> app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.NONE -> app.podiumpodcasts.podium.EpisodeSwipeAction.NONE
-                    }
+                    val secondaryLeftType = itemSettings.behavior.episodeSwipeLeftSecondaryAction.collectAsState(
+                        app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD
+                    ).value
 
                     SwipeableItem(
                         snackbarHostState = vm.snackbarHostState,

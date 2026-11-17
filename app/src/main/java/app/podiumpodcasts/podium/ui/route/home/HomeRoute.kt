@@ -114,10 +114,16 @@ fun HomeRoute(
     val db = LocalDatabase.current
     val settingsRepository = LocalSettingsRepository.current
 
-    val subscriptionsVm = viewModel { SubscriptionsViewModel(db) }
-    val playerVm = viewModel<MediaPlayerViewModel>()
+    val activity = androidx.activity.compose.LocalActivity.current as androidx.activity.ComponentActivity
+    val subscriptionsVm = viewModel(
+        viewModelStoreOwner = activity,
+        key = "HOME_SUBSCRIPTIONS"
+    ) { SubscriptionsViewModel(db) }
+    val playerVm = viewModel<MediaPlayerViewModel>(viewModelStoreOwner = activity)
 
-    val allSubscriptions by subscriptionsVm.subscriptionsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
+    val rawSubscriptions by subscriptionsVm.subscriptionsState.collectAsStateWithLifecycle()
+    val allSubscriptions = rawSubscriptions ?: emptyList()
+    val unplayedCounts by subscriptionsVm.unplayedCountsState.collectAsStateWithLifecycle()
 
     val context = androidx.compose.ui.platform.LocalContext.current
     androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -188,8 +194,8 @@ fun HomeRoute(
     }
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
-    val gridState = rememberLazyGridState()
-    val listState = rememberLazyListState()
+    val gridState = subscriptionsVm.lazyGridState
+    val listState = subscriptionsVm.lazyListState
 
     if (showCreateFolderDialog) {
         CreateFolderDialog(
@@ -366,7 +372,7 @@ fun HomeRoute(
                 }
             }
 
-            if (allSubscriptions.isEmpty()) {
+            if (rawSubscriptions != null && allSubscriptions.isEmpty()) {
                 InfoLayout(
                     icon = Icons.Rounded.Podcasts,
                     title = {
@@ -409,7 +415,7 @@ fun HomeRoute(
                         }
                     }
                 )
-            } else {
+            } else if (allSubscriptions.isNotEmpty()) {
                     if(layout == SubscriptionsLayout.LIST) {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
@@ -453,16 +459,17 @@ fun HomeRoute(
                                         )
                                     },
                                     trailingContent = {
+                                        val badgeCount = unplayedCounts[bundle.podcast.origin] ?: bundle.subscription.newEpisodes
                                         androidx.compose.foundation.layout.Row(
                                             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(4.dp)
                                         ) {
-                                            if(bundle.subscription.newEpisodes > 0 && badgeMode != SubscriptionsBadgeMode.OFF) {
+                                            if(badgeCount > 0 && badgeMode != SubscriptionsBadgeMode.OFF) {
                                                 Badge(
                                                     containerColor = MaterialTheme.colorScheme.primary
                                                 ) {
                                                     if(badgeMode == SubscriptionsBadgeMode.UNPLAYED_COUNT) {
-                                                        Text(bundle.subscription.newEpisodes.toString())
+                                                        Text(if (badgeCount > 99) "99+" else badgeCount.toString())
                                                     }
                                                 }
                                             }
@@ -598,6 +605,7 @@ fun HomeRoute(
                                             folder = folderPair.first,
                                             items = folderPair.second,
                                             badgeMode = badgeMode,
+                                            unplayedCounts = unplayedCounts,
                                             showTitles = showGridTitles,
                                             compact = isCompact,
                                             onClick = { openFolderId = folderPair.first.id }
@@ -608,6 +616,7 @@ fun HomeRoute(
                                             modifier = itemMod,
                                             bundle = entryValue,
                                             badgeMode = badgeMode,
+                                            unplayedCountOverride = unplayedCounts[entryValue.podcast.origin],
                                             fillCell = true,
                                             showTitles = showGridTitles,
                                             compact = isCompact,

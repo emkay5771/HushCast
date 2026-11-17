@@ -18,6 +18,13 @@ enum class AdPolicyMode {
     OFF
 }
 
+@Serializable
+enum class AdAutoSkipScope {
+    HIGH_CONFIDENCE_ONLY,
+    MODERATE_AND_HIGH,
+    ALL_DETECTED
+}
+
 enum class ReadinessBadge {
     NOT_PROCESSED,
     ANALYZING,
