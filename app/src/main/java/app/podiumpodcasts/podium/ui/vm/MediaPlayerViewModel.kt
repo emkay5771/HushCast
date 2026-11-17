@@ -83,6 +83,7 @@ class MediaPlayerViewModel : ViewModel() {
     val queue = mutableStateListOf<String>()
     val queueIndex = mutableStateListOf<Int>()
     private var hasRestoredQueue = false
+    private var isRestoringQueue = false
     private var appContext: Context? = null
 
     private fun saveLastPlayingEpisodeId(episodeId: String?) {
@@ -258,7 +259,15 @@ class MediaPlayerViewModel : ViewModel() {
     }
 
     fun seek(position: Long) {
-        mediaController?.seekTo(position)
+        val controller = mediaController ?: return
+        val clamped = if (currentDuration > 0L) {
+            position.coerceIn(0L, currentDuration)
+        } else {
+            position.coerceAtLeast(0L)
+        }
+        currentPosition = clamped
+        lastProgressUpdate = System.currentTimeMillis()
+        controller.seekTo(clamped)
     }
 
     fun seekBack() {
@@ -407,8 +416,9 @@ class MediaPlayerViewModel : ViewModel() {
 
     fun restoreQueueIfNeeded(context: Context) {
         appContext = context.applicationContext
-        if(hasRestoredQueue || !::db.isInitialized) return
+        if(!::db.isInitialized || isRestoringQueue) return
         val controller = mediaController ?: return
+        if(hasRestoredQueue && controller.mediaItemCount > 0) return
         hasRestoredQueue = true
 
         val currentEpisodeId = controller.currentMediaItem
@@ -425,34 +435,41 @@ class MediaPlayerViewModel : ViewModel() {
         val appCtx = context.applicationContext
         val lastEpisodeId = currentEpisodeId ?: loadLastPlayingEpisodeId(appCtx)
 
+        isRestoringQueue = true
         viewModelScope.launch {
-            val saved = withContext(Dispatchers.IO) {
-                db.playbackQueue().getQueueSync()
-            }
-
-            if (controller.mediaItemCount == 0 && lastEpisodeId != null) {
-                val lastBundle = withContext(Dispatchers.IO) {
-                    runCatching { db.podcastEpisodes().getSync(lastEpisodeId) }.getOrNull()
+            try {
+                val saved = withContext(Dispatchers.IO) {
+                    db.playbackQueue().getQueueSync()
                 }
-                if (lastBundle != null) {
-                    val resumeMs = ((lastBundle.playState?.state ?: 0) * 1000L).coerceAtLeast(0L)
-                    controller.setMediaItem(lastBundle.createMediaItem(appCtx), resumeMs)
+                if (controller != mediaController || controller.mediaItemCount > 1) return@launch
+
+                if (controller.mediaItemCount == 0 && lastEpisodeId != null) {
+                    val lastBundle = withContext(Dispatchers.IO) {
+                        runCatching { db.podcastEpisodes().getSync(lastEpisodeId) }.getOrNull()
+                    }
+                    if (lastBundle != null && controller == mediaController && controller.mediaItemCount == 0) {
+                        val resumeMs = ((lastBundle.playState?.state ?: 0) * 1000L).coerceAtLeast(0L)
+                        controller.setMediaItem(lastBundle.createMediaItem(appCtx), resumeMs)
+                    }
                 }
-            }
 
-            for(item in saved) {
-                if(item.episodeId == lastEpisodeId) continue
-                val bundle = withContext(Dispatchers.IO) {
-                    runCatching { db.podcastEpisodes().getSync(item.episodeId) }.getOrNull()
-                } ?: continue
-                controller.addMediaItem(bundle.createMediaItem(appCtx))
-            }
+                for(item in saved) {
+                    if(item.episodeId == lastEpisodeId) continue
+                    val bundle = withContext(Dispatchers.IO) {
+                        runCatching { db.podcastEpisodes().getSync(item.episodeId) }.getOrNull()
+                    } ?: continue
+                    if (controller != mediaController) return@launch
+                    controller.addMediaItem(bundle.createMediaItem(appCtx))
+                }
 
-            if (controller.mediaItemCount > 0 && controller.playbackState == Player.STATE_IDLE) {
-                controller.prepare()
-            }
+                if (controller == mediaController && controller.mediaItemCount > 0 && controller.playbackState == Player.STATE_IDLE) {
+                    controller.prepare()
+                }
 
-            syncQueue(persist = false)
+                syncQueue(persist = false)
+            } finally {
+                isRestoringQueue = false
+            }
         }
     }
 
@@ -565,6 +582,10 @@ class MediaPlayerViewModel : ViewModel() {
         syncQueue()
 
         mediaController.addListener(listener)
+
+        if (mediaController.mediaItemCount == 0) {
+            appContext?.let { restoreQueueIfNeeded(it) }
+        }
     }
 
     fun unregisterMediaController() {

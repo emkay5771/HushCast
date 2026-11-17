@@ -541,7 +541,9 @@ fun SyncedTranscriptCard(
                 }
             }
 
-            val listState = rememberLazyListState()
+            val listState = rememberLazyListState(
+                initialFirstVisibleItemIndex = activeRowIndex.coerceAtLeast(0)
+            )
             val scope = rememberCoroutineScope()
             var followLive by remember { mutableStateOf(true) }
 

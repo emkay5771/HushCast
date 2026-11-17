@@ -291,7 +291,7 @@ fun MediaPlayerBottomSheet(
         onDismiss()
     }
 
-    var isFullScreen by remember { mutableStateOf(false) }
+    var isFullScreen by remember { mutableStateOf(true) }
 
     SwitchableDynamicMaterialExpressiveTheme(
         enable = enableArtworkColors.value,
@@ -554,13 +554,15 @@ fun MediaPlayerBottomSheet(
                         Column(
                             Modifier
                                 .fillMaxWidth()
+                                .then(if (isFullScreen) Modifier.weight(1f) else Modifier)
                                 .verticalScroll(rememberScrollState())
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
+                                .padding(horizontal = 20.dp, vertical = 8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = if (isFullScreen && !compactLayout) Arrangement.Center else Arrangement.Top
                         ) {
                     Column(
                         Modifier
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(20.dp))
                             .clickable {
                                 dismissGracefully {
                                     onOpenEpisode(
@@ -569,16 +571,17 @@ fun MediaPlayerBottomSheet(
                                     )
                                 }
                             }
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         if(!compactLayout) {
                             Image(
                                 mediaPlayerViewModel = vm,
-                                compactLayout = false
+                                compactLayout = false,
+                                isFullScreen = isFullScreen
                             )
 
-                            Spacer(Modifier.height(16.dp))
+                            Spacer(Modifier.height(if (isFullScreen) 24.dp else 16.dp))
                         }
 
                         AnimatedContent(vm.mediaMetadata) { mediaMetadata ->
@@ -588,10 +591,11 @@ fun MediaPlayerBottomSheet(
                                 if(compactLayout) {
                                     Image(
                                         mediaPlayerViewModel = vm,
-                                        compactLayout = true
+                                        compactLayout = true,
+                                        isFullScreen = isFullScreen
                                     )
 
-                                    Spacer(Modifier.width(32.dp))
+                                    Spacer(Modifier.width(24.dp))
                                 }
 
                                 Column(
@@ -745,7 +749,8 @@ fun MediaPlayerBottomSheet(
                         ) {
                             Row(
                                 Modifier.padding(horizontal = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(if (isFullScreen) 16.dp else 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
                                 FilledTonalIconButton(
                                     modifier = Modifier
@@ -874,11 +879,24 @@ fun MediaPlayerBottomSheet(
                         }
 
                         androidx.compose.material3.IconButton(onClick = { showQueueBottomSheet = true }) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
-                                contentDescription = stringResource(R.string.common_queue),
-                                tint = if(vm.queue.isNotEmpty()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            androidx.compose.material3.BadgedBox(
+                                badge = {
+                                    if (vm.queue.isNotEmpty()) {
+                                        androidx.compose.material3.Badge(
+                                            containerColor = MaterialTheme.colorScheme.primary,
+                                            contentColor = MaterialTheme.colorScheme.onPrimary
+                                        ) {
+                                            Text(if (vm.queue.size > 99) "99+" else vm.queue.size.toString())
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                                    contentDescription = stringResource(R.string.common_queue),
+                                    tint = if(vm.queue.isNotEmpty()) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
 
                         androidx.compose.material3.IconButton(
@@ -1054,12 +1072,15 @@ fun MediaPlayerBottomSheet(
 @Composable
 private fun Image(
     mediaPlayerViewModel: MediaPlayerViewModel,
-    compactLayout: Boolean
+    compactLayout: Boolean,
+    isFullScreen: Boolean = false
 ) {
-    val size = when(compactLayout) {
-        true -> 96.dp
-        false -> 196.dp
+    val size = when {
+        compactLayout -> 96.dp
+        isFullScreen -> 260.dp
+        else -> 196.dp
     }
+    val cornerRadius = if (isFullScreen && !compactLayout) 24.dp else 16.dp
 
     AnimatedContent(mediaPlayerViewModel.isLoading) { isLoading ->
         when(isLoading) {
@@ -1079,7 +1100,7 @@ private fun Image(
                     ShimmerAsyncImage(
                         modifier = Modifier
                             .size(size)
-                            .clip(RoundedCornerShape(16.dp)),
+                            .clip(RoundedCornerShape(cornerRadius)),
 
                         model = mediaMetadata?.artworkUri,
                         contentDescription = null,
