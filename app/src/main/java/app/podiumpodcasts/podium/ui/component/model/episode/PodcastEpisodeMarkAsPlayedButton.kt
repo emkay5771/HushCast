@@ -24,6 +24,8 @@ fun PodcastEpisodeMarkAsPlayedButton(
 ) {
     val scope = rememberCoroutineScope()
     val db = LocalDatabase.current
+    val mediaPlayerVm: app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel =
+        androidx.lifecycle.viewmodel.compose.viewModel()
 
     val playState = bundle.playState
 
@@ -68,6 +70,8 @@ fun PodcastEpisodeMarkAsPlayedButton(
                             state = bundle.episode.duration,
                             played = true
                         )
+
+                    mediaPlayerVm.removeEpisodeFromPlaybackAndQueue(bundle.episode.id)
                 }
             }
         },

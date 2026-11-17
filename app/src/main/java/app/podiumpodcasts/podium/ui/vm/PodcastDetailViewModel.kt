@@ -169,6 +169,8 @@ class PodcastDetailViewModel(
             db.podcastEpisodePlayStates()
                 .savePlayed(bundle.episode.id, true)
 
+            db.playbackQueue().remove(bundle.episode.id)
+
             db.syncActions()
                 .addPlayState(
                     origin = bundle.episode.origin,

@@ -665,10 +665,10 @@ fun SyncedTranscriptCard(
                                             )
                                         }
                                         if (paragraphWords.isNotEmpty()) {
-                                            val errorColor = MaterialTheme.colorScheme.error
-                                            val errorContainer = MaterialTheme.colorScheme.errorContainer
-                                            val primaryColor = MaterialTheme.colorScheme.primary
-                                            val primaryContainer = MaterialTheme.colorScheme.primaryContainer
+                                            val mutedTextColor = MaterialTheme.colorScheme.onErrorContainer
+                                            val mutedBgColor = MaterialTheme.colorScheme.errorContainer
+                                            val spokenTextColor = MaterialTheme.colorScheme.onPrimary
+                                            val spokenBgColor = MaterialTheme.colorScheme.primary
                                             val normalColor = if (isActive) {
                                                 MaterialTheme.colorScheme.onSurface
                                             } else {
@@ -682,7 +682,11 @@ fun SyncedTranscriptCard(
                                                 paragraphWords,
                                                 activeMuteWindows,
                                                 if (isActive) currentPositionMs / 100L else -1L,
-                                                normalColor
+                                                normalColor,
+                                                mutedTextColor,
+                                                mutedBgColor,
+                                                spokenTextColor,
+                                                spokenBgColor
                                             ) {
                                                 wordRanges.clear()
                                                 androidx.compose.ui.text.buildAnnotatedString {
@@ -696,8 +700,8 @@ fun SyncedTranscriptCard(
                                                         if (isMuted || isSpokenNow) {
                                                             pushStyle(
                                                                 androidx.compose.ui.text.SpanStyle(
-                                                                    color = if (isMuted) errorColor else primaryColor,
-                                                                    background = if (isMuted) errorContainer else primaryContainer,
+                                                                    color = if (isMuted) mutedTextColor else spokenTextColor,
+                                                                    background = if (isMuted) mutedBgColor else spokenBgColor,
                                                                     fontWeight = if (isSpokenNow) FontWeight.Bold else FontWeight.Normal,
                                                                     textDecoration = if (isMuted) TextDecoration.LineThrough else TextDecoration.None
                                                                 )

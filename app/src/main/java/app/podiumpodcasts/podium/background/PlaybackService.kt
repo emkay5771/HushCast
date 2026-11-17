@@ -216,16 +216,40 @@ class PlaybackService : MediaLibraryService() {
 
         // Load persisted settings asynchronously on startup (F2, P9, P22)
         scope.launch {
-            HushCastEngineBridge.loadFromSettings(settingsRepository)
+            HushCastEngineBridge.loadFromSettings(settingsRepository, this@PlaybackService)
             val backInc = settingsRepository.behavior.playerSeekBackIncrement.first()
             val fwdInc = settingsRepository.behavior.playerSeekForwardIncrement.first()
             val speed = settingsRepository.behavior.playerPlaybackSpeed.first()
+            val trimSilence = settingsRepository.behavior.trimSilence.first()
             currentSeekBackIncrementMs = backInc
             currentSeekForwardIncrementMs = fwdInc
             exoPlayer.setSeekBackIncrementMs(backInc)
             exoPlayer.setSeekForwardIncrementMs(fwdInc)
             exoPlayer.setPlaybackSpeed(speed)
+            exoPlayer.skipSilenceEnabled = trimSilence
             mediaSession?.setMediaButtonPreferences(buildMediaButtons(exoPlayer))
+        }
+
+        scope.launch {
+            settingsRepository.behavior.trimSilence.collect { exoPlayer.skipSilenceEnabled = it }
+        }
+        scope.launch {
+            settingsRepository.behavior.volumeBoost.collect { HushCastEngineBridge.volumeBoostEnabled = it }
+        }
+        scope.launch {
+            settingsRepository.hushCast.sponsorSkipSoundEnabled.collect {
+                HushCastEngineBridge.sponsorSkipSoundEnabled = it
+            }
+        }
+        scope.launch {
+            settingsRepository.hushCast.sponsorSkipSoundUri.collect {
+                HushCastEngineBridge.sponsorSkipSoundUri = it
+            }
+        }
+        scope.launch {
+            settingsRepository.hushCast.muteCustomSoundUri.collect {
+                HushCastEngineBridge.loadCustomMuteSound(this@PlaybackService, it)
+            }
         }
 
         scope.launch {
@@ -241,6 +265,7 @@ class PlaybackService : MediaLibraryService() {
         scope.launch {
             HushCastEngineBridge.adSkipEvents.collect { event ->
                 HushCastEngineBridge.notifyAdSkipped(event)
+                HushCastEngineBridge.playSponsorSkipIndicator(this@PlaybackService)
             }
         }
 

@@ -6,7 +6,9 @@ import kotlinx.serialization.Serializable
 enum class MuteActionMode {
     HARD_SILENCE,
     VOLUME_DUCK,
-    SAMPLE_DROP_MICRO_SKIP
+    SAMPLE_DROP_MICRO_SKIP,
+    BEEP,
+    CUSTOM_SOUND
 }
 
 @Serializable

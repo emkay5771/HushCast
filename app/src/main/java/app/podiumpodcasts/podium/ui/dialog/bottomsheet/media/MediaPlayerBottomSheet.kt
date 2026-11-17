@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -406,6 +407,7 @@ fun MediaPlayerBottomSheet(
                     scope.launch {
                         appDb.podcastEpisodePlayStates().savePlayed(episodeId, true)
                     }
+                    vm.removeEpisodeFromPlaybackAndQueue(episodeId)
                 }
             }
             PlayerToolbarAction.ANALYZE -> {
@@ -415,6 +417,22 @@ fun MediaPlayerBottomSheet(
     }
 
     var isFullScreen by remember { mutableStateOf(true) }
+    val pagerState = androidx.compose.foundation.pager.rememberPagerState(
+        initialPage = visibleTabs.indexOf(selectedTab).coerceAtLeast(0)
+    ) { visibleTabs.size }
+
+    LaunchedEffect(selectedTab, visibleTabs) {
+        val targetIdx = visibleTabs.indexOf(selectedTab).coerceAtLeast(0)
+        if (pagerState.currentPage != targetIdx && targetIdx < visibleTabs.size) {
+            pagerState.animateScrollToPage(targetIdx)
+        }
+    }
+    LaunchedEffect(pagerState.currentPage, visibleTabs) {
+        val tab = visibleTabs.getOrNull(pagerState.currentPage)
+        if (tab != null && tab != selectedTab) {
+            selectedTab = tab
+        }
+    }
 
     SwitchableDynamicMaterialExpressiveTheme(
         enable = enableArtworkColors.value,
@@ -440,9 +458,10 @@ fun MediaPlayerBottomSheet(
                                 onDragStart = { totalDrag = 0f },
                                 onVerticalDrag = { _, dragAmount ->
                                     totalDrag += dragAmount
-                                    if (totalDrag < -thresholdPx && !isFullScreen) {
+                                    if (totalDrag < -thresholdPx) {
                                         totalDrag = 0f
-                                        isFullScreen = true
+                                        if (!isFullScreen) isFullScreen = true
+                                        else showQueueBottomSheet = true
                                     } else if (totalDrag > thresholdPx && isFullScreen) {
                                         totalDrag = 0f
                                         isFullScreen = false
@@ -462,11 +481,10 @@ fun MediaPlayerBottomSheet(
                         )
                     }
 
-                    androidx.compose.material3.PrimaryScrollableTabRow(
+                    androidx.compose.material3.PrimaryTabRow(
                         modifier = Modifier.weight(1f),
-                        selectedTabIndex = visibleTabs.indexOf(selectedTab).coerceAtLeast(0),
+                        selectedTabIndex = visibleTabs.indexOf(selectedTab).coerceIn(0, (visibleTabs.size - 1).coerceAtLeast(0)),
                         containerColor = Color.Transparent,
-                        edgePadding = 4.dp,
                         divider = { }
                     ) {
                         visibleTabs.forEach { tab ->
@@ -478,7 +496,8 @@ fun MediaPlayerBottomSheet(
                                         text = tab.label,
                                         maxLines = 1,
                                         softWrap = false,
-                                        overflow = TextOverflow.Ellipsis
+                                        overflow = TextOverflow.Ellipsis,
+                                        style = MaterialTheme.typography.labelLarge
                                     )
                                 }
                             )
@@ -509,7 +528,15 @@ fun MediaPlayerBottomSheet(
                     }
                 }
 
-                when (selectedTab) {
+                androidx.compose.foundation.pager.HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(if (isFullScreen) Modifier.weight(1f) else Modifier),
+                    beyondViewportPageCount = 1
+                ) { pageIndex ->
+                val pageTab = visibleTabs.getOrNull(pageIndex) ?: MediaPlayerTab.PLAYER
+                when (pageTab) {
                     MediaPlayerTab.CHAPTERS -> {
                         LiveChaptersTabContent(
                             vm = vm,
@@ -677,263 +704,298 @@ fun MediaPlayerBottomSheet(
                     }
 
                     MediaPlayerTab.PLAYER -> {
-                        Column(
-                            Modifier
+                        Box(
+                            modifier = Modifier
                                 .fillMaxWidth()
-                                .then(if (isFullScreen) Modifier.weight(1f) else Modifier)
-                                .verticalScroll(rememberScrollState())
-                                .padding(horizontal = 20.dp, vertical = 8.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = if (isFullScreen && !compactLayout) Arrangement.Center else Arrangement.Top
+                                .fillMaxHeight()
+                                .pointerInput(Unit) {
+                                    val thresholdPx = 72.dp.toPx()
+                                    var totalDrag = 0f
+                                    detectVerticalDragGestures(
+                                        onDragStart = { totalDrag = 0f },
+                                        onVerticalDrag = { _, dragAmount ->
+                                            totalDrag += dragAmount
+                                            if (totalDrag < -thresholdPx) {
+                                                totalDrag = 0f
+                                                showQueueBottomSheet = true
+                                            }
+                                        }
+                                    )
+                                }
                         ) {
-                    Column(
-                        Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .clickable {
-                                dismissGracefully {
-                                    onOpenEpisode(
-                                        vm.metadataOrigin!!,
-                                        vm.metadataEpisodeId!!
-                                    )
-                                }
-                            }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        if(!compactLayout) {
-                            Image(
-                                mediaPlayerViewModel = vm,
-                                compactLayout = false,
-                                isFullScreen = isFullScreen
-                            )
-
-                            Spacer(Modifier.height(if (isFullScreen) 24.dp else 16.dp))
-                        }
-
-                        AnimatedContent(vm.mediaMetadata) { mediaMetadata ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
                             ) {
-                                if(compactLayout) {
-                                    Image(
-                                        mediaPlayerViewModel = vm,
-                                        compactLayout = true,
-                                        isFullScreen = isFullScreen
-                                    )
-
-                                    Spacer(Modifier.width(24.dp))
-                                }
-
                                 Column(
-                                    Modifier.fillMaxWidth(),
-                                    horizontalAlignment = if(compactLayout) Alignment.Start else Alignment.CenterHorizontally
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f, fill = true)
+                                        .verticalScroll(rememberScrollState()),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = if (isFullScreen && !compactLayout) Arrangement.Center else Arrangement.Top
                                 ) {
-                                    Text(
-                                        text = mediaMetadata?.title.toString(),
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                        textAlign = if(compactLayout) androidx.compose.ui.text.style.TextAlign.Start else androidx.compose.ui.text.style.TextAlign.Center,
-                                        style = Typography.titleLargeEmphasized
-                                    )
-
-                                    Spacer(Modifier.height(4.dp))
-
-                                    Text(
-                                        text = mediaMetadata?.subtitle.toString(),
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        textAlign = if(compactLayout) androidx.compose.ui.text.style.TextAlign.Start else androidx.compose.ui.text.style.TextAlign.Center,
-                                        color = if(onOpenPodcast != null && vm.metadataOrigin != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        style = Typography.bodyMedium,
-                                        modifier = if(onOpenPodcast != null && vm.metadataOrigin != null) {
-                                            Modifier.clickable {
+                                    Column(
+                                        Modifier
+                                            .clip(RoundedCornerShape(20.dp))
+                                            .clickable {
                                                 dismissGracefully {
-                                                    onOpenPodcast(vm.metadataOrigin!!)
+                                                    onOpenEpisode(
+                                                        vm.metadataOrigin!!,
+                                                        vm.metadataEpisodeId!!
+                                                    )
                                                 }
                                             }
-                                        } else Modifier
-                                    )
-
-                                    if (episodeChapters.isNotEmpty()) {
-                                        Spacer(Modifier.height(10.dp))
-                                        ActiveChapterPill(
-                                            vm = vm,
-                                            chapters = episodeChapters,
-                                            onClick = { selectedTab = MediaPlayerTab.CHAPTERS }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Column(
-                        Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        if (isCastingExternal) {
-                            CastingBypassNoticeBanner()
-                            Spacer(Modifier.height(8.dp))
-                        }
-
-                        if (vm.mediaSourceType is SourceTypeState.Streaming &&
-                            analysisStatus?.badge != ReadinessBadge.READY.name &&
-                            analysisStatus?.badge != ReadinessBadge.WORD_MUTE_READY.name &&
-                            episodeId.isNotBlank()
-                        ) {
-                            Surface(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = "Download to enable HushCast muting & sponsor skipping",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    androidx.compose.material3.TextButton(
-                                        onClick = { triggerAnalyzeNow() }
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
-                                        Text("Download")
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.height(8.dp))
-                        }
+                                        if(!compactLayout) {
+                                            Image(
+                                                mediaPlayerViewModel = vm,
+                                                compactLayout = false,
+                                                isFullScreen = isFullScreen
+                                            )
 
-                        pendingUndo?.let { undoEvent ->
-                            OneTapUndoAdSkipBanner(
-                                event = undoEvent,
-                                onUndo = {
-                                    vm.seek(undoEvent.jumpedFromMs)
-                                    HushCastEngineBridge.clearPendingUndo()
-                                },
-                                onDismiss = { HushCastEngineBridge.clearPendingUndo() }
-                            )
-                            Spacer(Modifier.height(8.dp))
-                        }
+                                            Spacer(Modifier.height(if (isFullScreen) 24.dp else 16.dp))
+                                        }
 
-                        val muteWindows = remember(muteEntities) { muteEntities.map { it.toDomain() } }
-                        val adWindows = remember(adEntities) { adEntities.map { it.toDomain() } }
+                                        AnimatedContent(vm.mediaMetadata) { mediaMetadata ->
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                if(compactLayout) {
+                                                    Image(
+                                                        mediaPlayerViewModel = vm,
+                                                        compactLayout = true,
+                                                        isFullScreen = isFullScreen
+                                                    )
 
-                        PlayerSeekBarSection(
-                            vm = vm,
-                            muteWindows = muteWindows,
-                            adWindows = adWindows
-                        )
+                                                    Spacer(Modifier.width(24.dp))
+                                                }
 
-                        Spacer(Modifier.height(16.dp))
+                                                Column(
+                                                    Modifier.fillMaxWidth(),
+                                                    horizontalAlignment = if(compactLayout) Alignment.Start else Alignment.CenterHorizontally
+                                                ) {
+                                                    Text(
+                                                        text = mediaMetadata?.title.toString(),
+                                                        maxLines = 2,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        textAlign = if(compactLayout) androidx.compose.ui.text.style.TextAlign.Start else androidx.compose.ui.text.style.TextAlign.Center,
+                                                        style = Typography.titleLargeEmphasized
+                                                    )
 
-                        ButtonGroup(
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Row(
-                                Modifier.padding(horizontal = 8.dp),
-                                horizontalArrangement = Arrangement.spacedBy(if (isFullScreen) 16.dp else 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                FilledTonalIconButton(
-                                    modifier = Modifier
-                                        .size(IconButtonDefaults.largeContainerSize()),
-                                    shapes = IconButtonDefaults.shapes(
-                                        shape = IconButtonDefaults.largeSquareShape,
-                                        pressedShape = IconButtonDefaults.largePressedShape
-                                    ),
-                                    onClick = {
-                                        vm.seekBack()
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = when(vm.seekBackIncrement) {
-                                            5000L -> Icons.Rounded.Replay5
-                                            10000L -> Icons.Rounded.Replay10
-                                            30000L -> Icons.Rounded.Replay30
-                                            else -> Icons.Rounded.Replay
-                                        },
-                                        contentDescription = stringResource(R.string.common_action_seek_back),
-                                        modifier = Modifier.size(IconButtonDefaults.largeIconSize),
-                                    )
-                                }
+                                                    Spacer(Modifier.height(4.dp))
 
-                                val targetSizeWidth by animateDpAsState(
-                                    targetValue = if(vm.isPlaying) {
-                                        IconButtonDefaults.largeContainerSize(IconButtonWidthOption.Uniform).width
-                                    } else {
-                                        IconButtonDefaults.largeContainerSize(IconButtonWidthOption.Wide).width
-                                    },
-                                    animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
-                                )
+                                                    Text(
+                                                        text = mediaMetadata?.subtitle.toString(),
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        textAlign = if(compactLayout) androidx.compose.ui.text.style.TextAlign.Start else androidx.compose.ui.text.style.TextAlign.Center,
+                                                        color = if(onOpenPodcast != null && vm.metadataOrigin != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        style = Typography.bodyMedium,
+                                                        modifier = if(onOpenPodcast != null && vm.metadataOrigin != null) {
+                                                            Modifier.clickable {
+                                                                dismissGracefully {
+                                                                    onOpenPodcast(vm.metadataOrigin!!)
+                                                                }
+                                                            }
+                                                        } else Modifier
+                                                    )
 
-                                FilledIconButton(
-                                    modifier = Modifier
-                                        .height(
-                                            IconButtonDefaults
-                                                .largeContainerSize(IconButtonWidthOption.Narrow)
-                                                .height
-                                        )
-                                        .width(targetSizeWidth),
-                                    shapes = IconButtonDefaults.shapes(
-                                        shape = IconButtonDefaults.largeSquareShape,
-                                        pressedShape = IconButtonDefaults.largePressedShape
-                                    ),
-                                    onClick = {
-                                        if(vm.isPlaying) {
-                                            vm.pause()
-                                        } else {
-                                            vm.play()
+                                                    if (episodeChapters.isNotEmpty()) {
+                                                        Spacer(Modifier.height(10.dp))
+                                                        ActiveChapterPill(
+                                                            vm = vm,
+                                                            chapters = episodeChapters,
+                                                            onClick = { selectedTab = MediaPlayerTab.CHAPTERS }
+                                                        )
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
+                                }
+
+                                // Fixed bottom controls (never pushed into scrolling area by toasts/banners)
+                                Column(
+                                    Modifier.padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
-                                    AnimatedContent(vm.isPlaying) {
-                                        Icon(
-                                            imageVector = when(it) {
-                                                true -> Icons.Rounded.Pause
-                                                false -> Icons.Rounded.PlayArrow
-                                            },
-                                            contentDescription = when(it) {
-                                                true -> stringResource(R.string.common_action_pause)
-                                                false -> stringResource(R.string.common_action_play)
-                                            },
-                                            modifier = Modifier.size(IconButtonDefaults.largeIconSize),
-                                        )
+                                    val muteWindows = remember(muteEntities) { muteEntities.map { it.toDomain() } }
+                                    val adWindows = remember(adEntities) { adEntities.map { it.toDomain() } }
+
+                                    PlayerSeekBarSection(
+                                        vm = vm,
+                                        muteWindows = muteWindows,
+                                        adWindows = adWindows
+                                    )
+
+                                    Spacer(Modifier.height(16.dp))
+
+                                    ButtonGroup(
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Row(
+                                            Modifier.padding(horizontal = 8.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(if (isFullScreen) 16.dp else 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            FilledTonalIconButton(
+                                                modifier = Modifier
+                                                    .size(IconButtonDefaults.largeContainerSize()),
+                                                shapes = IconButtonDefaults.shapes(
+                                                    shape = IconButtonDefaults.largeSquareShape,
+                                                    pressedShape = IconButtonDefaults.largePressedShape
+                                                ),
+                                                onClick = {
+                                                    vm.seekBack()
+                                                }
+                                            ) {
+                                                Icon(
+                                                    imageVector = when(vm.seekBackIncrement) {
+                                                        5000L -> Icons.Rounded.Replay5
+                                                        10000L -> Icons.Rounded.Replay10
+                                                        30000L -> Icons.Rounded.Replay30
+                                                        else -> Icons.Rounded.Replay
+                                                    },
+                                                    contentDescription = stringResource(R.string.common_action_seek_back),
+                                                    modifier = Modifier.size(IconButtonDefaults.largeIconSize),
+                                                )
+                                            }
+
+                                            val targetSizeWidth by animateDpAsState(
+                                                targetValue = if(vm.isPlaying) {
+                                                    IconButtonDefaults.largeContainerSize(IconButtonWidthOption.Uniform).width
+                                                } else {
+                                                    IconButtonDefaults.largeContainerSize(IconButtonWidthOption.Wide).width
+                                                },
+                                                animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                                            )
+
+                                            FilledIconButton(
+                                                modifier = Modifier
+                                                    .height(
+                                                        IconButtonDefaults
+                                                            .largeContainerSize(IconButtonWidthOption.Narrow)
+                                                            .height
+                                                    )
+                                                    .width(targetSizeWidth),
+                                                shapes = IconButtonDefaults.shapes(
+                                                    shape = IconButtonDefaults.largeSquareShape,
+                                                    pressedShape = IconButtonDefaults.largePressedShape
+                                                ),
+                                                onClick = {
+                                                    if(vm.isPlaying) {
+                                                        vm.pause()
+                                                    } else {
+                                                        vm.play()
+                                                    }
+                                                }
+                                            ) {
+                                                AnimatedContent(vm.isPlaying) {
+                                                    Icon(
+                                                        imageVector = when(it) {
+                                                            true -> Icons.Rounded.Pause
+                                                            false -> Icons.Rounded.PlayArrow
+                                                        },
+                                                        contentDescription = when(it) {
+                                                            true -> stringResource(R.string.common_action_pause)
+                                                            false -> stringResource(R.string.common_action_play)
+                                                        },
+                                                        modifier = Modifier.size(IconButtonDefaults.largeIconSize),
+                                                    )
+                                                }
+                                            }
+
+                                            FilledTonalIconButton(
+                                                modifier = Modifier
+                                                    .size(IconButtonDefaults.largeContainerSize()),
+                                                shapes = IconButtonDefaults.shapes(
+                                                    shape = IconButtonDefaults.largeSquareShape,
+                                                    pressedShape = IconButtonDefaults.largePressedShape
+                                                ),
+                                                onClick = {
+                                                    vm.seekForward()
+                                                }
+                                            ) {
+                                                Icon(
+                                                    imageVector = when(vm.seekForwardIncrement) {
+                                                        5000L -> Icons.Rounded.Forward5
+                                                        10000L -> Icons.Rounded.Forward10
+                                                        30000L -> Icons.Rounded.Forward30
+                                                        else -> Icons.Rounded.Forward
+                                                    },
+                                                    contentDescription = stringResource(R.string.common_action_seek_forward),
+                                                    modifier = Modifier.size(IconButtonDefaults.largeIconSize),
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Floating overlay for banners & toasts so play buttons never move
+                            Column(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (isCastingExternal) {
+                                    CastingBypassNoticeBanner()
+                                }
+
+                                if (vm.mediaSourceType is SourceTypeState.Streaming &&
+                                    analysisStatus?.badge != ReadinessBadge.READY.name &&
+                                    analysisStatus?.badge != ReadinessBadge.WORD_MUTE_READY.name &&
+                                    episodeId.isNotBlank()
+                                ) {
+                                    Surface(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        shadowElevation = 4.dp
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = "Download to enable HushCast muting & sponsor skipping",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            androidx.compose.material3.TextButton(
+                                                onClick = { triggerAnalyzeNow() }
+                                            ) {
+                                                Text("Download")
+                                            }
+                                        }
                                     }
                                 }
 
-                                FilledTonalIconButton(
-                                    modifier = Modifier
-                                        .size(IconButtonDefaults.largeContainerSize()),
-                                    shapes = IconButtonDefaults.shapes(
-                                        shape = IconButtonDefaults.largeSquareShape,
-                                        pressedShape = IconButtonDefaults.largePressedShape
-                                    ),
-                                    onClick = {
-                                        vm.seekForward()
-                                    }
-                                ) {
-                                    Icon(
-                                        imageVector = when(vm.seekForwardIncrement) {
-                                            5000L -> Icons.Rounded.Forward5
-                                            10000L -> Icons.Rounded.Forward10
-                                            30000L -> Icons.Rounded.Forward30
-                                            else -> Icons.Rounded.Forward
+                                pendingUndo?.let { undoEvent ->
+                                    OneTapUndoAdSkipBanner(
+                                        event = undoEvent,
+                                        onUndo = {
+                                            vm.seek(undoEvent.jumpedFromMs)
+                                            HushCastEngineBridge.clearPendingUndo()
                                         },
-                                        contentDescription = stringResource(R.string.common_action_seek_forward),
-                                        modifier = Modifier.size(IconButtonDefaults.largeIconSize),
+                                        onDismiss = { HushCastEngineBridge.clearPendingUndo() }
                                     )
                                 }
                             }
                         }
                     }
-                        }
-                    }
+                }
                 }
 
                 if (selectedTab != MediaPlayerTab.PLAYER) {
@@ -1788,25 +1850,92 @@ private fun PlayerSeekBarSection(
         }
     )
 
+    val context = LocalContext.current
+    val settingsRepository = remember(context) { app.podiumpodcasts.podium.SettingsRepository(context) }
+    val remainingMode by settingsRepository.behavior.remainingTimeDisplay.collectAsState(
+        initial = app.podiumpodcasts.podium.RemainingTimeDisplayMode.BOTH
+    )
+
+    val currentPosMs = (displayValue * vm.currentDuration).toLong().coerceIn(0L, vm.currentDuration.coerceAtLeast(0L))
+    val remainingRawMs = (vm.currentDuration - currentPosMs).coerceAtLeast(0L)
+    val adjustedRemainingMs = remember(currentPosMs, vm.currentDuration, vm.speed, adWindows) {
+        computeAdjustedRemainingMs(
+            currentPosMs = currentPosMs,
+            durationMs = vm.currentDuration,
+            speed = vm.speed,
+            skipRanges = HushCastEngineBridge.getActiveSkipRanges()
+        )
+    }
+
+    val remainingText = when (remainingMode) {
+        app.podiumpodcasts.podium.RemainingTimeDisplayMode.RAW -> "-${formatPlayerTime(remainingRawMs)}"
+        app.podiumpodcasts.podium.RemainingTimeDisplayMode.ADJUSTED -> "-${formatPlayerTime(adjustedRemainingMs)}"
+        app.podiumpodcasts.podium.RemainingTimeDisplayMode.BOTH -> {
+            if (kotlin.math.abs(adjustedRemainingMs - remainingRawMs) >= 1000L) {
+                "-${formatPlayerTime(remainingRawMs)} (-${formatPlayerTime(adjustedRemainingMs)})"
+            } else {
+                "-${formatPlayerTime(remainingRawMs)}"
+            }
+        }
+    }
+
     Row(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Text(
             text = formatPlayerTime(
-                time = (displayValue * vm.currentDuration).toLong(),
+                time = currentPosMs,
                 duration = vm.currentDuration
             ),
             style = Typography.labelMediumEmphasized
         )
 
         Text(
-            text = formatPlayerTime(
-                time = vm.currentDuration
-            ),
+            text = remainingText,
             style = Typography.labelMediumEmphasized
         )
     }
+}
+
+private fun computeAdjustedRemainingMs(
+    currentPosMs: Long,
+    durationMs: Long,
+    speed: Float,
+    skipRanges: List<app.hushcast.automute.dsp.SkipAwareSeekCalculator.SkipRange>
+): Long {
+    val remainingRaw = (durationMs - currentPosMs).coerceAtLeast(0L)
+    if (remainingRaw == 0L) return 0L
+
+    val clipped = skipRanges
+        .mapNotNull { r ->
+            val s = maxOf(r.startMs, currentPosMs)
+            val e = minOf(r.endMs, durationMs)
+            if (e > s) s to e else null
+        }
+        .sortedBy { it.first }
+
+    var skippedMs = 0L
+    var curStart = -1L
+    var curEnd = -1L
+    for ((s, e) in clipped) {
+        if (curStart < 0L) {
+            curStart = s
+            curEnd = e
+        } else if (s <= curEnd) {
+            curEnd = maxOf(curEnd, e)
+        } else {
+            skippedMs += (curEnd - curStart)
+            curStart = s
+            curEnd = e
+        }
+    }
+    if (curStart >= 0L) {
+        skippedMs += (curEnd - curStart)
+    }
+
+    val effectiveRemaining = (remainingRaw - skippedMs).coerceAtLeast(0L)
+    return (effectiveRemaining / speed.coerceAtLeast(0.25f)).toLong()
 }
 
 @Composable

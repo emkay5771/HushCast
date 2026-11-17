@@ -270,16 +270,53 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         context: Context,
         bundle: PodcastEpisodeBundle
     ) {
-        if (bundle.download?.state == PodcastEpisodeDownloadState.DOWNLOADED.value) return
         val appCtx = context.applicationContext
+        val isDownloaded = bundle.download?.state == PodcastEpisodeDownloadState.DOWNLOADED.value
 
         viewModelScope.launch(Dispatchers.IO) {
             val repo = SettingsRepository(appCtx)
+            val protectionActive = repo.hushCast.wordMutingEnabled.first() ||
+                repo.hushCast.adPolicyMode.first() != app.hushcast.automute.dsp.AdPolicyMode.OFF
             val queueAutoDl = repo.behavior.autoDownloadQueue.first()
-            val hushAutoDl = repo.hushCast.autoDownloadUpNext.first() &&
-                (repo.hushCast.wordMutingEnabled.first() ||
-                    repo.hushCast.adPolicyMode.first() != app.hushcast.automute.dsp.AdPolicyMode.OFF)
-            if (queueAutoDl || hushAutoDl) {
+            val hushAutoDl = repo.hushCast.autoDownloadUpNext.first() && protectionActive
+
+            if (!isDownloaded && (queueAutoDl || hushAutoDl)) {
+                DownloadManager.downloadEpisode(
+                    context = appCtx,
+                    db = db,
+                    episodeId = bundle.episode.id,
+                    auto = true
+                )
+                return@launch
+            }
+
+            if (!protectionActive) return@launch
+            val autoMethod = app.hushcast.automute.engine.HushCastPrefs.getAutoDownloadMethod(appCtx)
+            if (autoMethod == app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS) return@launch
+
+            val autoMuteDao = app.hushcast.automute.storage.AutoMuteDatabase.getInstance(appCtx).dao()
+            val existingBadge = autoMuteDao.getStatus(bundle.episode.id)?.badge
+            if (existingBadge == app.hushcast.automute.dsp.ReadinessBadge.READY.name ||
+                existingBadge == app.hushcast.automute.dsp.ReadinessBadge.ANALYZING.name
+            ) {
+                return@launch
+            }
+
+            val localPath = if (isDownloaded) {
+                bundle.episode.craftDownloadFile(appCtx).takeIf { it.exists() }?.absolutePath
+            } else {
+                null
+            }
+            val desktopEnabled = app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(appCtx)
+            if (localPath != null) {
+                app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueAnalyzeNow(
+                    context = appCtx,
+                    episodeId = bundle.episode.id,
+                    audioPath = localPath,
+                    actionMode = repo.hushCast.muteActionMode.first(),
+                    episodeTitle = bundle.episode.title
+                )
+            } else if (desktopEnabled) {
                 DownloadManager.downloadEpisode(
                     context = appCtx,
                     db = db,
@@ -338,6 +375,41 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         syncQueue(persist = true)
+    }
+
+    fun removeEpisodeFromPlaybackAndQueue(episodeId: String) {
+        val controller = mediaController
+        if (controller != null) {
+            for (index in controller.mediaItemCount - 1 downTo 0) {
+                val mediaItem = controller.getMediaItemAt(index)
+                val mediaItemEpisodeId =
+                    mediaItem.mediaMetadata.extras?.getString(MediaMetadataExtra.EPISODE_ID.name)
+                if (episodeId != mediaItemEpisodeId) continue
+
+                val currentIdx = controller.currentMediaItemIndex
+                if (index == currentIdx) {
+                    if (controller.mediaItemCount <= 1) {
+                        controller.stop()
+                        controller.clearMediaItems()
+                        break
+                    } else {
+                        if (index + 1 < controller.mediaItemCount) {
+                            controller.seekToNextMediaItem()
+                        } else {
+                            controller.seekToPreviousMediaItem()
+                        }
+                        controller.removeMediaItem(index)
+                    }
+                } else {
+                    controller.removeMediaItem(index)
+                }
+            }
+            syncQueue(persist = true)
+        } else {
+            viewModelScope.launch(Dispatchers.IO) {
+                db.playbackQueue().remove(episodeId)
+            }
+        }
     }
 
     fun removeFromQueue(queuePos: Int) {

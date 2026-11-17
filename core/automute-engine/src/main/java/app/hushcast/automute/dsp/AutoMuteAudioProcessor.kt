@@ -11,6 +11,8 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sin
+import kotlin.math.tanh
 
 /**
  * Sample-accurate Media3 AudioProcessor for Feature A (Word-Level Auto-Muting).
@@ -28,6 +30,9 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
         private const val RAMP_MS_SILENCE = 8.0
         private const val RAMP_MS_DROP = 12.0
         private const val DUCK_FLOOR = 0.10f
+        private const val BEEP_FREQ_HZ = 1000.0
+        private const val BEEP_AMPLITUDE = 0.22f
+        private const val VOLUME_BOOST_GAIN = 1.85f
         const val DEFAULT_ENCODER_DELAY_MS = 30L
     }
 
@@ -41,7 +46,16 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
     var defaultActionMode: MuteActionMode = MuteActionMode.HARD_SILENCE
 
     @Volatile
+    var volumeBoostEnabled: Boolean = false
+
+    @Volatile
     var encoderDelayOffsetMs: Long = DEFAULT_ENCODER_DELAY_MS
+
+    @Volatile
+    private var customSoundPcm: FloatArray? = null
+
+    @Volatile
+    private var customSoundSampleRateHz: Int = 44100
 
     private val skippedFramesCounter = AtomicLong(0L)
     val skippedFrames: Long
@@ -53,6 +67,11 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
     private var channelCount: Int = 2
     private var bytesPerFrame: Int = 4
     private var isFloatPcm: Boolean = false
+
+    fun setCustomSoundPcm(samples: FloatArray?, sampleRateHz: Int = 44100) {
+        customSoundPcm = samples?.takeIf { it.isNotEmpty() }
+        customSoundSampleRateHz = sampleRateHz.coerceAtLeast(8000)
+    }
 
     fun updateWindows(newWindows: List<MuteWindow>) {
         windows = newWindows.filter { it.enabled && it.endMs > it.startMs }.sortedBy { it.startMs }
@@ -127,7 +146,7 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
         val activeWindows = windows
         if (!isEnabled || activeWindows.isEmpty()) {
             val out = replaceOutputBuffer(remaining)
-            out.put(inputBuffer)
+            bulkCopyFrames(inputBuffer, out, frameCount)
             out.flip()
             currentInputFrameIndex += frameCount
             return
@@ -148,7 +167,7 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
         // Fast path: next window starts after this buffer ends -> single bulk copy
         if (idx >= activeWindows.size || (activeWindows[idx].startMs + delayMs).coerceAtLeast(0L) > bufEndMs) {
             val out = replaceOutputBuffer(remaining)
-            out.put(inputBuffer)
+            bulkCopyFrames(inputBuffer, out, frameCount)
             out.flip()
             currentInputFrameIndex += frameCount
             return
@@ -205,6 +224,26 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
                     val gain = cosineRampGain(framesFromStart, framesToEnd, rampFramesSilence, floor = DUCK_FLOOR)
                     copyFrameWithGain(inputBuffer, out, gain)
                 }
+                MuteActionMode.BEEP -> {
+                    val origGain = cosineRampGain(framesFromStart, framesToEnd, rampFramesSilence, floor = 0.0f)
+                    val effectEnv = (1.0f - origGain).coerceIn(0.0f, 1.0f)
+                    val tone = sin(2.0 * PI * BEEP_FREQ_HZ * framesFromStart / sampleRateHz.coerceAtLeast(1)).toFloat() *
+                        BEEP_AMPLITUDE * effectEnv
+                    copyFrameWithGainAndMix(inputBuffer, out, origGain, tone)
+                }
+                MuteActionMode.CUSTOM_SOUND -> {
+                    val origGain = cosineRampGain(framesFromStart, framesToEnd, rampFramesSilence, floor = 0.0f)
+                    val effectEnv = (1.0f - origGain).coerceIn(0.0f, 1.0f)
+                    val pcm = customSoundPcm
+                    val mixSample = if (pcm != null && pcm.isNotEmpty()) {
+                        val srcIdx = ((framesFromStart.toLong() * customSoundSampleRateHz) / sampleRateHz.coerceAtLeast(1)).toInt() % pcm.size
+                        pcm[srcIdx] * effectEnv
+                    } else {
+                        sin(2.0 * PI * BEEP_FREQ_HZ * framesFromStart / sampleRateHz.coerceAtLeast(1)).toFloat() *
+                            BEEP_AMPLITUDE * effectEnv
+                    }
+                    copyFrameWithGainAndMix(inputBuffer, out, origGain, mixSample)
+                }
                 MuteActionMode.SAMPLE_DROP_MICRO_SKIP -> {
                     if (framesFromStart < rampFramesDrop || framesToEnd < rampFramesDrop) {
                         val gain = cosineRampGain(framesFromStart, framesToEnd, rampFramesDrop, floor = 0.0f)
@@ -226,12 +265,31 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
         currentInputFrameIndex += frameCount
     }
 
+    private fun applyBoostFloat(sample: Float): Float {
+        if (!volumeBoostEnabled) return sample
+        return tanh((sample * VOLUME_BOOST_GAIN).toDouble()).toFloat()
+    }
+
     private fun bulkCopyFrames(src: ByteBuffer, dst: ByteBuffer, count: Int) {
-        val bytes = count * bytesPerFrame
-        val oldLimit = src.limit()
-        src.limit(src.position() + bytes)
-        dst.put(src)
-        src.limit(oldLimit)
+        if (!volumeBoostEnabled) {
+            val bytes = count * bytesPerFrame
+            val oldLimit = src.limit()
+            src.limit(src.position() + bytes)
+            dst.put(src)
+            src.limit(oldLimit)
+            return
+        }
+        val totalSamples = count * channelCount
+        for (i in 0 until totalSamples) {
+            if (isFloatPcm) {
+                dst.putFloat(applyBoostFloat(src.getFloat()))
+            } else {
+                val normalized = src.getShort().toFloat() / 32768.0f
+                val boosted = (applyBoostFloat(normalized) * 32767.0f).roundToInt()
+                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                dst.putShort(boosted.toShort())
+            }
+        }
     }
 
     private fun cosineRampGain(
@@ -269,9 +327,28 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
     private fun copyFrameWithGain(src: ByteBuffer, dst: ByteBuffer, gain: Float) {
         for (c in 0 until channelCount) {
             if (isFloatPcm) {
-                dst.putFloat(src.getFloat() * gain)
+                dst.putFloat(applyBoostFloat(src.getFloat() * gain))
             } else {
-                val sample = (src.getShort() * gain).roundToInt()
+                val sample = if (volumeBoostEnabled) {
+                    val norm = (src.getShort().toFloat() * gain) / 32768.0f
+                    (applyBoostFloat(norm) * 32767.0f).roundToInt()
+                } else {
+                    (src.getShort() * gain).roundToInt()
+                }.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                dst.putShort(sample.toShort())
+            }
+        }
+    }
+
+    private fun copyFrameWithGainAndMix(src: ByteBuffer, dst: ByteBuffer, gain: Float, mixFloat: Float) {
+        for (c in 0 until channelCount) {
+            if (isFloatPcm) {
+                val s = src.getFloat() * gain + mixFloat
+                dst.putFloat(applyBoostFloat(s).coerceIn(-1.0f, 1.0f))
+            } else {
+                val origNorm = (src.getShort().toFloat() * gain) / 32768.0f
+                val mixed = applyBoostFloat(origNorm + mixFloat)
+                val sample = (mixed * 32767.0f).roundToInt()
                     .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
                 dst.putShort(sample.toShort())
             }

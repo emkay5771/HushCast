@@ -151,6 +151,14 @@ fun NewEpisodesRoute(
 
                     val markedAsSeen = stringResource(R.string.snackbar_marked_as_seen)
 
+                    val secondaryRightType = when (itemSwipeRightAction) {
+                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT -> app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST
+                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST -> app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
+                        app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED -> app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD
+                        app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD -> app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
+                        app.podiumpodcasts.podium.EpisodeSwipeAction.NONE -> app.podiumpodcasts.podium.EpisodeSwipeAction.NONE
+                    }
+
                     SwipeableItem(
                         scope = scope,
                         modifier = Modifier.animateItem(),
@@ -161,6 +169,20 @@ fun NewEpisodesRoute(
                             playerVm = itemPlayerVm,
                             onMarkPlayed = { markPlayed ->
                                 db.podcastEpisodePlayStates().savePlayed(item.episode.id, markPlayed)
+                                if (markPlayed) {
+                                    itemPlayerVm.removeEpisodeFromPlaybackAndQueue(item.episode.id)
+                                }
+                            }
+                        ),
+                        secondaryStartAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
+                            actionType = secondaryRightType,
+                            bundle = item,
+                            playerVm = itemPlayerVm,
+                            onMarkPlayed = { markPlayed ->
+                                db.podcastEpisodePlayStates().savePlayed(item.episode.id, markPlayed)
+                                if (markPlayed) {
+                                    itemPlayerVm.removeEpisodeFromPlaybackAndQueue(item.episode.id)
+                                }
                             }
                         ),
                         endAction = SwipeableItemActions.CheckAction(

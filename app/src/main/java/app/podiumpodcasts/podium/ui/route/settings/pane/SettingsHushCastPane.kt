@@ -101,6 +101,41 @@ fun SettingsHushCastPane(
     val wordMutingEnabled by settingsRepository.hushCast.wordMutingEnabled.collectAsState(initial = HushCastEngineBridge.wordMutingEnabled)
     val selectedActionMode by settingsRepository.hushCast.muteActionMode.collectAsState(initial = HushCastEngineBridge.defaultActionMode)
     val selectedAdPolicy by settingsRepository.hushCast.adPolicyMode.collectAsState(initial = HushCastEngineBridge.defaultAdPolicy)
+    val muteCustomSoundUri by settingsRepository.hushCast.muteCustomSoundUri.collectAsState(initial = null)
+    val sponsorSkipSoundEnabled by settingsRepository.hushCast.sponsorSkipSoundEnabled.collectAsState(initial = HushCastEngineBridge.sponsorSkipSoundEnabled)
+    val sponsorSkipSoundUri by settingsRepository.hushCast.sponsorSkipSoundUri.collectAsState(initial = HushCastEngineBridge.sponsorSkipSoundUri)
+
+    val muteSoundPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            val uriStr = uri.toString()
+            HushCastEngineBridge.loadCustomMuteSound(context, uriStr)
+            scope.launch { settingsRepository.hushCast.setMuteCustomSoundUri(uriStr) }
+        }
+    }
+
+    val skipSoundPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    uri,
+                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            val uriStr = uri.toString()
+            HushCastEngineBridge.sponsorSkipSoundUri = uriStr
+            scope.launch { settingsRepository.hushCast.setSponsorSkipSoundUri(uriStr) }
+        }
+    }
 
     var newPattern by remember { mutableStateOf("") }
     var isRegex by remember { mutableStateOf(false) }
@@ -739,19 +774,49 @@ fun SettingsHushCastPane(
                         val modes = listOf(
                             MuteActionMode.HARD_SILENCE to "Silence",
                             MuteActionMode.VOLUME_DUCK to "Duck 10%",
-                            MuteActionMode.SAMPLE_DROP_MICRO_SKIP to "Micro-Skip"
+                            MuteActionMode.SAMPLE_DROP_MICRO_SKIP to "Micro-Skip",
+                            MuteActionMode.BEEP to "Bleep",
+                            MuteActionMode.CUSTOM_SOUND to "Custom"
                         )
-                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                            modes.forEachIndexed { idx, (mode, label) ->
-                                SegmentedButton(
+                        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                        androidx.compose.foundation.layout.FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            modes.forEach { (mode, label) ->
+                                androidx.compose.material3.FilterChip(
                                     selected = selectedActionMode == mode,
                                     onClick = {
                                         HushCastEngineBridge.defaultActionMode = mode
                                         scope.launch { settingsRepository.hushCast.setMuteActionMode(mode) }
                                     },
-                                    shape = SegmentedButtonDefaults.itemShape(idx, modes.size)
-                                ) {
-                                    Text(label)
+                                    label = { Text(label) }
+                                )
+                            }
+                        }
+                        if (selectedActionMode == MuteActionMode.CUSTOM_SOUND) {
+                            Spacer(Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (muteCustomSoundUri != null) "Custom sound selected" else "Default bleep (no file chosen)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                androidx.compose.material3.TextButton(onClick = { muteSoundPicker.launch(arrayOf("audio/*")) }) {
+                                    Text(if (muteCustomSoundUri != null) "Change" else "Choose file")
+                                }
+                                if (muteCustomSoundUri != null) {
+                                    androidx.compose.material3.TextButton(onClick = {
+                                        HushCastEngineBridge.loadCustomMuteSound(context, null)
+                                        scope.launch { settingsRepository.hushCast.setMuteCustomSoundUri(null) }
+                                    }) {
+                                        Text("Clear")
+                                    }
                                 }
                             }
                         }
@@ -786,6 +851,46 @@ fun SettingsHushCastPane(
                                     shape = SegmentedButtonDefaults.itemShape(idx, policies.size)
                                 ) {
                                     Text(label)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Sponsor skip indicator sound", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    text = if (sponsorSkipSoundUri != null) "Custom sound selected" else "Play a subtle chime when an ad is skipped",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = sponsorSkipSoundEnabled,
+                                onCheckedChange = { enabled ->
+                                    HushCastEngineBridge.sponsorSkipSoundEnabled = enabled
+                                    scope.launch { settingsRepository.hushCast.setSponsorSkipSoundEnabled(enabled) }
+                                }
+                            )
+                        }
+                        if (sponsorSkipSoundEnabled) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                androidx.compose.material3.TextButton(onClick = { skipSoundPicker.launch(arrayOf("audio/*")) }) {
+                                    Text(if (sponsorSkipSoundUri != null) "Change sound" else "Custom sound")
+                                }
+                                if (sponsorSkipSoundUri != null) {
+                                    androidx.compose.material3.TextButton(onClick = {
+                                        HushCastEngineBridge.sponsorSkipSoundUri = null
+                                        scope.launch { settingsRepository.hushCast.setSponsorSkipSoundUri(null) }
+                                    }) {
+                                        Text("Reset to chime")
+                                    }
                                 }
                             }
                         }

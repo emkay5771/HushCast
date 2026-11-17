@@ -102,8 +102,10 @@ object WordMatcher {
 
     private fun modeStrength(mode: MuteActionMode): Int = when (mode) {
         MuteActionMode.VOLUME_DUCK -> 1
-        MuteActionMode.HARD_SILENCE -> 2
-        MuteActionMode.SAMPLE_DROP_MICRO_SKIP -> 3
+        MuteActionMode.BEEP -> 2
+        MuteActionMode.CUSTOM_SOUND -> 2
+        MuteActionMode.HARD_SILENCE -> 3
+        MuteActionMode.SAMPLE_DROP_MICRO_SKIP -> 4
     }
 
     fun matchWords(

@@ -1,3 +1,26 @@
+# HushCast v1.0.3-hushcast
+
+## What's New
+- **Database Migration Fix**:
+  - Fixed Room migration validation crash on `podcastEpisode` by adding the matching `@Entity` indices (`origin`, `pubDate` and `pubDate`) and bumping the schema to v18 with `MIGRATION_17_18`.
+- **Player & Queue Improvements**:
+  - Marking an episode as played now removes it from the **Up Next** queue and stops/advances playback if it is currently playing.
+  - Fixed toast/banner overlays (like Undo Ad Skip and streaming notices) in the player so they float cleanly without pushing the play buttons into a scrolling area.
+  - Replaced the player top tab bar with a compact `PrimaryTabRow` + `HorizontalPager` for smooth single-phase side-to-side swiping and reduced whitespace.
+  - Added swipe-up gesture in the full-screen player to open the **Up Next** queue.
+  - Updated remaining time to show speed- and skip-adjusted time in parentheses (e.g., `-24:10 (-16:07)`), configurable in **Settings → Playback → Remaining time display**.
+- **Playback Effects & Miniplayer**:
+  - Upgraded the speed sheet to **Playback Effects** with **Trim silence**, **Volume boost**, speed `-`/`+` stepper, and preset chips.
+  - Redesigned the miniplayer to a Pocket Casts-style layout with rounded-square artwork, maximized title/subtitle space, Play/Pause + Queue buttons, and a bottom progress bar.
+- **Audio Effects & Transcript Contrast**:
+  - Added **Bleep** and **Custom** sound effect options for word auto-muting, plus an optional **Sponsor skip indicator sound** (chime or custom audio) in **Settings → HushCast**.
+  - Improved dark-mode contrast for spoken and muted words in the synced transcript view.
+- **Swipe Actions & Analysis Reliability**:
+  - Upgraded episode list swipe actions to support Pocket Casts-style half-swipe 2-option trays and full-swipe primary triggers.
+  - Fixed `autoDownloadIfEnabled` and `PodcastEpisodeDownloadWorker` (`ExistingWorkPolicy.REPLACE` on manual/reprocess triggers) so unanalyzed episodes auto-send for analysis reliably.
+
+---
+
 # HushCast v1.0.2-hushcast
 
 ## What's New

@@ -11,6 +11,7 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.ForeignKey.Companion.CASCADE
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import app.podiumpodcasts.podium.manager.DownloadManager
 import app.podiumpodcasts.podium.utils.sha256
@@ -34,7 +35,11 @@ enum class MediaMetadataExtra {
         parentColumns = arrayOf("origin"),
         childColumns = arrayOf("origin"),
         onDelete = CASCADE
-    )]
+    )],
+    indices = [
+        Index(value = ["origin", "pubDate"]),
+        Index(value = ["pubDate"])
+    ]
 )
 data class PodcastEpisodeModel(
     @PrimaryKey

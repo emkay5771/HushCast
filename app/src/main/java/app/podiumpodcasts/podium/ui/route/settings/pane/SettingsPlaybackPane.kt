@@ -381,6 +381,63 @@ fun SettingsPlaybackPane(
                     )
                 }
             }
+
+            item {
+                val remainingMode = vm.repository.behavior.remainingTimeDisplay.collectAsState(
+                    app.podiumpodcasts.podium.RemainingTimeDisplayMode.BOTH
+                )
+                val showPicker = remember { mutableStateOf(false) }
+
+                app.podiumpodcasts.podium.ui.component.settings.SettingsListItem(
+                    icon = {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Rounded.Speed,
+                            "Remaining time display"
+                        )
+                    },
+                    label = "Remaining time display",
+                    description = remainingMode.value.label,
+                    onClick = { showPicker.value = true },
+                    index = 8,
+                    count = 9
+                )
+
+                if (showPicker.value) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { showPicker.value = false },
+                        title = { Text("Remaining time display") },
+                        text = {
+                            androidx.compose.foundation.layout.Column {
+                                app.podiumpodcasts.podium.RemainingTimeDisplayMode.entries.forEach { mode ->
+                                    androidx.compose.foundation.layout.Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                showPicker.value = false
+                                                scope.launch { vm.repository.behavior.setRemainingTimeDisplay(mode) }
+                                            }
+                                            .padding(vertical = 8.dp),
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                                    ) {
+                                        androidx.compose.material3.RadioButton(
+                                            selected = mode == remainingMode.value,
+                                            onClick = {
+                                                showPicker.value = false
+                                                scope.launch { vm.repository.behavior.setRemainingTimeDisplay(mode) }
+                                            }
+                                        )
+                                        Text(mode.label, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {},
+                        dismissButton = {
+                            androidx.compose.material3.TextButton(onClick = { showPicker.value = false }) { Text("Cancel") }
+                        }
+                    )
+                }
+            }
         }
     }
 }

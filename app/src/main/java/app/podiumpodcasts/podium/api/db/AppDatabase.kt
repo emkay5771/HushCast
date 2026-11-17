@@ -46,7 +46,7 @@ import app.podiumpodcasts.podium.api.db.model.statistics.UpdatePodcastRunModel
         SyncActionModel::class,
         QueueItemModel::class,
         ChapterSkipModel::class
-    ], version = 17, exportSchema = true
+    ], version = 18, exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun podcasts(): PodcastDao
@@ -340,6 +340,13 @@ val MIGRATION_16_17 = object : Migration(16, 17) {
     }
 }
 
+val MIGRATION_17_18 = object : Migration(17, 18) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_podcastEpisode_origin_pubDate` ON `podcastEpisode` (`origin`, `pubDate`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_podcastEpisode_pubDate` ON `podcastEpisode` (`pubDate`)")
+    }
+}
+
 val ALL_MIGRATIONS = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
@@ -356,5 +363,6 @@ val ALL_MIGRATIONS = arrayOf(
     MIGRATION_13_14,
     MIGRATION_14_15,
     MIGRATION_15_16,
-    MIGRATION_16_17
+    MIGRATION_16_17,
+    MIGRATION_17_18
 )

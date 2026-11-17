@@ -114,12 +114,13 @@ fun FloatingMediaPlayer(
                     enable = enableArtworkColors.value,
                     seedColor = Color(vm.metadataImageSeedColor ?: 1)
                 ) {
+                    val cardShape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp)
                     ElevatedCard(
                         modifier = Modifier
                             .padding(start = 16.dp)
                             .widthIn(min = 50.dp, max = FloatingMediaPlayerMaxWidth)
                             .height(FloatingMediaPlayerHeight)
-                            .border(1.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, cardShape)
                             .pointerInput(Unit) {
                                 val thresholdPx = 40.dp.toPx()
                                 var totalDrag = 0f
@@ -134,153 +135,125 @@ fun FloatingMediaPlayer(
                                     }
                                 )
                             },
-                        shape = CircleShape,
+                        shape = cardShape,
                         colors = CardDefaults.elevatedCardColors(
-                            containerColor = MaterialTheme.colorScheme.background,
-                            contentColor = MaterialTheme.colorScheme.onBackground
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            contentColor = MaterialTheme.colorScheme.onSurface
                         ),
                         onClick = onClick
                     ) {
-                        Row(
-                            Modifier
-                                .padding(horizontal = 8.dp, vertical = 6.dp)
-                                .fillMaxSize(),
-                            horizontalArrangement = Arrangement.Absolute.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            AnimatedContent(vm.isLoading) { isLoading ->
-                                when(isLoading) {
-                                    true -> {
-                                        ContainedLoadingIndicator(
-                                            Modifier.size(46.dp)
-                                        )
+                        Column(Modifier.fillMaxSize()) {
+                            Row(
+                                Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                AnimatedContent(vm.isLoading) { isLoading ->
+                                    when(isLoading) {
+                                        true -> {
+                                            ContainedLoadingIndicator(
+                                                Modifier.size(48.dp)
+                                            )
+                                        }
+
+                                        false -> {
+                                            AnimatedContent(vm.mediaMetadata) { mediaMetadata ->
+                                                ShimmerAsyncImage(
+                                                    modifier = Modifier
+                                                        .size(48.dp)
+                                                        .clip(androidx.compose.foundation.shape.RoundedCornerShape(10.dp)),
+
+                                                    model = mediaMetadata?.artworkUri,
+                                                    contentDescription = null,
+
+                                                    contentScale = ContentScale.Crop
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Spacer(Modifier.width(12.dp))
+
+                                Column(
+                                    Modifier
+                                        .weight(1f)
+                                        .fillMaxWidth(),
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    AnimatedContent(vm.mediaMetadata) { mediaMetadata ->
+                                        Column {
+                                            Text(
+                                                text = mediaMetadata?.title?.toString().orEmpty(),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                style = Typography.titleMediumEmphasized
+                                            )
+
+                                            Text(
+                                                text = mediaMetadata?.subtitle?.toString().orEmpty(),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                style = Typography.bodySmall
+                                            )
+                                        }
+                                    }
+                                }
+
+                                Spacer(Modifier.width(6.dp))
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    FilledTonalIconToggleButton(
+                                        modifier = Modifier.size(40.dp),
+                                        checked = vm.isPlaying,
+                                        onCheckedChange = {
+                                            if(vm.isPlaying) {
+                                                vm.pause()
+                                            } else {
+                                                vm.play()
+                                            }
+                                        }
+                                    ) {
+                                        AnimatedContent(vm.isPlaying) {
+                                            Icon(
+                                                imageVector = when(it) {
+                                                    true -> Icons.Rounded.Pause
+                                                    false -> Icons.Rounded.PlayArrow
+                                                },
+                                                contentDescription = null
+                                            )
+                                        }
                                     }
 
-                                    false -> {
-                                        AnimatedContent(vm.mediaMetadata) { mediaMetadata ->
-                                            ShimmerAsyncImage(
-                                                modifier = Modifier
-                                                    .size(46.dp)
-                                                    .clip(CircleShape),
-
-                                                model = mediaMetadata?.artworkUri,
-                                                contentDescription = null,
-
-                                                contentScale = ContentScale.Crop
+                                    onOpenQueue?.let { openQueue ->
+                                        IconButton(
+                                            modifier = Modifier.size(36.dp),
+                                            onClick = openQueue
+                                        ) {
+                                            Icon(
+                                                modifier = Modifier.size(20.dp),
+                                                imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                                                contentDescription = "Up Next"
                                             )
                                         }
                                     }
                                 }
                             }
 
-                            Spacer(Modifier.width(10.dp))
-
-                            Column(
-                                Modifier
-                                    .weight(1f, false)
+                            androidx.compose.material3.LinearProgressIndicator(
+                                progress = { progressState.value },
+                                modifier = Modifier
                                     .fillMaxWidth()
-                            ) {
-                                AnimatedContent(vm.mediaMetadata) { mediaMetadata ->
-                                    Column {
-                                        Text(
-                                            text = mediaMetadata?.title.toString(),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            style = Typography.titleMediumEmphasized
-                                        )
-
-                                        Text(
-                                            text = mediaMetadata?.subtitle.toString(),
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            style = Typography.labelMedium
-                                        )
-                                    }
-                                }
-
-                                Spacer(Modifier.height(4.dp))
-
-                                LinearWavyProgressIndicator(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    color = MaterialTheme.colorScheme.secondary,
-                                    progress = { progressState.value },
-                                    amplitude = { if(vm.isPlaying) 1f else 0f }
-                                )
-                            }
-
-                            Spacer(Modifier.width(4.dp))
-
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(2.dp)
-                            ) {
-                                IconButton(
-                                    modifier = Modifier.size(34.dp),
-                                    onClick = { vm.seekBack() }
-                                ) {
-                                    Icon(
-                                        modifier = Modifier.size(20.dp),
-                                        imageVector = when(vm.seekBackIncrement) {
-                                            5000L -> Icons.Rounded.Replay5
-                                            10000L -> Icons.Rounded.Replay10
-                                            30000L -> Icons.Rounded.Replay30
-                                            else -> Icons.Rounded.Replay
-                                        },
-                                        contentDescription = stringResource(R.string.common_action_seek_back)
-                                    )
-                                }
-
-                                FilledTonalIconToggleButton(
-                                    modifier = Modifier.size(40.dp),
-                                    checked = vm.isPlaying,
-                                    onCheckedChange = {
-                                        if(vm.isPlaying) {
-                                            vm.pause()
-                                        } else {
-                                            vm.play()
-                                        }
-                                    }
-                                ) {
-                                    AnimatedContent(vm.isPlaying) {
-                                        Icon(
-                                            imageVector = when(it) {
-                                                true -> Icons.Rounded.Pause
-                                                false -> Icons.Rounded.PlayArrow
-                                            },
-                                            contentDescription = null
-                                        )
-                                    }
-                                }
-
-                                IconButton(
-                                    modifier = Modifier.size(34.dp),
-                                    onClick = { vm.seekForward() }
-                                ) {
-                                    Icon(
-                                        modifier = Modifier.size(20.dp),
-                                        imageVector = when(vm.seekForwardIncrement) {
-                                            5000L -> Icons.Rounded.Forward5
-                                            10000L -> Icons.Rounded.Forward10
-                                            30000L -> Icons.Rounded.Forward30
-                                            else -> Icons.Rounded.Forward
-                                        },
-                                        contentDescription = stringResource(R.string.common_action_seek_forward)
-                                    )
-                                }
-
-                                onOpenQueue?.let { openQueue ->
-                                    IconButton(
-                                        modifier = Modifier.size(34.dp),
-                                        onClick = openQueue
-                                    ) {
-                                        Icon(
-                                            modifier = Modifier.size(20.dp),
-                                            imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
-                                            contentDescription = "Up Next"
-                                        )
-                                    }
-                                }
-                            }
+                                    .height(2.5.dp),
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = MaterialTheme.colorScheme.surfaceContainerHighest
+                            )
                         }
                     }
                 }

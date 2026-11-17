@@ -28,6 +28,8 @@ class ContinuePlayingViewModel(
             db.podcastEpisodePlayStates()
                 .savePlayed(item.episode.id, true)
 
+            db.playbackQueue().remove(item.episode.id)
+
             db.syncActions()
                 .addPlayState(
                     origin = item.episode.origin,

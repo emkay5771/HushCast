@@ -65,6 +65,12 @@ enum class HeadsetPrevAction(val label: String) {
     PREV_EPISODE("Previous episode / restart")
 }
 
+enum class RemainingTimeDisplayMode(val label: String) {
+    BOTH("Both (e.g. -24:10 (-16:07))"),
+    ADJUSTED("Adjusted only (speed & skips)"),
+    RAW("Original time only")
+}
+
 enum class PlayerToolbarAction(val label: String) {
     HUSHCAST("HushCast"),
     SPEED("Speed"),
@@ -93,6 +99,12 @@ object SettingsKeys {
 
     val BEHAVIOR_PLAYER_PLAYBACK_SPEED =
         floatPreferencesKey("behavior_player_playback_speed")
+    val BEHAVIOR_TRIM_SILENCE =
+        booleanPreferencesKey("behavior_trim_silence")
+    val BEHAVIOR_VOLUME_BOOST =
+        booleanPreferencesKey("behavior_volume_boost")
+    val BEHAVIOR_REMAINING_TIME_DISPLAY =
+        stringPreferencesKey("behavior_remaining_time_display")
     val BEHAVIOR_TAP_UP_NEXT_TO_PLAY =
         booleanPreferencesKey("behavior_tap_up_next_to_play")
     val BEHAVIOR_EPISODE_SWIPE_RIGHT_ACTION =
@@ -131,6 +143,9 @@ object SettingsKeys {
 
     val HUSHCAST_WORD_MUTING_ENABLED = booleanPreferencesKey("hushcast_word_muting_enabled")
     val HUSHCAST_MUTE_ACTION_MODE = stringPreferencesKey("hushcast_mute_action_mode")
+    val HUSHCAST_MUTE_CUSTOM_SOUND_URI = stringPreferencesKey("hushcast_mute_custom_sound_uri")
+    val HUSHCAST_SPONSOR_SKIP_SOUND_ENABLED = booleanPreferencesKey("hushcast_sponsor_skip_sound_enabled")
+    val HUSHCAST_SPONSOR_SKIP_SOUND_URI = stringPreferencesKey("hushcast_sponsor_skip_sound_uri")
     val HUSHCAST_AD_POLICY_MODE = stringPreferencesKey("hushcast_ad_policy_mode")
     val HUSHCAST_SETUP_COMPLETED = booleanPreferencesKey("hushcast_setup_completed")
     val HUSHCAST_SHIELD_HINT_SEEN = booleanPreferencesKey("hushcast_shield_hint_seen")
@@ -530,6 +545,35 @@ class SettingsRepository(val context: Context) {
         suspend fun setPlayerToolbarActions(actions: List<PlayerToolbarAction>) = dataStore.edit { preferences ->
             preferences[SettingsKeys.BEHAVIOR_PLAYER_TOOLBAR_ACTIONS] = actions.distinct().joinToString(",") { it.name }
         }
+
+        val trimSilence: Flow<Boolean> = dataStore.data
+            .map { preferences ->
+                preferences[SettingsKeys.BEHAVIOR_TRIM_SILENCE] ?: false
+            }
+
+        suspend fun setTrimSilence(enabled: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_TRIM_SILENCE] = enabled
+        }
+
+        val volumeBoost: Flow<Boolean> = dataStore.data
+            .map { preferences ->
+                preferences[SettingsKeys.BEHAVIOR_VOLUME_BOOST] ?: false
+            }
+
+        suspend fun setVolumeBoost(enabled: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_VOLUME_BOOST] = enabled
+        }
+
+        val remainingTimeDisplay: Flow<RemainingTimeDisplayMode> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.BEHAVIOR_REMAINING_TIME_DISPLAY]
+                runCatching { raw?.let { RemainingTimeDisplayMode.valueOf(it) } }.getOrNull()
+                    ?: RemainingTimeDisplayMode.BOTH
+            }
+
+        suspend fun setRemainingTimeDisplay(mode: RemainingTimeDisplayMode) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_REMAINING_TIME_DISPLAY] = mode.name
+        }
     }
 
     inner class HushCast {
@@ -549,6 +593,32 @@ class SettingsRepository(val context: Context) {
 
         suspend fun setMuteActionMode(mode: app.hushcast.automute.dsp.MuteActionMode) = dataStore.edit { preferences ->
             preferences[SettingsKeys.HUSHCAST_MUTE_ACTION_MODE] = mode.name
+        }
+
+        val muteCustomSoundUri: Flow<String?> = dataStore.data.map { preferences ->
+            preferences[SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI]?.takeIf { it.isNotBlank() }
+        }
+
+        suspend fun setMuteCustomSoundUri(uri: String?) = dataStore.edit { preferences ->
+            if (uri.isNullOrBlank()) preferences.remove(SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI)
+            else preferences[SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI] = uri
+        }
+
+        val sponsorSkipSoundEnabled: Flow<Boolean> = dataStore.data.map { preferences ->
+            preferences[SettingsKeys.HUSHCAST_SPONSOR_SKIP_SOUND_ENABLED] ?: false
+        }
+
+        suspend fun setSponsorSkipSoundEnabled(enabled: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.HUSHCAST_SPONSOR_SKIP_SOUND_ENABLED] = enabled
+        }
+
+        val sponsorSkipSoundUri: Flow<String?> = dataStore.data.map { preferences ->
+            preferences[SettingsKeys.HUSHCAST_SPONSOR_SKIP_SOUND_URI]?.takeIf { it.isNotBlank() }
+        }
+
+        suspend fun setSponsorSkipSoundUri(uri: String?) = dataStore.edit { preferences ->
+            if (uri.isNullOrBlank()) preferences.remove(SettingsKeys.HUSHCAST_SPONSOR_SKIP_SOUND_URI)
+            else preferences[SettingsKeys.HUSHCAST_SPONSOR_SKIP_SOUND_URI] = uri
         }
 
         val adPolicyMode: Flow<app.hushcast.automute.dsp.AdPolicyMode> = dataStore.data.map { preferences ->

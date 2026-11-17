@@ -1,32 +1,49 @@
 package app.podiumpodcasts.podium.ui.component.common.swipeable
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import app.podiumpodcasts.podium.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @Composable
 fun SwipeableItem(
@@ -34,95 +51,220 @@ fun SwipeableItem(
     snackbarHostState: SnackbarHostState,
     modifier: Modifier = Modifier,
     startAction: SwipeableItemAction? = null,
+    secondaryStartAction: SwipeableItemAction? = null,
     endAction: SwipeableItemAction? = null,
+    secondaryEndAction: SwipeableItemAction? = null,
     content: @Composable RowScope.() -> Unit
 ) {
-    val resetOnNextDismiss = rememberSaveable { mutableStateOf(false) }
-    val dismissState = rememberSwipeToDismissBoxState()
-
-    val action = when(dismissState.dismissDirection) {
-        SwipeToDismissBoxValue.StartToEnd -> startAction
-        SwipeToDismissBoxValue.EndToStart -> endAction
-        else -> null
-    }
-
-    val onAction = action?.onActionHandler()
-
+    val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
     val undo = stringResource(R.string.common_action_undo)
 
-    SwipeToDismissBox(
-        modifier = modifier,
-        state = dismissState,
-        enableDismissFromStartToEnd = startAction != null,
-        enableDismissFromEndToStart = endAction != null,
-        backgroundContent = {
-            action ?: return@SwipeToDismissBox
-            val style = action.style()
+    val actionSlotWidthDp = 64.dp
+    val startSlots = listOfNotNull(startAction, secondaryStartAction)
+    val endSlots = listOfNotNull(endAction, secondaryEndAction)
+    val startRevealPx = with(density) { (actionSlotWidthDp * startSlots.size).toPx() }
+    val endRevealPx = with(density) { (actionSlotWidthDp * endSlots.size).toPx() }
+    val halfThresholdPx = with(density) { 56.dp.toPx() }
+    var itemWidthPx by remember { mutableFloatStateOf(0f) }
 
-            val backgroundColor by animateColorAsState(
-                when(dismissState.targetValue) {
-                    SwipeToDismissBoxValue.Settled -> style.backgroundColor
-                    else -> style.activeBackgroundColor
-                }, label = "swipeBackgroundColor"
-            )
+    val offsetX = remember { Animatable(0f) }
 
-            val iconColor by animateColorAsState(
-                when(dismissState.targetValue) {
-                    SwipeToDismissBoxValue.Settled -> style.iconTint
-                    else -> style.activeIconTint
-                }, label = "swipeIconColor"
-            )
+    val startPrimaryHandler = startAction?.onActionHandler()
+    val startSecondaryHandler = secondaryStartAction?.onActionHandler()
+    val endPrimaryHandler = endAction?.onActionHandler()
+    val endSecondaryHandler = secondaryEndAction?.onActionHandler()
 
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(backgroundColor)
-                    .padding(horizontal = 24.dp),
-                contentAlignment = when(dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) {
-                    true -> Alignment.CenterStart
-                    false -> Alignment.CenterEnd
-                }
-            ) {
-                Icon(
-                    imageVector = style.icon,
-                    contentDescription = "",
-                    tint = iconColor,
-                    modifier = Modifier.graphicsLayer {
-                        scaleX =
-                            if(dismissState.targetValue != SwipeToDismissBoxValue.Settled) 1.2f else 1.0f
-                        scaleY =
-                            if(dismissState.targetValue != SwipeToDismissBoxValue.Settled) 1.2f else 1.0f
-                    }
-                )
+    fun executeAction(handler: (suspend () -> SwipeableItemActionResult)?) {
+        if (handler == null) return
+        scope.launch {
+            val result = handler()
+            if (!result.isDismissed) {
+                offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow))
             }
-        },
-        onDismiss = {
-            scope.launch {
-                if(resetOnNextDismiss.value) {
-                    dismissState.reset()
-                    resetOnNextDismiss.value = false
-                } else {
-                    onAction?.let {
-                        resetOnNextDismiss.value = true
-
-                        val result = onAction()
-                        if(!result.isDismissed) dismissState.reset()
-
-                        snackbarHostState.currentSnackbarData?.dismiss()
-
-                        val snackBarResult = snackbarHostState.showSnackbar(
-                            message = result.message,
-                            actionLabel = undo,
-                            duration = SnackbarDuration.Short
-                        )
-
-                        if(snackBarResult == SnackbarResult.ActionPerformed)
-                            result.onUndo()
-                    }
-                }
+            snackbarHostState.currentSnackbarData?.dismiss()
+            val snackBarResult = snackbarHostState.showSnackbar(
+                message = result.message,
+                actionLabel = undo,
+                duration = SnackbarDuration.Short
+            )
+            if (snackBarResult == SnackbarResult.ActionPerformed) {
+                result.onUndo()
             }
-        },
-        content = content
+        }
+    }
+
+    val fullSwipeThresholdPx = maxOf(
+        with(density) { 180.dp.toPx() },
+        itemWidthPx * 0.52f
     )
+    val isFullStart = offsetX.value >= fullSwipeThresholdPx && startAction != null
+    val isFullEnd = offsetX.value <= -fullSwipeThresholdPx && endAction != null
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .onSizeChanged { itemWidthPx = it.width.toFloat() }
+    ) {
+        // Background action tray
+        if (offsetX.value > 0f && startSlots.isNotEmpty()) {
+            val primaryStyle = startAction!!.style()
+            val bgColor by animateColorAsState(
+                if (isFullStart) primaryStyle.activeBackgroundColor else primaryStyle.backgroundColor,
+                label = "swipeStartBg"
+            )
+            Row(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(bgColor),
+                horizontalArrangement = Arrangement.Start,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val primaryStyleResolved = startAction.style()
+                val primaryIconTint by animateColorAsState(
+                    if (isFullStart) primaryStyleResolved.activeIconTint else primaryStyleResolved.iconTint,
+                    label = "swipeStartPrimaryTint"
+                )
+                Box(
+                    modifier = Modifier
+                        .width(actionSlotWidthDp)
+                        .fillMaxHeight()
+                        .clickable { executeAction(startPrimaryHandler) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = primaryStyleResolved.icon,
+                        contentDescription = null,
+                        tint = primaryIconTint,
+                        modifier = Modifier.graphicsLayer {
+                            val s = if (isFullStart) 1.25f else 1.0f
+                            scaleX = s
+                            scaleY = s
+                        }
+                    )
+                }
+                if (secondaryStartAction != null && !isFullStart) {
+                    val secStyle = secondaryStartAction.style()
+                    Box(
+                        modifier = Modifier
+                            .width(actionSlotWidthDp)
+                            .fillMaxHeight()
+                            .background(secStyle.backgroundColor.copy(alpha = 0.85f))
+                            .clickable { executeAction(startSecondaryHandler) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = secStyle.icon,
+                            contentDescription = null,
+                            tint = secStyle.iconTint
+                        )
+                    }
+                }
+            }
+        } else if (offsetX.value < 0f && endSlots.isNotEmpty()) {
+            val primaryStyle = endAction!!.style()
+            val bgColor by animateColorAsState(
+                if (isFullEnd) primaryStyle.activeBackgroundColor else primaryStyle.backgroundColor,
+                label = "swipeEndBg"
+            )
+            Row(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(bgColor),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (secondaryEndAction != null && !isFullEnd) {
+                    val secStyle = secondaryEndAction.style()
+                    Box(
+                        modifier = Modifier
+                            .width(actionSlotWidthDp)
+                            .fillMaxHeight()
+                            .background(secStyle.backgroundColor.copy(alpha = 0.85f))
+                            .clickable { executeAction(endSecondaryHandler) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = secStyle.icon,
+                            contentDescription = null,
+                            tint = secStyle.iconTint
+                        )
+                    }
+                }
+                val primaryStyleResolved = endAction.style()
+                val primaryIconTint by animateColorAsState(
+                    if (isFullEnd) primaryStyleResolved.activeIconTint else primaryStyleResolved.iconTint,
+                    label = "swipeEndPrimaryTint"
+                )
+                Box(
+                    modifier = Modifier
+                        .width(actionSlotWidthDp)
+                        .fillMaxHeight()
+                        .clickable { executeAction(endPrimaryHandler) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = primaryStyleResolved.icon,
+                        contentDescription = null,
+                        tint = primaryIconTint,
+                        modifier = Modifier.graphicsLayer {
+                            val s = if (isFullEnd) 1.25f else 1.0f
+                            scaleX = s
+                            scaleY = s
+                        }
+                    )
+                }
+            }
+        }
+
+        // Foreground draggable content
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                .draggable(
+                    orientation = Orientation.Horizontal,
+                    enabled = startAction != null || endAction != null,
+                    state = rememberDraggableState { delta ->
+                        val minBound = if (endAction != null) -(fullSwipeThresholdPx * 1.15f) else 0f
+                        val maxBound = if (startAction != null) (fullSwipeThresholdPx * 1.15f) else 0f
+                        val next = (offsetX.value + delta).coerceIn(minBound, maxBound)
+                        scope.launch { offsetX.snapTo(next) }
+                    },
+                    onDragStopped = {
+                        val cur = offsetX.value
+                        when {
+                            cur >= fullSwipeThresholdPx && startAction != null -> {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                executeAction(startPrimaryHandler)
+                            }
+                            cur <= -fullSwipeThresholdPx && endAction != null -> {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                executeAction(endPrimaryHandler)
+                            }
+                            cur >= halfThresholdPx && startAction != null && secondaryStartAction != null -> {
+                                scope.launch { offsetX.animateTo(startRevealPx, spring(stiffness = Spring.StiffnessMediumLow)) }
+                            }
+                            cur <= -halfThresholdPx && endAction != null && secondaryEndAction != null -> {
+                                scope.launch { offsetX.animateTo(-endRevealPx, spring(stiffness = Spring.StiffnessMediumLow)) }
+                            }
+                            cur >= halfThresholdPx && startAction != null -> {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                executeAction(startPrimaryHandler)
+                            }
+                            cur <= -halfThresholdPx && endAction != null -> {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                executeAction(endPrimaryHandler)
+                            }
+                            else -> {
+                                scope.launch { offsetX.animateTo(0f, spring(stiffness = Spring.StiffnessMediumLow)) }
+                            }
+                        }
+                    }
+                ),
+            content = content
+        )
+    }
 }
