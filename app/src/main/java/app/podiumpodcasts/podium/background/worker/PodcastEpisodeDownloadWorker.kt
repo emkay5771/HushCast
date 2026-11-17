@@ -13,7 +13,6 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
@@ -24,6 +23,7 @@ import app.podiumpodcasts.podium.background.work.PodcastEpisodeDownloadWork
 import app.podiumpodcasts.podium.manager.DatabaseManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 const val KEY_EPISODE_ID = "KEY_EPISODE_ID"
@@ -60,11 +60,13 @@ class PodcastEpisodeDownloadWorker(
 
             var lastTitle = ""
             val worker = PodcastEpisodeDownloadWork(applicationContext, db)
+            val isFinalAttempt = runAttemptCount >= 4
             val outcome = worker.doWork(
                 episodeId = episodeId,
                 downloadMethod = method,
                 isAuto = isAuto,
-                forceReprocess = forceReprocess
+                forceReprocess = forceReprocess,
+                isFinalAttempt = isFinalAttempt
             ) { title, sourceLabel, pct ->
                 if (title.isNotBlank()) lastTitle = title
                 runCatching {
@@ -91,7 +93,7 @@ class PodcastEpisodeDownloadWorker(
                 }
 
                 DownloadWorkOutcome.RetryableFailure -> {
-                    if (runAttemptCount < 3) {
+                    if (!isFinalAttempt) {
                         Result.retry()
                     } else {
                         db.podcastEpisodeDownloads().setState(episodeId, PodcastEpisodeDownloadState.FAILED.value)
@@ -107,11 +109,23 @@ class PodcastEpisodeDownloadWorker(
             throw c
         } catch (e: Exception) {
             e.printStackTrace()
-            if (runAttemptCount < 3) {
+            if (runAttemptCount < 4) {
                 Result.retry()
             } else {
                 runCatching {
                     db.podcastEpisodeDownloads().setState(episodeId, PodcastEpisodeDownloadState.FAILED.value)
+                    val autoMuteDao = app.hushcast.automute.storage.AutoMuteDatabase.getInstance(applicationContext).dao()
+                    val st = autoMuteDao.getStatus(episodeId)
+                    if (st?.badge == app.hushcast.automute.dsp.ReadinessBadge.ANALYZING.name) {
+                        autoMuteDao.upsertStatus(
+                            st.copy(
+                                badge = app.hushcast.automute.dsp.ReadinessBadge.NOT_PROCESSED.name,
+                                progressPercent = 0,
+                                stageLabel = "Failed",
+                                errorMessage = e.message ?: e.javaClass.simpleName
+                            )
+                        )
+                    }
                 }
                 Result.failure()
             }
@@ -261,7 +275,6 @@ class PodcastEpisodeDownloadWorker(
 
             val downloadRequest = OneTimeWorkRequestBuilder<PodcastEpisodeDownloadWorker>()
                 .setInputData(podcastData)
-                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 15, TimeUnit.SECONDS)
                 .setConstraints(
                     Constraints.Builder()
@@ -290,6 +303,9 @@ class PodcastEpisodeDownloadWorker(
             WorkManager
                 .getInstance(context)
                 .cancelUniqueWork(generateUniqueWorkName(episodeId))
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                app.hushcast.automute.desktop.DesktopWorkerClient.cancelActiveJobForEpisode(episodeId)
+            }
         }
     }
 }

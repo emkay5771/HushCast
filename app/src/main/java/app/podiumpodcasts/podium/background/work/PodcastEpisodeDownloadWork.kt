@@ -29,6 +29,7 @@ class PodcastEpisodeDownloadWork(
 ) {
     companion object {
         private val transferSemaphore = Semaphore(2)
+        private val desktopOffloadSemaphore = Semaphore(1)
         private const val PROGRESS_THROTTLE_MS = 250L
     }
 
@@ -39,6 +40,7 @@ class PodcastEpisodeDownloadWork(
         downloadMethod: app.hushcast.automute.engine.DownloadAnalysisMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO,
         isAuto: Boolean = false,
         forceReprocess: Boolean = false,
+        isFinalAttempt: Boolean = true,
         onProgressUpdate: ((title: String, sourceLabel: String, percent: Int) -> Unit)? = null
     ): DownloadWorkOutcome {
         val bundle = db.podcastEpisodes().getSyncNullable(episodeId)
@@ -58,8 +60,26 @@ class PodcastEpisodeDownloadWork(
 
         try {
             return transferSemaphore.withPermit {
-                onProgressUpdate?.invoke(episode.title, "Starting up…", 0)
-                DownloadTracker.update(episodeId, 0L, -1L, "Starting up…")
+                val existingStatus = runCatching {
+                    app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
+                        .dao()
+                        .getStatus(episodeId)
+                }.getOrNull()
+                val resumeAnalyzing = !forceReprocess &&
+                    existingStatus?.badge == app.hushcast.automute.dsp.ReadinessBadge.ANALYZING.name &&
+                    existingStatus.progressPercent > 0
+                val initialPct = if (resumeAnalyzing) existingStatus!!.progressPercent.coerceIn(0, 99) else 0
+                val initialStage = if (resumeAnalyzing && existingStatus!!.stageLabel.isNotBlank()) {
+                    existingStatus.stageLabel
+                } else {
+                    "Starting up…"
+                }
+                onProgressUpdate?.invoke(episode.title, initialStage, initialPct)
+                if (resumeAnalyzing) {
+                    DownloadTracker.update(episodeId, initialPct.toLong(), 100L, initialStage)
+                } else {
+                    DownloadTracker.update(episodeId, 0L, -1L, initialStage)
+                }
 
                 db.podcastEpisodeDownloads()
                     .setState(episodeId, PodcastEpisodeDownloadState.DOWNLOADING.value)
@@ -74,6 +94,7 @@ class PodcastEpisodeDownloadWork(
                 }
 
                 if (shouldTryDesktop) {
+                    app.hushcast.automute.worker.EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
                     val offloaded = tryDownloadFromDesktopWorker(
                         episodeId = episodeId,
                         audioUrl = episode.audioUrl,
@@ -82,6 +103,7 @@ class PodcastEpisodeDownloadWork(
                         workerUrl = workerUrl,
                         token = app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerToken(context),
                         forceReprocess = forceReprocess,
+                        resetStatusOnError = downloadMethod != app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP || isFinalAttempt,
                         onProgressUpdate = onProgressUpdate
                     )
                     if (offloaded) {
@@ -155,13 +177,24 @@ class PodcastEpisodeDownloadWork(
                             val sha256 = withContext(Dispatchers.IO) {
                                 app.hushcast.automute.hash.StreamingSha256.hashFile(file)
                             }
-                            app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueBackgroundCharging(
-                                context = context,
-                                episodeId = episodeId,
-                                audioPath = file.absolutePath,
-                                knownSha256 = sha256,
-                                episodeTitle = episode.title
-                            )
+                            val chargingOnly = app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context)
+                            if (chargingOnly) {
+                                app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueBackgroundCharging(
+                                    context = context,
+                                    episodeId = episodeId,
+                                    audioPath = file.absolutePath,
+                                    knownSha256 = sha256,
+                                    episodeTitle = episode.title
+                                )
+                            } else {
+                                app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueAnalyzeNow(
+                                    context = context,
+                                    episodeId = episodeId,
+                                    audioPath = file.absolutePath,
+                                    knownSha256 = sha256,
+                                    episodeTitle = episode.title
+                                )
+                            }
                         }
                         outcome = DownloadWorkOutcome.Success
                         stateHandled = true
@@ -236,134 +269,175 @@ class PodcastEpisodeDownloadWork(
         workerUrl: String,
         token: String,
         forceReprocess: Boolean = false,
+        resetStatusOnError: Boolean = true,
         onProgressUpdate: ((title: String, sourceLabel: String, percent: Int) -> Unit)?
-    ): Boolean = coroutineScope {
-        try {
+    ): Boolean = desktopOffloadSemaphore.withPermit {
+        coroutineScope {
             val autoMuteDb = app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
+            var highestWrittenPct = 0
             suspend fun reportDesktopStatus(pct: Int, stage: String) {
+                val clamped = maxOf(highestWrittenPct, pct).coerceIn(0, 99)
+                highestWrittenPct = clamped
                 autoMuteDb.dao().upsertStatus(
                     app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
                         episodeId = episodeId,
                         badge = app.hushcast.automute.dsp.ReadinessBadge.ANALYZING.name,
-                        progressPercent = pct.coerceIn(0, 99),
+                        progressPercent = clamped,
                         stageLabel = stage
                     )
                 )
             }
-            var highestPct = 5
-            onProgressUpdate?.invoke(title, "Starting analysis…", highestPct)
-            reportDesktopStatus(highestPct, "Starting analysis…")
-            val job = app.hushcast.automute.desktop.DesktopWorkerClient.submitJob(
-                baseUrl = workerUrl,
-                token = token,
-                request = app.hushcast.automute.desktop.DesktopJobRequest(
-                    episodeId = episodeId,
-                    audioUrl = audioUrl,
-                    title = title,
-                    force = forceReprocess
-                )
+            val statusChannel = kotlinx.coroutines.channels.Channel<Pair<Int, String>>(
+                kotlinx.coroutines.channels.Channel.CONFLATED
             )
-            var lastPollNotifyMs = 0L
-            var lastPollNotifyPct = -1
-            var lastFriendlyStage = ""
-            val ready = app.hushcast.automute.desktop.DesktopWorkerClient.pollJobUntilReady(
-                baseUrl = workerUrl,
-                token = token,
-                jobId = job.jobId
-            ) { status ->
-                val rawPct = (5 + ((status.progressPercent * 65) / 100)).coerceIn(5, 70)
-                val unifiedPct = maxOf(highestPct, rawPct)
-                highestPct = unifiedPct
-                val friendlyStage = friendlyWorkerStage(status.stageLabel.ifBlank { status.state })
-                val now = System.currentTimeMillis()
-                if ((unifiedPct != lastPollNotifyPct || friendlyStage != lastFriendlyStage) &&
-                    (now - lastPollNotifyMs >= 450L || unifiedPct >= 70 || friendlyStage != lastFriendlyStage)
-                ) {
-                    lastPollNotifyMs = now
-                    lastPollNotifyPct = unifiedPct
-                    lastFriendlyStage = friendlyStage
-                    onProgressUpdate?.invoke(title, friendlyStage, unifiedPct)
-                    DownloadTracker.update(episodeId, unifiedPct.toLong(), 100L, friendlyStage)
-                    launch {
-                        runCatching { reportDesktopStatus(unifiedPct, friendlyStage) }
-                    }
+            val statusWriter = launch(Dispatchers.IO) {
+                for ((pct, stage) in statusChannel) {
+                    runCatching { reportDesktopStatus(pct, stage) }
                 }
             }
-            val sha256 = ready.fileSha256 ?: return@coroutineScope false
+            var trackedJobId: String? = null
+            try {
+                val existing = runCatching { autoMuteDb.dao().getStatus(episodeId) }.getOrNull()
+                val resumeAnalyzing = !forceReprocess &&
+                    existing?.badge == app.hushcast.automute.dsp.ReadinessBadge.ANALYZING.name &&
+                    existing.progressPercent > 5
+                var highestPct = if (resumeAnalyzing) existing!!.progressPercent.coerceIn(5, 98) else 5
+                highestWrittenPct = highestPct
+                val startStage = if (resumeAnalyzing && existing!!.stageLabel.isNotBlank()) {
+                    existing.stageLabel
+                } else {
+                    "Starting analysis…"
+                }
+                onProgressUpdate?.invoke(title, startStage, highestPct)
+                DownloadTracker.update(episodeId, highestPct.toLong(), 100L, startStage)
+                if (!resumeAnalyzing) {
+                    reportDesktopStatus(highestPct, startStage)
+                }
 
-            highestPct = maxOf(highestPct, 72)
-            reportDesktopStatus(highestPct, "Saving to phone…")
-            onProgressUpdate?.invoke(title, "Saving to phone…", highestPct)
-            var lastStatusUpdateMs = 0L
-            var lastTransferNotifyMs = 0L
-            var lastTransferNotifyPct = highestPct
-            app.hushcast.automute.desktop.DesktopWorkerClient.downloadAudioAndVerifySha256(
-                baseUrl = workerUrl,
-                token = token,
-                expectedSha256 = sha256,
-                destFile = destFile
-            ) { received, total ->
-                if (total > 0L) {
-                    val now = System.currentTimeMillis()
-                    val rawPct = (72 + ((received * 26L) / total).toInt()).coerceIn(72, 98)
+                val job = app.hushcast.automute.desktop.DesktopWorkerClient.submitJob(
+                    baseUrl = workerUrl,
+                    token = token,
+                    request = app.hushcast.automute.desktop.DesktopJobRequest(
+                        episodeId = episodeId,
+                        audioUrl = audioUrl,
+                        title = title,
+                        force = forceReprocess
+                    )
+                )
+                trackedJobId = job.jobId
+                app.hushcast.automute.desktop.DesktopWorkerClient.trackActiveJob(
+                    episodeId = episodeId,
+                    baseUrl = workerUrl,
+                    token = token,
+                    jobId = job.jobId
+                )
+
+                var lastPollNotifyMs = 0L
+                var lastPollNotifyPct = -1
+                var lastFriendlyStage = ""
+                val ready = app.hushcast.automute.desktop.DesktopWorkerClient.pollJobUntilReady(
+                    baseUrl = workerUrl,
+                    token = token,
+                    jobId = job.jobId
+                ) { status ->
+                    val rawPct = (5 + ((status.progressPercent * 65) / 100)).coerceIn(5, 70)
                     val unifiedPct = maxOf(highestPct, rawPct)
                     highestPct = unifiedPct
-                    if (unifiedPct != lastTransferNotifyPct && (now - lastTransferNotifyMs >= 250L || unifiedPct >= 98)) {
-                        lastTransferNotifyMs = now
-                        lastTransferNotifyPct = unifiedPct
-                        DownloadTracker.update(episodeId, unifiedPct.toLong(), 100L, "Saving to phone…")
-                        onProgressUpdate?.invoke(title, "Saving to phone…", unifiedPct)
+                    val friendlyStage = friendlyWorkerStage(status.stageLabel.ifBlank { status.state })
+                    val now = System.currentTimeMillis()
+                    if ((unifiedPct != lastPollNotifyPct || friendlyStage != lastFriendlyStage) &&
+                        (now - lastPollNotifyMs >= 450L || unifiedPct >= 70 || friendlyStage != lastFriendlyStage)
+                    ) {
+                        lastPollNotifyMs = now
+                        lastPollNotifyPct = unifiedPct
+                        lastFriendlyStage = friendlyStage
+                        onProgressUpdate?.invoke(title, friendlyStage, unifiedPct)
+                        DownloadTracker.update(episodeId, unifiedPct.toLong(), 100L, friendlyStage)
+                        statusChannel.trySend(unifiedPct to friendlyStage)
                     }
-                    if (now - lastStatusUpdateMs >= 450L) {
-                        lastStatusUpdateMs = now
-                        launch {
-                            runCatching {
-                                reportDesktopStatus(
-                                    unifiedPct,
-                                    "Saving to phone (${(received * 100L / total).toInt()}%)"
-                                )
-                            }
+                }
+                val sha256 = ready.fileSha256 ?: return@coroutineScope false
+
+                highestPct = maxOf(highestPct, 72)
+                statusChannel.trySend(highestPct to "Saving to phone…")
+                onProgressUpdate?.invoke(title, "Saving to phone…", highestPct)
+                var lastStatusUpdateMs = 0L
+                var lastTransferNotifyMs = 0L
+                var lastTransferNotifyPct = highestPct
+                app.hushcast.automute.desktop.DesktopWorkerClient.downloadAudioAndVerifySha256(
+                    baseUrl = workerUrl,
+                    token = token,
+                    expectedSha256 = sha256,
+                    destFile = destFile
+                ) { received, total ->
+                    if (total > 0L) {
+                        val now = System.currentTimeMillis()
+                        val rawPct = (72 + ((received * 26L) / total).toInt()).coerceIn(72, 98)
+                        val unifiedPct = maxOf(highestPct, rawPct)
+                        highestPct = unifiedPct
+                        if (unifiedPct != lastTransferNotifyPct && (now - lastTransferNotifyMs >= 250L || unifiedPct >= 98)) {
+                            lastTransferNotifyMs = now
+                            lastTransferNotifyPct = unifiedPct
+                            DownloadTracker.update(episodeId, unifiedPct.toLong(), 100L, "Saving to phone…")
+                            onProgressUpdate?.invoke(title, "Saving to phone…", unifiedPct)
+                        }
+                        if (now - lastStatusUpdateMs >= 450L) {
+                            lastStatusUpdateMs = now
+                            statusChannel.trySend(
+                                unifiedPct to "Saving to phone (${(received * 100L / total).toInt()}%)"
+                            )
                         }
                     }
                 }
-            }
 
-            reportDesktopStatus(98, "Finishing up…")
-            val bundle = app.hushcast.automute.desktop.DesktopWorkerClient.fetchBundle(
-                baseUrl = workerUrl,
-                token = token,
-                sha256 = sha256
-            )
-            app.hushcast.automute.worker.EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
-            app.hushcast.automute.desktop.DesktopWorkerClient.ingestBundleIntoDb(
-                db = autoMuteDb,
-                episodeId = episodeId,
-                bundle = bundle,
-                defaultActionMode = app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode
-            )
-            app.hushcast.automute.worker.EpisodeAnalysisWorker.analysisCompletedEvents.tryEmit(episodeId)
-
-            db.podcastEpisodeDownloads().registerDownload(episodeId, destFile.absolutePath, destFile.length())
-            app.podiumpodcasts.podium.background.PlaybackService.notifyEpisodeDownloaded(episodeId)
-            true
-        } catch (c: CancellationException) {
-            throw c
-        } catch (t: Throwable) {
-            val errMsg = t.message ?: t.javaClass.simpleName
-            Log.w("HushCastDesktop", "Desktop worker offload failed for $episodeId: $errMsg", t)
-            runCatching {
-                val autoMuteDb = app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
-                autoMuteDb.dao().upsertStatus(
-                    app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
-                        episodeId = episodeId,
-                        badge = app.hushcast.automute.dsp.ReadinessBadge.NOT_PROCESSED.name,
-                        progressPercent = 0,
-                        stageLabel = "Desktop/Cloud failed",
-                        errorMessage = errMsg
-                    )
+                statusChannel.close()
+                statusWriter.join()
+                reportDesktopStatus(98, "Finishing up…")
+                val bundle = app.hushcast.automute.desktop.DesktopWorkerClient.fetchBundle(
+                    baseUrl = workerUrl,
+                    token = token,
+                    sha256 = sha256
                 )
+                app.hushcast.automute.worker.EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
+                app.hushcast.automute.desktop.DesktopWorkerClient.ingestBundleIntoDb(
+                    db = autoMuteDb,
+                    episodeId = episodeId,
+                    bundle = bundle,
+                    defaultActionMode = app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode
+                )
+                app.hushcast.automute.worker.EpisodeAnalysisWorker.analysisCompletedEvents.tryEmit(episodeId)
+
+                db.podcastEpisodeDownloads().registerDownload(episodeId, destFile.absolutePath, destFile.length())
+                app.podiumpodcasts.podium.background.PlaybackService.notifyEpisodeDownloaded(episodeId)
+                true
+            } catch (c: CancellationException) {
+                statusChannel.close()
+                statusWriter.cancel()
+                throw c
+            } catch (t: Throwable) {
+                statusChannel.close()
+                statusWriter.cancel()
+                val errMsg = t.message ?: t.javaClass.simpleName
+                Log.w("HushCastDesktop", "Desktop worker offload failed for $episodeId: $errMsg", t)
+                if (resetStatusOnError) {
+                    runCatching {
+                        autoMuteDb.dao().upsertStatus(
+                            app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
+                                episodeId = episodeId,
+                                badge = app.hushcast.automute.dsp.ReadinessBadge.NOT_PROCESSED.name,
+                                progressPercent = 0,
+                                stageLabel = "Desktop/Cloud failed",
+                                errorMessage = errMsg
+                            )
+                        )
+                    }
+                }
+                false
+            } finally {
+                trackedJobId?.let {
+                    app.hushcast.automute.desktop.DesktopWorkerClient.clearActiveJob(episodeId, it)
+                }
             }
-            false
         }
     }
 }

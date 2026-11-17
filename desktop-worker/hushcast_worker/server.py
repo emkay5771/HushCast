@@ -166,6 +166,8 @@ def create_app(
             )
             cache.save_job(jobs[_jid])
     url_to_job_id: dict[str, str] = {}
+    episode_to_job_id: dict[str, str] = {}
+    last_job_save_ts: dict[str, float] = {}
     job_tasks: dict[str, asyncio.Task] = {}
     job_cancel_events: dict[str, threading.Event] = {}
     jobs_in_thread: set[str] = set()
@@ -178,10 +180,36 @@ def create_app(
     def _update_job(job_id: str, **updates) -> None:
         if job_id not in jobs:
             return
-        if jobs[job_id].state == JobState.CANCELLED and updates.get("state") != JobState.CANCELLED:
+        current = jobs[job_id]
+        if current.state == JobState.CANCELLED and updates.get("state") != JobState.CANCELLED:
             return
-        jobs[job_id] = jobs[job_id].model_copy(update=updates)
-        cache.save_job(jobs[job_id])
+        new_state = updates.get("state", current.state)
+        if "progressPercent" in updates and new_state not in (
+            JobState.READY,
+            JobState.FAILED,
+            JobState.CANCELLED,
+        ):
+            updates["progressPercent"] = max(current.progressPercent, int(updates["progressPercent"]))
+        updated = current.model_copy(update=updates)
+        jobs[job_id] = updated
+        now = time.monotonic()
+        is_terminal = new_state in (JobState.READY, JobState.FAILED, JobState.CANCELLED)
+        if is_terminal or new_state != current.state or (now - last_job_save_ts.get(job_id, 0.0)) >= 5.0:
+            last_job_save_ts[job_id] = now
+            cache.save_job(updated)
+
+    def _cancel_in_flight(jid: Optional[str]) -> None:
+        if not jid or jid not in jobs:
+            return
+        existing = jobs[jid]
+        if existing.state in (JobState.READY, JobState.FAILED, JobState.CANCELLED):
+            return
+        if jid in job_cancel_events:
+            job_cancel_events[jid].set()
+        _update_job(jid, state=JobState.CANCELLED, stageLabel="Superseded by new request")
+        task = job_tasks.get(jid)
+        if task and not task.done() and jid not in jobs_in_thread:
+            task.cancel()
 
     def verify_auth(
         authorization: Optional[str] = Header(default=None),
@@ -252,11 +280,18 @@ def create_app(
                 )
                 return resp
 
-            in_flight_id = url_to_job_id.get(req.audioUrl)
-            if in_flight_id and in_flight_id in jobs:
-                existing_job = jobs[in_flight_id]
-                if existing_job.state not in (JobState.READY, JobState.FAILED, JobState.CANCELLED):
-                    return existing_job
+            for in_flight_id in (
+                url_to_job_id.get(req.audioUrl),
+                episode_to_job_id.get(req.episodeId) if req.episodeId else None,
+            ):
+                if in_flight_id and in_flight_id in jobs:
+                    existing_job = jobs[in_flight_id]
+                    if existing_job.state not in (JobState.READY, JobState.FAILED, JobState.CANCELLED):
+                        return existing_job
+        else:
+            _cancel_in_flight(url_to_job_id.get(req.audioUrl))
+            if req.episodeId:
+                _cancel_in_flight(episode_to_job_id.get(req.episodeId))
 
         job_id = str(uuid.uuid4())
         job = DesktopJobResponse(
@@ -267,8 +302,11 @@ def create_app(
             stageLabel="Reprocessing on desktop" if req.force else "Queued on desktop",
         )
         jobs[job_id] = job
+        last_job_save_ts[job_id] = time.monotonic()
         cache.save_job(job)
         url_to_job_id[req.audioUrl] = job_id
+        if req.episodeId:
+            episode_to_job_id[req.episodeId] = job_id
 
         cancel_event = threading.Event()
         job_cancel_events[job_id] = cancel_event

@@ -52,6 +52,40 @@ object DesktopWorkerClient {
         json.decodeFromString<DesktopHealthResponse>(body)
     }
 
+    private data class ActiveJobRef(
+        val baseUrl: String,
+        val token: String,
+        val jobId: String,
+        val certFingerprint: String
+    )
+
+    private val activeJobs = java.util.concurrent.ConcurrentHashMap<String, ActiveJobRef>()
+
+    fun trackActiveJob(
+        episodeId: String,
+        baseUrl: String,
+        token: String,
+        jobId: String,
+        certFingerprint: String = ""
+    ) {
+        activeJobs[episodeId] = ActiveJobRef(baseUrl, token, jobId, certFingerprint)
+    }
+
+    fun clearActiveJob(episodeId: String, jobId: String? = null) {
+        if (jobId == null) {
+            activeJobs.remove(episodeId)
+        } else {
+            activeJobs.remove(episodeId, activeJobs[episodeId]?.takeIf { it.jobId == jobId })
+        }
+    }
+
+    suspend fun cancelActiveJobForEpisode(episodeId: String) {
+        val ref = activeJobs.remove(episodeId) ?: return
+        runCatching {
+            cancelJob(ref.baseUrl, ref.token, ref.jobId, ref.certFingerprint)
+        }
+    }
+
     suspend fun submitJob(
         baseUrl: String,
         token: String,
@@ -75,6 +109,22 @@ object DesktopWorkerClient {
         json.decodeFromString<DesktopJobResponse>(body)
     }
 
+    suspend fun cancelJob(
+        baseUrl: String,
+        token: String,
+        jobId: String,
+        certFingerprint: String = ""
+    ) = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl)
+        val conn = openConnection("$normalized/v1/jobs/$jobId", token, defaultTimeoutMs(normalized), certFingerprint)
+        try {
+            conn.requestMethod = "DELETE"
+            conn.responseCode
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     /**
      * Polls job status with exponential backoff on transient network errors (E18).
      */
@@ -88,14 +138,15 @@ object DesktopWorkerClient {
         onProgress: (DesktopJobResponse) -> Unit = {}
     ): DesktopJobResponse {
         val deadline = System.currentTimeMillis() + maxWaitMs
-        val maxQueuedWaitMs = 5 * 60 * 1000L
+        val maxQueuedWaitMs = 20 * 60 * 1000L
         var queuedSinceMs: Long? = null
         var consecutiveErrors = 0
         var currentDelayMs = pollIntervalMs
+        var highestReportedPct = 0
 
         while (true) {
             currentCoroutineContext().ensureActive()
-            val status = try {
+            val rawStatus = try {
                 val res = getJob(baseUrl, token, jobId, certFingerprint)
                 consecutiveErrors = 0
                 currentDelayMs = pollIntervalMs
@@ -112,9 +163,17 @@ object DesktopWorkerClient {
                 continue
             }
 
+            highestReportedPct = maxOf(highestReportedPct, rawStatus.progressPercent)
+            val status = if (rawStatus.progressPercent < highestReportedPct && rawStatus.state !in setOf("READY", "FAILED", "CANCELLED")) {
+                rawStatus.copy(progressPercent = highestReportedPct)
+            } else {
+                rawStatus
+            }
+
             onProgress(status)
             when (status.state) {
                 "READY" -> return status
+                "CANCELLED" -> throw CancellationException("Desktop worker job cancelled: $jobId")
                 "FAILED" -> throw IllegalStateException(
                     "Desktop worker failed: ${status.errorMessage ?: status.stageLabel}"
                 )
