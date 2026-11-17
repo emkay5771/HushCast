@@ -257,3 +257,19 @@ fun buildEpisodeSwipeAction(
         app.podiumpodcasts.podium.EpisodeSwipeAction.NONE -> null
     }
 }
+
+fun consolidateSecondarySwipeAction(
+    primary: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    secondary: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    inQueue: Boolean
+): app.podiumpodcasts.podium.EpisodeSwipeAction {
+    val isPrimaryQueue = primary == app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT ||
+        primary == app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST
+    val isSecondaryQueue = secondary == app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT ||
+        secondary == app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST
+    return if (inQueue && isPrimaryQueue && isSecondaryQueue) {
+        app.podiumpodcasts.podium.EpisodeSwipeAction.NONE
+    } else {
+        secondary
+    }
+}

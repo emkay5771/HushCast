@@ -93,6 +93,9 @@ class PlaybackService : MediaLibraryService() {
 
     private val scheduledMessages = mutableListOf<PlayerMessage>()
     private var lastStartedEpisodeId: String? = null
+    @Volatile private var intelligentPlaybackResumptionEnabled: Boolean = false
+    private var lastPausedAtMs: Long = 0L
+    private var lastPausedMediaId: String? = null
 
     private val updatePlayStateHandler: Handler = Handler(Looper.getMainLooper())
     private val updatePlayStateRunnable = Runnable {
@@ -288,6 +291,11 @@ class PlaybackService : MediaLibraryService() {
         }
         scope.launch {
             settingsRepository.behavior.headsetPrevAction.collect { headsetPrevAction = it }
+        }
+        scope.launch {
+            settingsRepository.behavior.intelligentPlaybackResumption.collect {
+                intelligentPlaybackResumptionEnabled = it
+            }
         }
 
         scope.launch {
@@ -751,9 +759,31 @@ class PlaybackService : MediaLibraryService() {
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 if (isPlaying) {
+                    val mediaId = exoPlayer.currentMediaItem?.mediaId
+                    if (intelligentPlaybackResumptionEnabled &&
+                        lastPausedAtMs > 0L &&
+                        mediaId != null &&
+                        mediaId == lastPausedMediaId
+                    ) {
+                        val pausedDurationMs = System.currentTimeMillis() - lastPausedAtMs
+                        val rewindMs = when {
+                            pausedDurationMs >= 3_600_000L -> 15_000L
+                            pausedDurationMs >= 300_000L -> 10_000L
+                            pausedDurationMs >= 30_000L -> 3_000L
+                            else -> 0L
+                        }
+                        if (rewindMs > 0L && exoPlayer.currentPosition > 1_000L) {
+                            exoPlayer.seekTo((exoPlayer.currentPosition - rewindMs).coerceAtLeast(0L))
+                        }
+                    }
+                    lastPausedAtMs = 0L
                     enqueueUpdatePlayState()
                     checkActiveSkipsNow()
                 } else {
+                    if (exoPlayer.playbackState == Player.STATE_READY && !exoPlayer.playWhenReady) {
+                        lastPausedAtMs = System.currentTimeMillis()
+                        lastPausedMediaId = exoPlayer.currentMediaItem?.mediaId
+                    }
                     updatePlayState()
                     updatePlayStateHandler.removeCallbacks(updatePlayStateRunnable)
                     syncIfEnabled()

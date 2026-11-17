@@ -174,7 +174,31 @@ fun SettingsPlaybackPane(
                     label = "Tap Up Next to play",
                     description = "Tapping a queued episode plays it immediately instead of opening episode details",
                     index = 2,
-                    count = 6
+                    count = 7
+                )
+            }
+
+            item {
+                val intelligentResumption = vm.repository.behavior.intelligentPlaybackResumption
+                    .collectAsState(false)
+
+                SettingsSwitchListItem(
+                    checked = intelligentResumption.value,
+                    onCheckedChange = {
+                        scope.launch {
+                            vm.repository.behavior.setIntelligentPlaybackResumption(it)
+                        }
+                    },
+                    icon = {
+                        Icon(
+                            Icons.Rounded.Replay,
+                            "Intelligent Playback Resumption"
+                        )
+                    },
+                    label = "Intelligent Playback Resumption",
+                    description = "Automatically rewind a few seconds when resuming after a pause",
+                    index = 3,
+                    count = 7
                 )
             }
 

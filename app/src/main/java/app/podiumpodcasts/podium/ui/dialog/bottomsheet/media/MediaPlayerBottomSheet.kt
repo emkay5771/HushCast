@@ -36,10 +36,10 @@ import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CloseFullscreen
-import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadForOffline
 import androidx.compose.material.icons.rounded.Forward10
 import androidx.compose.material.icons.rounded.Forward30
 import androidx.compose.material.icons.rounded.Forward5
@@ -323,8 +323,7 @@ fun MediaPlayerBottomSheet(
             PlayerToolbarAction.DOWNLOAD,
             PlayerToolbarAction.GO_TO_PODCAST,
             PlayerToolbarAction.EPISODE_DETAILS,
-            PlayerToolbarAction.MARK_PLAYED,
-            PlayerToolbarAction.ANALYZE
+            PlayerToolbarAction.MARK_PLAYED
         )
     }
     val configuredToolbarActions by settingsRepository.behavior.playerToolbarActions.collectAsState(
@@ -336,19 +335,24 @@ fun MediaPlayerBottomSheet(
         )
     )
     val shortcutActions = remember(configuredToolbarActions) {
-        configuredToolbarActions.filter { it in availablePlayerActions }.take(4).ifEmpty {
-            listOf(
-                PlayerToolbarAction.HUSHCAST,
-                PlayerToolbarAction.SPEED,
-                PlayerToolbarAction.SLEEP,
-                PlayerToolbarAction.FAVORITE
-            )
-        }
+        configuredToolbarActions
+            .map { if (it == PlayerToolbarAction.ANALYZE) PlayerToolbarAction.HUSHCAST else it }
+            .distinct()
+            .filter { it in availablePlayerActions }
+            .take(4)
+            .ifEmpty {
+                listOf(
+                    PlayerToolbarAction.HUSHCAST,
+                    PlayerToolbarAction.SPEED,
+                    PlayerToolbarAction.SLEEP,
+                    PlayerToolbarAction.FAVORITE
+                )
+            }
     }
 
     fun performToolbarAction(action: PlayerToolbarAction) {
         when (action) {
-            PlayerToolbarAction.HUSHCAST -> {
+            PlayerToolbarAction.HUSHCAST, PlayerToolbarAction.ANALYZE -> {
                 if (!setupCompleted) showSetupSheet = true
                 else showHushCastSheet = true
             }
@@ -412,9 +416,6 @@ fun MediaPlayerBottomSheet(
                     }
                     vm.removeEpisodeFromPlaybackAndQueue(episodeId)
                 }
-            }
-            PlayerToolbarAction.ANALYZE -> {
-                triggerAnalyzeNow()
             }
         }
     }
@@ -1214,8 +1215,8 @@ fun MediaPlayerBottomSheet(
                                 PlayerToolbarAction.DOWNLOAD -> {
                                     IconButton(onClick = { performToolbarAction(action) }) {
                                         Icon(
-                                            imageVector = if (isDownloaded) Icons.Rounded.DeleteOutline else Icons.Rounded.Download,
-                                            contentDescription = if (isDownloaded) "Remove downloaded file" else "Download episode",
+                                            imageVector = if (isDownloaded) Icons.Rounded.DownloadForOffline else Icons.Rounded.Download,
+                                            contentDescription = if (isDownloaded) "Downloaded (tap to remove)" else "Download episode",
                                             tint = if (isDownloaded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                         )
                                     }
@@ -1236,11 +1237,6 @@ fun MediaPlayerBottomSheet(
                                 PlayerToolbarAction.MARK_PLAYED -> {
                                     IconButton(onClick = { performToolbarAction(action) }) {
                                         Icon(Icons.Rounded.Done, contentDescription = "Mark as Played")
-                                    }
-                                }
-                                PlayerToolbarAction.ANALYZE -> {
-                                    IconButton(onClick = { performToolbarAction(action) }) {
-                                        Icon(Icons.Rounded.AutoAwesome, contentDescription = "Analyze with HushCast AI")
                                     }
                                 }
                                 else -> Unit
@@ -1290,7 +1286,7 @@ fun MediaPlayerBottomSheet(
                         }
                         val description = when (action) {
                             PlayerToolbarAction.GO_TO_PODCAST -> vm.mediaMetadata?.subtitle?.toString() ?: ""
-                            PlayerToolbarAction.ANALYZE -> "Scan for muted words and sponsor segments"
+                            PlayerToolbarAction.HUSHCAST -> "Process episode, mute words, and skip sponsors"
                             else -> null
                         }
                         val iconVec = when (action) {
@@ -1298,11 +1294,10 @@ fun MediaPlayerBottomSheet(
                             PlayerToolbarAction.SPEED -> Icons.Filled.Speed
                             PlayerToolbarAction.SLEEP -> Icons.Filled.Bedtime
                             PlayerToolbarAction.FAVORITE -> if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder
-                            PlayerToolbarAction.DOWNLOAD -> if (isDownloaded) Icons.Rounded.DeleteOutline else Icons.Rounded.Download
+                            PlayerToolbarAction.DOWNLOAD -> if (isDownloaded) Icons.Rounded.DownloadForOffline else Icons.Rounded.Download
                             PlayerToolbarAction.GO_TO_PODCAST -> Icons.Rounded.Podcasts
                             PlayerToolbarAction.EPISODE_DETAILS -> Icons.Rounded.Info
                             PlayerToolbarAction.MARK_PLAYED -> Icons.Rounded.Done
-                            PlayerToolbarAction.ANALYZE -> Icons.Rounded.AutoAwesome
                             else -> Icons.Rounded.MoreHoriz
                         }
                         SettingsListItem(

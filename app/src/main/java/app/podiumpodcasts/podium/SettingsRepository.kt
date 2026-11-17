@@ -129,6 +129,8 @@ object SettingsKeys {
         stringPreferencesKey("behavior_remaining_time_display")
     val BEHAVIOR_TAP_UP_NEXT_TO_PLAY =
         booleanPreferencesKey("behavior_tap_up_next_to_play")
+    val BEHAVIOR_INTELLIGENT_PLAYBACK_RESUMPTION =
+        booleanPreferencesKey("behavior_intelligent_playback_resumption")
     val BEHAVIOR_EPISODE_SWIPE_RIGHT_ACTION =
         stringPreferencesKey("behavior_episode_swipe_right_action")
     val BEHAVIOR_EPISODE_SWIPE_RIGHT_SECONDARY_ACTION =
@@ -378,6 +380,15 @@ class SettingsRepository(val context: Context) {
 
         suspend fun setTapUpNextToPlay(enable: Boolean) = dataStore.edit { preferences ->
             preferences[SettingsKeys.BEHAVIOR_TAP_UP_NEXT_TO_PLAY] = enable
+        }
+
+        val intelligentPlaybackResumption: Flow<Boolean> = dataStore.data
+            .map { preferences ->
+                preferences[SettingsKeys.BEHAVIOR_INTELLIGENT_PLAYBACK_RESUMPTION] ?: false
+            }
+
+        suspend fun setIntelligentPlaybackResumption(enable: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_INTELLIGENT_PLAYBACK_RESUMPTION] = enable
         }
 
         val episodeSwipeRightAction: Flow<EpisodeSwipeAction> = dataStore.data

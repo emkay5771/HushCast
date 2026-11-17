@@ -6,15 +6,42 @@ import math
 import re
 import shutil
 import subprocess
+import threading
 from collections import Counter
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
 from .models import AdSegmentDto, DesktopChapterDto, SegmentDto
 
 logger = logging.getLogger("hushcast_worker.chapters")
+
+_CHAT_LLM_LOCK = threading.Lock()
+_CACHED_CHAT_LLM: Optional[tuple[str, int, Any]] = None
+
+
+def _get_chat_llm(chat_model_path: Path):
+    global _CACHED_CHAT_LLM
+    from llama_cpp import Llama
+
+    key_path = str(chat_model_path)
+    key_cls = id(Llama)
+    with _CHAT_LLM_LOCK:
+        if (
+            _CACHED_CHAT_LLM is not None
+            and _CACHED_CHAT_LLM[0] == key_path
+            and _CACHED_CHAT_LLM[1] == key_cls
+        ):
+            return _CACHED_CHAT_LLM[2]
+        llm = Llama(
+            model_path=key_path,
+            n_ctx=2048,
+            n_gpu_layers=-1,
+            verbose=False,
+        )
+        _CACHED_CHAT_LLM = (key_path, key_cls, llm)
+        return llm
 
 _STOPWORDS = {
     "a", "about", "above", "actually", "after", "again", "all", "also", "always",
@@ -249,31 +276,27 @@ def generate_chapters_and_summary(
                 '{"summary": "...", "titles": ["Title 1", "Title 2"]}\n\n'
                 f"Chapters:\n{chapters_prompt_text}\n\nJSON:"
             )
-            chat_llm = Llama(
-                model_path=str(chat_model_path),
-                n_ctx=4096,
-                n_gpu_layers=-1,
-                verbose=False,
-            )
-            if hasattr(chat_llm, "create_chat_completion"):
-                out = chat_llm.create_chat_completion(
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": (
-                                "You are a concise podcast editor. Return ONLY valid JSON with no "
-                                "markdown fences or extra commentary."
-                            ),
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                    max_tokens=512,
-                    temperature=0.2,
-                )
-                raw_text = out["choices"][0]["message"]["content"].strip()
-            else:
-                out = chat_llm.create_completion(prompt, max_tokens=512, temperature=0.2)
-                raw_text = out["choices"][0]["text"].strip()
+            chat_llm = _get_chat_llm(chat_model_path)
+            with _CHAT_LLM_LOCK:
+                if hasattr(chat_llm, "create_chat_completion"):
+                    out = chat_llm.create_chat_completion(
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": (
+                                    "You are a concise podcast editor. Return ONLY valid JSON with no "
+                                    "markdown fences or extra commentary."
+                                ),
+                            },
+                            {"role": "user", "content": prompt},
+                        ],
+                        max_tokens=512,
+                        temperature=0.2,
+                    )
+                    raw_text = out["choices"][0]["message"]["content"].strip()
+                else:
+                    out = chat_llm.create_completion(prompt, max_tokens=512, temperature=0.2)
+                    raw_text = out["choices"][0]["text"].strip()
             m_json = re.search(r"\{.*\}", raw_text, flags=re.DOTALL)
             if m_json:
                 parsed = json.loads(m_json.group(0))

@@ -172,7 +172,11 @@ fun NewEpisodesRoute(
                             }
                         ),
                         secondaryStartAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
-                            actionType = secondaryRightType,
+                            actionType = app.podiumpodcasts.podium.ui.component.common.swipeable.consolidateSecondarySwipeAction(
+                                primary = itemSwipeRightAction,
+                                secondary = secondaryRightType,
+                                inQueue = itemPlayerVm.queue.contains(item.episode.id)
+                            ),
                             bundle = item,
                             playerVm = itemPlayerVm,
                             onMarkPlayed = { markPlayed ->

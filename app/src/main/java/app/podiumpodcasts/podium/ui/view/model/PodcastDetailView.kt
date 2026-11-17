@@ -904,7 +904,11 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                             }
                         ),
                         secondaryStartAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
-                            actionType = secondaryRightType,
+                            actionType = app.podiumpodcasts.podium.ui.component.common.swipeable.consolidateSecondarySwipeAction(
+                                primary = itemSwipeRightAction,
+                                secondary = secondaryRightType,
+                                inQueue = itemPlayerVm.queue.contains(episodeBundle.episode.id)
+                            ),
                             bundle = episodeBundle,
                             playerVm = itemPlayerVm,
                             onMarkPlayed = { markPlayed ->
@@ -926,7 +930,11 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                             }
                         ),
                         secondaryEndAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
-                            actionType = secondaryLeftType,
+                            actionType = app.podiumpodcasts.podium.ui.component.common.swipeable.consolidateSecondarySwipeAction(
+                                primary = itemSwipeLeftAction,
+                                secondary = secondaryLeftType,
+                                inQueue = itemPlayerVm.queue.contains(episodeBundle.episode.id)
+                            ),
                             bundle = episodeBundle,
                             playerVm = itemPlayerVm,
                             onMarkPlayed = { markPlayed ->

@@ -1,3 +1,18 @@
+# HushCast v1.0.12-hushcast
+
+## What's New
+- **Consolidated Queue Swipe Action**:
+  - When an episode is already in the queue and both Primary and Secondary swipe actions on the same side are queue actions (`Play Next` / `Play Last`), the duplicate "Remove from queue" icon is consolidated into a single action.
+- **Intelligent Playback Resumption**:
+  - Added **Intelligent Playback Resumption** in **Settings → Playback**, automatically rewinding 3s / 10s / 15s when resuming after pauses of 30s+ / 5m+ / 1h+ in `PlaybackService`.
+- **Player Action Bar Downloaded Icon & HushCast Consolidation**:
+  - Replaced the trash can (`DeleteOutline`) icon on downloaded episodes in `MediaPlayerBottomSheet`'s player action bar with `DownloadForOffline` while keeping tap-to-remove functionality.
+  - Consolidated the separate **HushCast** shield button and **Analyze with HushCast AI** action into the unified **HushCast** action and sheet.
+- **Desktop / Modal Worker AI Speed & Consistency**:
+  - Cached the `Qwen2.5-7B-Instruct` `Llama` instance in `chapters.py` across episodes and reduced `n_ctx` from `4096` to `2048` so the 4.7 GB model is not reloaded from disk on every episode and fits comfortably in T4 VRAM alongside Whisper and `Qwen3-Embedding-0.6B`.
+
+---
+
 # HushCast v1.0.11-hushcast
 
 ## What's New
