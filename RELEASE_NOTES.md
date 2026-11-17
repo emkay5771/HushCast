@@ -1,3 +1,12 @@
+# HushCast v1.0.5-hushcast
+
+## What's New
+- **Player Top Bar & Tab Pager Fix**:
+  - Switched the player top bar from fixed-width `PrimaryTabRow` to `PrimaryScrollableTabRow(edgePadding = 0.dp, minTabWidth = 0.dp)` so tab labels (`Player`, `Transcript`, `Chapters`, `Notes`) never truncate.
+  - Fixed the `HorizontalPager` two-way `LaunchedEffect` race that cancelled `animateScrollToPage` mid-swipe and left pages stuck between tabs, and switched `CHAPTERS`/`NOTES`/`TRANSCRIPT` full-screen containers inside the pager to `Modifier.fillMaxSize()`.
+
+---
+
 # HushCast v1.0.4-hushcast
 
 ## What's New

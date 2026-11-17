@@ -421,16 +421,15 @@ fun MediaPlayerBottomSheet(
         initialPage = visibleTabs.indexOf(selectedTab).coerceAtLeast(0)
     ) { visibleTabs.size }
 
-    LaunchedEffect(selectedTab, visibleTabs) {
-        val targetIdx = visibleTabs.indexOf(selectedTab).coerceAtLeast(0)
-        if (pagerState.currentPage != targetIdx && targetIdx < visibleTabs.size) {
-            pagerState.animateScrollToPage(targetIdx)
-        }
-    }
-    LaunchedEffect(pagerState.currentPage, visibleTabs) {
-        val tab = visibleTabs.getOrNull(pagerState.currentPage)
+    LaunchedEffect(pagerState.settledPage, visibleTabs) {
+        val tab = visibleTabs.getOrNull(pagerState.settledPage)
         if (tab != null && tab != selectedTab) {
             selectedTab = tab
+        }
+    }
+    LaunchedEffect(visibleTabs.size) {
+        if (visibleTabs.isNotEmpty() && pagerState.currentPage >= visibleTabs.size) {
+            pagerState.scrollToPage(visibleTabs.lastIndex)
         }
     }
 
@@ -481,22 +480,29 @@ fun MediaPlayerBottomSheet(
                         )
                     }
 
-                    androidx.compose.material3.PrimaryTabRow(
+                    val activeTabIndex = pagerState.currentPage.coerceIn(0, (visibleTabs.size - 1).coerceAtLeast(0))
+                    androidx.compose.material3.PrimaryScrollableTabRow(
                         modifier = Modifier.weight(1f),
-                        selectedTabIndex = visibleTabs.indexOf(selectedTab).coerceIn(0, (visibleTabs.size - 1).coerceAtLeast(0)),
+                        selectedTabIndex = activeTabIndex,
+                        edgePadding = 0.dp,
+                        minTabWidth = 0.dp,
                         containerColor = Color.Transparent,
                         divider = { }
                     ) {
-                        visibleTabs.forEach { tab ->
+                        visibleTabs.forEachIndexed { idx, tab ->
                             Tab(
-                                selected = selectedTab == tab,
-                                onClick = { selectedTab = tab },
+                                selected = activeTabIndex == idx,
+                                onClick = {
+                                    selectedTab = tab
+                                    scope.launch {
+                                        pagerState.animateScrollToPage(idx)
+                                    }
+                                },
                                 text = {
                                     Text(
                                         text = tab.label,
                                         maxLines = 1,
                                         softWrap = false,
-                                        overflow = TextOverflow.Ellipsis,
                                         style = MaterialTheme.typography.labelLarge
                                     )
                                 }
@@ -548,7 +554,7 @@ fun MediaPlayerBottomSheet(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .then(
-                                    if (isFullScreen) Modifier.weight(1f)
+                                    if (isFullScreen) Modifier.fillMaxSize()
                                     else Modifier.heightIn(min = 320.dp, max = 520.dp)
                                 )
                                 .padding(horizontal = 16.dp, vertical = 12.dp)
@@ -560,7 +566,7 @@ fun MediaPlayerBottomSheet(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .then(
-                                    if (isFullScreen) Modifier.weight(1f)
+                                    if (isFullScreen) Modifier.fillMaxSize()
                                     else Modifier.heightIn(min = 320.dp, max = 520.dp)
                                 )
                                 .verticalScroll(rememberScrollState())
@@ -614,7 +620,7 @@ fun MediaPlayerBottomSheet(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .then(
-                                    if (isFullScreen) Modifier.weight(1f)
+                                    if (isFullScreen) Modifier.fillMaxSize()
                                     else Modifier.heightIn(min = 320.dp, max = 520.dp)
                                 )
                                 .padding(horizontal = 16.dp, vertical = 12.dp)
