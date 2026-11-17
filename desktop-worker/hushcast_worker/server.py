@@ -154,6 +154,16 @@ def create_app(
 
     app = FastAPI(title="HushCast Desktop Worker", version=__version__)
     jobs: dict[str, DesktopJobResponse] = cache.load_jobs()
+    for _jid, _job in list(jobs.items()):
+        if _job.state not in (JobState.READY, JobState.FAILED, JobState.CANCELLED):
+            jobs[_jid] = _job.model_copy(
+                update={
+                    "state": JobState.FAILED,
+                    "stageLabel": "Worker restarted",
+                    "errorMessage": "Worker restarted before job completed; please retry",
+                }
+            )
+            cache.save_job(jobs[_jid])
     url_to_job_id: dict[str, str] = {}
     job_tasks: dict[str, asyncio.Task] = {}
     background_tasks: set[asyncio.Task] = set()
@@ -377,6 +387,17 @@ def create_app(
         job = jobs.get(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
+        if (
+            job.state not in (JobState.READY, JobState.FAILED, JobState.CANCELLED)
+            and job_id not in job_tasks
+        ):
+            _update_job(
+                job_id,
+                state=JobState.FAILED,
+                stageLabel="Worker task stopped",
+                errorMessage="Worker task is no longer running; please retry",
+            )
+            return jobs[job_id]
         return job
 
     @app.delete(

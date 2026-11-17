@@ -88,6 +88,8 @@ object DesktopWorkerClient {
         onProgress: (DesktopJobResponse) -> Unit = {}
     ): DesktopJobResponse {
         val deadline = System.currentTimeMillis() + maxWaitMs
+        val maxQueuedWaitMs = 5 * 60 * 1000L
+        var queuedSinceMs: Long? = null
         var consecutiveErrors = 0
         var currentDelayMs = pollIntervalMs
 
@@ -116,6 +118,18 @@ object DesktopWorkerClient {
                 "FAILED" -> throw IllegalStateException(
                     "Desktop worker failed: ${status.errorMessage ?: status.stageLabel}"
                 )
+                "QUEUED" -> {
+                    val now = System.currentTimeMillis()
+                    if (status.progressPercent <= 0) {
+                        val firstQueued = queuedSinceMs ?: now.also { queuedSinceMs = it }
+                        if (now - firstQueued >= maxQueuedWaitMs) {
+                            throw IllegalStateException("Timed out waiting in worker queue for job $jobId")
+                        }
+                    } else {
+                        queuedSinceMs = null
+                    }
+                }
+                else -> queuedSinceMs = null
             }
             if (System.currentTimeMillis() >= deadline) {
                 throw IllegalStateException("Timed out waiting for desktop worker job $jobId")

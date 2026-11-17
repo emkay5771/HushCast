@@ -1,3 +1,13 @@
+# HushCast v1.0.7-hushcast
+
+## What's New
+- **Desktop / Cloud Analysis Queue Hang Fix**:
+  - Updated [`server.py`](https://github.com/emkay5771/HushCast/blob/main/desktop-worker/hushcast_worker/server.py) to mark orphaned non-terminal jobs loaded from disk on worker startup (and in `GET /v1/jobs/{job_id}` if no background task is running) as `FAILED` instead of leaving them stuck in `QUEUED` indefinitely after a container restart or scale-down.
+  - Added a 5-minute `QUEUED` stall timeout in [`DesktopWorkerClient.pollJobUntilReady`](https://github.com/emkay5771/HushCast/blob/main/core/automute-engine/src/main/java/app/hushcast/automute/desktop/DesktopWorkerClient.kt) so stalled queue jobs fail cleanly rather than hanging at `1%` Live Activity / `10%` Diagnostics for 30 minutes.
+  - Separated `"Queued on worker…"` from `"Starting analysis…"` in [`PodcastEpisodeDownloadWork`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/background/work/PodcastEpisodeDownloadWork.kt) for clearer live progress status.
+
+---
+
 # HushCast v1.0.6-hushcast
 
 ## What's New

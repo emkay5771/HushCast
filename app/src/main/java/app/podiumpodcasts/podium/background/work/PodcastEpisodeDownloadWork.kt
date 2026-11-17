@@ -211,7 +211,8 @@ class PodcastEpisodeDownloadWork(
         val lower = rawStage.lowercase()
         return when {
             "cached" in lower || "matched existing" in lower -> "Ready"
-            "queued" in lower || "reprocessing" in lower || "submitting" in lower -> "Starting analysis…"
+            "queued" in lower -> "Queued on worker…"
+            "reprocessing" in lower || "submitting" in lower -> "Starting analysis…"
             "downloading" in lower -> "Downloading audio…"
             "decoding" in lower || "acoustic" in lower || "loading whisper" in lower -> "Preparing audio…"
             "transcrib" in lower -> "Transcribing speech…"
