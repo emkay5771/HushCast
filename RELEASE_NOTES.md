@@ -1,3 +1,12 @@
+# HushCast v1.0.2-hushcast
+
+## What's New
+- **Consistent CI App Signing**:
+  - Restored `app/ci-debug.keystore` so all CI APK builds share the same signing certificate (matching `v0.1.x` builds) and future updates install in-place without requiring uninstalls.
+  - Note: If updating from `v1.0.0-hushcast` or `v1.0.1-hushcast` (which were signed with ephemeral runner keys), back up your data in **Settings → Backup**, uninstall once, install `v1.0.2-hushcast`, and restore.
+
+---
+
 # HushCast v1.0.1-hushcast
 
 ## What's New
