@@ -68,7 +68,7 @@ _base_image = (
         "pydantic==2.11.3",
         "zeroconf==0.146.5",
         "numpy==2.2.5",
-        "onnxruntime-gpu==1.20.1",
+        "onnxruntime-gpu==1.20.2",
         "av==14.2.0",
     )
     .pip_install(
