@@ -6,6 +6,7 @@ import android.net.Uri
 import android.text.format.DateFormat
 import androidx.core.content.FileProvider
 import androidx.room.Room
+import app.hushcast.automute.storage.AutoMuteDatabase
 import app.podiumpodcasts.podium.api.db.ALL_MIGRATIONS
 import app.podiumpodcasts.podium.api.db.AppDatabase
 import java.io.BufferedOutputStream
@@ -17,26 +18,43 @@ import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 const val DATABASE_NAME = "podiumDB"
+const val AUTOMUTE_DATABASE_NAME = "hushcast_automute.db"
+const val SETTINGS_BACKUP_NAME = "settings.preferences_pb"
 const val DATABASE_EXTENSION = "podiumdb"
 
 val DATABASE_BACKUP_FILES = arrayOf(
-    "podiumDB",
-    "podiumDB-shm",
-    "podiumDB-wal"
+    DATABASE_NAME,
+    "$DATABASE_NAME-shm",
+    "$DATABASE_NAME-wal",
+    AUTOMUTE_DATABASE_NAME,
+    "$AUTOMUTE_DATABASE_NAME-shm",
+    "$AUTOMUTE_DATABASE_NAME-wal"
 )
 
 class DatabaseManager {
     companion object {
+        @Volatile
+        private var INSTANCE: AppDatabase? = null
+
         fun build(context: Context): AppDatabase {
-            return Room
-                .databaseBuilder(
-                    context = context,
-                    klass = AppDatabase::class.java,
-                    name = DATABASE_NAME
-                )
-                .addMigrations(*ALL_MIGRATIONS)
-                .enableMultiInstanceInvalidation()
-                .build()
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: Room
+                    .databaseBuilder(
+                        context = context.applicationContext,
+                        klass = AppDatabase::class.java,
+                        name = DATABASE_NAME
+                    )
+                    .addMigrations(*ALL_MIGRATIONS)
+                    .build()
+                    .also { INSTANCE = it }
+            }
+        }
+
+        fun closeInstance() {
+            synchronized(this) {
+                INSTANCE?.close()
+                INSTANCE = null
+            }
         }
 
         fun getDatabaseFile(context: Context): File? {
@@ -53,19 +71,47 @@ class DatabaseManager {
         }
 
         fun writeBackupFile(context: Context, file: File): File {
-            val dbDir = getDatabaseFile(context)?.parentFile
+            val appCtx = context.applicationContext
+            val tmpDir = File(appCtx.cacheDir, "backup_snapshot").apply {
+                deleteRecursively()
+                mkdirs()
+            }
+            try {
+                val appSnap = File(tmpDir, DATABASE_NAME)
+                val db = build(appCtx)
+                db.openHelper.writableDatabase.execSQL(
+                    "VACUUM INTO '${appSnap.absolutePath.replace("'", "''")}'"
+                )
 
-            FileOutputStream(file).use { outputStream ->
-                ZipOutputStream(BufferedOutputStream(outputStream)).use { zipOutputStream ->
-                    DATABASE_BACKUP_FILES.forEach { fileName ->
-                        val file = File(dbDir, fileName)
-                        if(!file.exists()) return@forEach
+                val autoMuteSnap = File(tmpDir, AUTOMUTE_DATABASE_NAME)
+                val autoMuteDbFile = appCtx.getDatabasePath(AUTOMUTE_DATABASE_NAME)
+                if (autoMuteDbFile.exists()) {
+                    val amDb = AutoMuteDatabase.getInstance(appCtx)
+                    amDb.openHelper.writableDatabase.execSQL(
+                        "VACUUM INTO '${autoMuteSnap.absolutePath.replace("'", "''")}'"
+                    )
+                }
 
-                        zipOutputStream.putNextEntry(ZipEntry(file.name))
-                        file.inputStream().use { it.copyTo(zipOutputStream) }
-                        zipOutputStream.closeEntry()
+                val dataStoreFile = File(appCtx.filesDir, "datastore/settings.preferences_pb")
+
+                FileOutputStream(file).use { outputStream ->
+                    ZipOutputStream(BufferedOutputStream(outputStream)).use { zipOut ->
+                        listOf(appSnap, autoMuteSnap).forEach { snap ->
+                            if (snap.exists()) {
+                                zipOut.putNextEntry(ZipEntry(snap.name))
+                                snap.inputStream().use { it.copyTo(zipOut) }
+                                zipOut.closeEntry()
+                            }
+                        }
+                        if (dataStoreFile.exists()) {
+                            zipOut.putNextEntry(ZipEntry(SETTINGS_BACKUP_NAME))
+                            dataStoreFile.inputStream().use { it.copyTo(zipOut) }
+                            zipOut.closeEntry()
+                        }
                     }
                 }
+            } finally {
+                tmpDir.deleteRecursively()
             }
 
             return file
@@ -102,8 +148,9 @@ class DatabaseManager {
             context.contentResolver.openInputStream(uri)?.use { input ->
                 ZipInputStream(input).use { zipInputStream ->
                     var entry = zipInputStream.nextEntry
-                    while(entry != null) {
-                        if(entry.name == DATABASE_NAME) return true
+                    while (entry != null) {
+                        if (entry.name == DATABASE_NAME) return true
+                        zipInputStream.closeEntry()
                         entry = zipInputStream.nextEntry
                     }
                 }
@@ -113,23 +160,45 @@ class DatabaseManager {
         }
 
         fun restoreFromBackup(context: Context, uri: Uri) {
-            val dbDir = getDatabaseFile(context)!!.parent
+            val appCtx = context.applicationContext
+            // F10: Close all open Room instances and clear WAL/SHM before replacing database files
+            closeInstance()
+            AutoMuteDatabase.closeInstance()
 
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            val dbDir = getDatabaseFile(appCtx)!!.parentFile!!
+            listOf(
+                DATABASE_NAME,
+                "$DATABASE_NAME-shm",
+                "$DATABASE_NAME-wal",
+                AUTOMUTE_DATABASE_NAME,
+                "$AUTOMUTE_DATABASE_NAME-shm",
+                "$AUTOMUTE_DATABASE_NAME-wal"
+            ).forEach { name ->
+                File(dbDir, name).delete()
+            }
+
+            val dsDir = File(appCtx.filesDir, "datastore").apply { mkdirs() }
+
+            appCtx.contentResolver.openInputStream(uri)?.use { inputStream ->
                 ZipInputStream(inputStream).use { zipInputStream ->
                     var entry = zipInputStream.nextEntry
-                    while(entry != null) {
-                        if(entry.name in DATABASE_BACKUP_FILES) {
-                            val destination = File(dbDir, entry.name)
-                            if(destination.exists()) destination.delete()
-
-                            destination.outputStream().use { outputStream ->
-                                zipInputStream.copyTo(outputStream)
+                    while (entry != null) {
+                        when (entry.name) {
+                            in DATABASE_BACKUP_FILES -> {
+                                val destination = File(dbDir, entry.name)
+                                destination.outputStream().use { outputStream ->
+                                    zipInputStream.copyTo(outputStream)
+                                }
                             }
-
-                            zipInputStream.closeEntry()
-                            entry = zipInputStream.nextEntry
+                            SETTINGS_BACKUP_NAME -> {
+                                val destination = File(dsDir, SETTINGS_BACKUP_NAME)
+                                destination.outputStream().use { outputStream ->
+                                    zipInputStream.copyTo(outputStream)
+                                }
+                            }
                         }
+                        zipInputStream.closeEntry()
+                        entry = zipInputStream.nextEntry
                     }
                 }
             }

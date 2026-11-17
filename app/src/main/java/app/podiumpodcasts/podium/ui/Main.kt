@@ -73,23 +73,31 @@ import kotlinx.parcelize.Parcelize
 import kotlinx.serialization.Serializable
 
 @Serializable
-@Parcelize
-open class DetailPaneKey : Parcelable {
+sealed class DetailPaneKey : Parcelable {
     @Serializable
-    open class PodcastKey(
+    @Parcelize
+    data class PodcastKey(
         val origin: String
     ) : DetailPaneKey()
 
     @Serializable
-    class PodcastEpisodeKey(
+    @Parcelize
+    data class PodcastEpisodeKey(
         val episodeOrigin: String,
         val episodeId: String
-    ) : PodcastKey(episodeOrigin)
+    ) : DetailPaneKey()
 
     @Serializable
-    class EpisodeKey(
+    @Parcelize
+    data class EpisodeKey(
         val episodeOrigin: String,
         val episodeId: String
+    ) : DetailPaneKey()
+
+    @Serializable
+    @Parcelize
+    data class SettingsKey(
+        val pane: SettingsPaneKey
     ) : DetailPaneKey()
 }
 
@@ -419,7 +427,7 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
 
     scaffoldNavigator.currentDestination?.contentKey?.let { contentKey ->
         when(contentKey) {
-            is SettingsPaneKey -> {
+            is DetailPaneKey.SettingsKey -> {
                 AnimatedPane(
                     enterTransition = enterSpec,
                     exitTransition = exitSpec
@@ -427,7 +435,7 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
                     SettingsPane(
                         showBackButton = scaffoldNavigator.scaffoldValue.secondary == PaneAdaptedValue.Hidden,
 
-                        contentKey = contentKey,
+                        contentKey = contentKey.pane,
                         backStack = backStack,
                         onClose = {
                             scope.launch {
@@ -438,8 +446,13 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
                 }
             }
 
-            is DetailPaneKey.PodcastKey -> {
-                val podcast = vm.fetchPodcast(contentKey.origin)
+            is DetailPaneKey.PodcastKey, is DetailPaneKey.PodcastEpisodeKey -> {
+                val podcastOrigin = when (contentKey) {
+                    is DetailPaneKey.PodcastKey -> contentKey.origin
+                    is DetailPaneKey.PodcastEpisodeKey -> contentKey.episodeOrigin
+                    else -> ""
+                }
+                val podcast = vm.fetchPodcast(podcastOrigin)
                     .collectAsState(null)
 
                 AnimatedPane(

@@ -30,7 +30,10 @@ import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.SegmentedListItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -45,9 +48,11 @@ import app.podiumpodcasts.podium.ui.component.media.FloatingMediaPlayerSpacer
 import app.podiumpodcasts.podium.ui.component.media.LocalFloatingMediaPlayerHeight
 import app.podiumpodcasts.podium.ui.component.media.LocalFloatingMediaPlayerShown
 import app.podiumpodcasts.podium.ui.dialog.bottomsheet.ListCreateBottomSheet
+import app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.MediaPlayerQueueBottomSheet
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.vm.DownloadsViewModel
 import app.podiumpodcasts.podium.ui.vm.HistoryViewModel
+import app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel
 import app.podiumpodcasts.podium.ui.vm.home.ContinuePlayingViewModel
 import app.podiumpodcasts.podium.ui.vm.home.NewEpisodesViewModel
 import app.podiumpodcasts.podium.ui.vm.library.LibraryViewModel
@@ -66,6 +71,7 @@ fun LibraryRoute(
 ) {
     val db = LocalDatabase.current
     val vm = viewModel { LibraryViewModel(db) }
+    val playerVm = viewModel<MediaPlayerViewModel>()
 
     val systemLists = vm.systemLists.collectAsLazyPagingItems()
     val nonSystemLists = vm.nonSystemLists.collectAsLazyPagingItems()
@@ -80,6 +86,8 @@ fun LibraryRoute(
     val continuePlayingPager =
         remember { continuePlayingVm.continuePlaying }.collectAsLazyPagingItems()
     val newEpisodesPager = remember { newEpisodesVm.newEpisodes }.collectAsLazyPagingItems()
+
+    var showUpNextSheet by remember { mutableStateOf(false) }
 
     val scrollBehavior = SearchBarDefaults.enterAlwaysSearchBarScrollBehavior()
     val listState = rememberLazyListState()
@@ -109,6 +117,11 @@ fun LibraryRoute(
         }
     ) { inset ->
         val smartFilters = listOf(
+            Triple(
+                stringResource(R.string.route_up_next),
+                Icons.AutoMirrored.Rounded.PlaylistPlay,
+                playerVm.queue.size to { showUpNextSheet = true }
+            ),
             Triple(
                 stringResource(R.string.route_new_episodes),
                 Icons.Rounded.NewReleases,
@@ -211,6 +224,11 @@ fun LibraryRoute(
     if (vm.showListCreateBottomSheet.value) ListCreateBottomSheet {
         vm.showListCreateBottomSheet.value = false
     }
+
+    if (showUpNextSheet) MediaPlayerQueueBottomSheet(
+        onOpenEpisode = { _, _ -> showUpNextSheet = false },
+        onDismiss = { showUpNextSheet = false }
+    )
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

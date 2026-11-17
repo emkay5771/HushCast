@@ -1,6 +1,0 @@
-Hey 👋
-
-- Fixed podcasts sometimes being duplicated when syncing with gpodder.net or nextcloud-gpodder.
-- Fixed playback breaking after the app and its service got killed by the system (#63).
-- Fixed the country search field allowing line breaks, so pressing Enter didn't confirm the search (
-  #46).

@@ -8,6 +8,10 @@ import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "podcastHistory",
+    indices = [
+        androidx.room.Index(value = ["timestamp"]),
+        androidx.room.Index(value = ["episodeId"])
+    ],
     foreignKeys = [ForeignKey(
         entity = PodcastEpisodeModel::class,
         parentColumns = arrayOf("id"),

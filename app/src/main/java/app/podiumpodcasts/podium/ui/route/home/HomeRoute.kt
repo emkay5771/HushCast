@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,17 +26,20 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Podcasts
+import androidx.compose.material.icons.rounded.RssFeed
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
@@ -44,23 +48,21 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SegmentedListItem
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -69,28 +71,24 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.paging.compose.collectAsLazyPagingItems
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.SubscriptionsBadgeMode
 import app.podiumpodcasts.podium.SubscriptionsLayout
 import app.podiumpodcasts.podium.SubscriptionsSort
 import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeModel
+import app.podiumpodcasts.podium.ui.component.PodcastGridOptionsSheet
 import app.podiumpodcasts.podium.ui.component.layout.InfoLayout
-import app.podiumpodcasts.podium.ui.component.media.FloatingMediaPlayerBreakpoint
 import app.podiumpodcasts.podium.ui.component.media.FloatingMediaPlayerSpacer
-import app.podiumpodcasts.podium.ui.component.media.LocalFloatingMediaPlayerHeight
 import app.podiumpodcasts.podium.ui.component.model.SubscriptionCard
-import app.podiumpodcasts.podium.ui.component.model.episode.PodcastEpisodeListItem
 import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
-import app.podiumpodcasts.podium.ui.helper.PagerScaffold
 import app.podiumpodcasts.podium.ui.theme.Typography
+import app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel
 import app.podiumpodcasts.podium.ui.vm.home.SubscriptionsViewModel
 import kotlinx.coroutines.launch
-
-private var homeStartupSyncDone = false
 
 @OptIn(
     ExperimentalMaterial3Api::class, ExperimentalMaterial3AdaptiveApi::class,
@@ -117,42 +115,32 @@ fun HomeRoute(
     val settingsRepository = LocalSettingsRepository.current
 
     val subscriptionsVm = viewModel { SubscriptionsViewModel(db) }
+    val playerVm = viewModel<MediaPlayerViewModel>()
 
-    val subscriptionsPager = subscriptionsVm.subscriptions.collectAsLazyPagingItems()
+    val allSubscriptions by subscriptionsVm.subscriptionsFlow.collectAsStateWithLifecycle(initialValue = emptyList())
 
     val context = androidx.compose.ui.platform.LocalContext.current
     androidx.compose.runtime.LaunchedEffect(Unit) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             app.podiumpodcasts.podium.PodcastGridOrganization.init(context)
         }
-        if (!homeStartupSyncDone) {
-            homeStartupSyncDone = true
-            kotlinx.coroutines.delay(450)
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                db.podcastSubscriptions().subscribeAllExistingPodcasts()
-                db.podcastSubscriptions().recalculateAllNewEpisodesCounts()
-            }
-        }
     }
 
-    val layout by settingsRepository.appearance.subscriptionsLayout.collectAsState(SubscriptionsLayout.LARGE_GRID)
-    val sort by settingsRepository.appearance.subscriptionsSort.collectAsState(SubscriptionsSort.RECENTLY_ADDED)
-    val badgeMode by settingsRepository.appearance.subscriptionsBadgeMode.collectAsState(SubscriptionsBadgeMode.UNPLAYED_COUNT)
-    val showGridTitles by settingsRepository.appearance.showGridTitles.collectAsState(true)
-    val gridOrgState by app.podiumpodcasts.podium.PodcastGridOrganization.state.collectAsState()
+    val layout by settingsRepository.appearance.subscriptionsLayout.collectAsStateWithLifecycle(SubscriptionsLayout.LARGE_GRID)
+    val sort by settingsRepository.appearance.subscriptionsSort.collectAsStateWithLifecycle(SubscriptionsSort.RECENTLY_ADDED)
+    val badgeMode by settingsRepository.appearance.subscriptionsBadgeMode.collectAsStateWithLifecycle(SubscriptionsBadgeMode.UNPLAYED_COUNT)
+    val showGridTitles by settingsRepository.appearance.showGridTitles.collectAsStateWithLifecycle(true)
+    val gridOrgState by app.podiumpodcasts.podium.PodcastGridOrganization.state.collectAsStateWithLifecycle()
 
     var showOptionsSheet by remember { mutableStateOf(false) }
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var showOrganizeFoldersDialog by remember { mutableStateOf(false) }
+    var reorderMode by remember { mutableStateOf(false) }
     var openFolderId by remember { mutableStateOf<String?>(null) }
     var moveToFolderTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
 
-    val itemCount = subscriptionsPager.itemCount
-    val allSubscriptions = remember(itemCount) {
-        subscriptionsPager.itemSnapshotList.items
-    }
     val sortedSubscriptions = remember(allSubscriptions, sort) {
-        when(sort) {
+        when (sort) {
             SubscriptionsSort.A_Z -> allSubscriptions.sortedBy { it.podcast.fetchTitle().lowercase() }
             SubscriptionsSort.RECENTLY_ADDED,
             SubscriptionsSort.CUSTOM -> allSubscriptions
@@ -237,116 +225,38 @@ fun HomeRoute(
         }
     }
 
-    if(showOptionsSheet) {
-        ModalBottomSheet(onDismissRequest = { showOptionsSheet = false }) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text("Podcasts Options", style = Typography.titleLargeEmphasized)
-                Spacer(Modifier.height(16.dp))
-
-                Text("Layout", style = Typography.labelLarge)
-                Spacer(Modifier.height(8.dp))
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    val options = listOf(
-                        SubscriptionsLayout.LARGE_GRID to "Large Grid",
-                        SubscriptionsLayout.SMALL_GRID to "Compact Grid",
-                        SubscriptionsLayout.LIST to "List"
-                    )
-                    options.forEachIndexed { idx, (value, label) ->
-                        SegmentedButton(
-                            selected = layout == value,
-                            onClick = { scope.launch { settingsRepository.appearance.setSubscriptionsLayout(value) } },
-                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
-                        ) { Text(label) }
-                    }
+    if (showOptionsSheet) {
+        PodcastGridOptionsSheet(
+            layout = layout,
+            sort = sort,
+            badgeMode = badgeMode,
+            showGridTitles = showGridTitles,
+            hasFolders = gridOrgState.folders.isNotEmpty(),
+            reorderMode = reorderMode,
+            onLayoutChange = { value ->
+                scope.launch { settingsRepository.appearance.setSubscriptionsLayout(value) }
+            },
+            onSortChange = { value ->
+                scope.launch { settingsRepository.appearance.setSubscriptionsSort(value) }
+            },
+            onBadgeModeChange = { value ->
+                scope.launch { settingsRepository.appearance.setSubscriptionsBadgeMode(value) }
+            },
+            onShowGridTitlesChange = { enabled ->
+                scope.launch { settingsRepository.appearance.setShowGridTitles(enabled) }
+            },
+            onToggleReorderMode = { enabled ->
+                reorderMode = enabled
+                if (enabled && sort != SubscriptionsSort.CUSTOM) {
+                    scope.launch { settingsRepository.appearance.setSubscriptionsSort(SubscriptionsSort.CUSTOM) }
                 }
-
-                Spacer(Modifier.height(16.dp))
-                Text("Sort by", style = Typography.labelLarge)
-                Spacer(Modifier.height(8.dp))
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    val options = listOf(
-                        SubscriptionsSort.RECENTLY_ADDED to "New Episodes",
-                        SubscriptionsSort.A_Z to "A–Z",
-                        SubscriptionsSort.CUSTOM to "Drag & Drop"
-                    )
-                    options.forEachIndexed { idx, (value, label) ->
-                        SegmentedButton(
-                            selected = sort == value,
-                            onClick = { scope.launch { settingsRepository.appearance.setSubscriptionsSort(value) } },
-                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
-                        ) { Text(label) }
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-                Text("Badges", style = Typography.labelLarge)
-                Spacer(Modifier.height(8.dp))
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    val options = listOf(
-                        SubscriptionsBadgeMode.UNPLAYED_COUNT to "Count",
-                        SubscriptionsBadgeMode.LATEST_ONLY to "Dot",
-                        SubscriptionsBadgeMode.OFF to "Off"
-                    )
-                    options.forEachIndexed { idx, (value, label) ->
-                        SegmentedButton(
-                            selected = badgeMode == value,
-                            onClick = { scope.launch { settingsRepository.appearance.setSubscriptionsBadgeMode(value) } },
-                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
-                        ) { Text(label) }
-                    }
-                }
-
-                if (layout == SubscriptionsLayout.LARGE_GRID) {
-                    Spacer(Modifier.height(16.dp))
-                    androidx.compose.foundation.layout.Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-                    ) {
-                        Text("Show titles in grid", style = Typography.bodyLarge)
-                        androidx.compose.material3.Switch(
-                            checked = showGridTitles,
-                            onCheckedChange = { enabled ->
-                                scope.launch { settingsRepository.appearance.setShowGridTitles(enabled) }
-                            }
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-                androidx.compose.material3.OutlinedButton(
-                    onClick = {
-                        showOptionsSheet = false
-                        showCreateFolderDialog = true
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(androidx.compose.material.icons.Icons.Rounded.Add, contentDescription = null)
-                    Spacer(Modifier.size(8.dp))
-                    Text("New Folder")
-                }
-                if (gridOrgState.folders.isNotEmpty()) {
-                    Spacer(Modifier.height(8.dp))
-                    androidx.compose.material3.OutlinedButton(
-                        onClick = {
-                            showOptionsSheet = false
-                            showOrganizeFoldersDialog = true
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Organize Folders")
-                    }
-                }
-                Spacer(Modifier.height(24.dp))
-            }
-        }
+            },
+            onNewFolder = { showCreateFolderDialog = true },
+            onOrganizeFolders = { showOrganizeFoldersDialog = true },
+            onDismiss = { showOptionsSheet = false }
+        )
     }
 
-    val screenWidthDp = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
     Scaffold(
         Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         contentWindowInsets = WindowInsets.statusBars,
@@ -359,7 +269,7 @@ fun HomeRoute(
                 actions = {
                     IconButton(onClick = { showCreateFolderDialog = true }) {
                         Icon(
-                            androidx.compose.material.icons.Icons.Rounded.CreateNewFolder,
+                            Icons.Rounded.CreateNewFolder,
                             contentDescription = "New folder"
                         )
                     }
@@ -382,46 +292,112 @@ fun HomeRoute(
             )
         }
     ) { inset ->
-            Box(
-                Modifier
-                    .padding(inset)
-                    .fillMaxSize()
-            ) {
-                PagerScaffold(
-                    subscriptionsPager,
-                    isEmpty = {
-                        InfoLayout(
-                            icon = Icons.Rounded.Podcasts,
-                            title = {
-                                stringResource(R.string.route_home_empty_title)
-                            },
-                            content = {
-                                Text(
-                                    text = stringResource(R.string.route_home_empty_text),
-                                    textAlign = TextAlign.Center
-                                )
+        Column(
+            Modifier
+                .padding(inset)
+                .fillMaxSize()
+        ) {
+            if (reorderMode) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Drag & drop to reorder podcasts",
+                            style = Typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        TextButton(onClick = { reorderMode = false }) {
+                            Text("Done")
+                        }
+                    }
+                }
+            }
 
-                                Spacer(Modifier.height(32.dp))
-
-                                Button(
-                                    onClick = {
-                                        onClickDiscover()
-                                    }
-                                ) {
-                                    Icon(
-                                        Icons.Rounded.Explore,
-                                        contentDescription = stringResource(R.string.route_discover),
-                                        modifier = Modifier.size(ButtonDefaults.IconSize),
-                                    )
-
-                                    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
-
-                                    Text(stringResource(R.string.route_discover))
-                                }
-                            }
+            if (allSubscriptions.isNotEmpty() && playerVm.queue.isNotEmpty()) {
+                ElevatedCard(
+                    onClick = onClickContinuePlaying,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.PlaylistPlay,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Up Next • ${playerVm.queue.size} queued",
+                            style = Typography.titleSmall,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "Continue",
+                            style = Typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
-                ) {
+                }
+            }
+
+            if (allSubscriptions.isEmpty()) {
+                InfoLayout(
+                    icon = Icons.Rounded.Podcasts,
+                    title = {
+                        stringResource(R.string.route_home_empty_title)
+                    },
+                    content = {
+                        Text(
+                            text = stringResource(R.string.route_home_empty_text),
+                            textAlign = TextAlign.Center
+                        )
+
+                        Spacer(Modifier.height(24.dp))
+
+                        Button(
+                            onClick = onClickDiscover,
+                            modifier = Modifier.fillMaxWidth(0.75f)
+                        ) {
+                            Icon(
+                                Icons.Rounded.Explore,
+                                contentDescription = stringResource(R.string.route_discover),
+                                modifier = Modifier.size(ButtonDefaults.IconSize),
+                            )
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            Text(stringResource(R.string.route_discover))
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+
+                        OutlinedButton(
+                            onClick = onClickAddPodcast,
+                            modifier = Modifier.fillMaxWidth(0.75f)
+                        ) {
+                            Icon(
+                                Icons.Rounded.RssFeed,
+                                contentDescription = null,
+                                modifier = Modifier.size(ButtonDefaults.IconSize),
+                            )
+                            Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                            Text("Add by RSS URL or OPML")
+                        }
+                    }
+                )
+            } else {
                     if(layout == SubscriptionsLayout.LIST) {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
@@ -511,7 +487,8 @@ fun HomeRoute(
                         LazyVerticalGrid(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .pointerInput(Unit) {
+                                .pointerInput(reorderMode) {
+                                    if (!reorderMode) return@pointerInput
                                     detectDragGesturesAfterLongPress(
                                         onDragStart = { offset ->
                                             val hit = gridState.layoutInfo.visibleItemsInfo.firstOrNull { item ->

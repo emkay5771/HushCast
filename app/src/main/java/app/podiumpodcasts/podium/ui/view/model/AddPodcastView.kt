@@ -311,13 +311,30 @@ fun AddPodcastView(
             }
 
             is AddPodcastState.Error -> Column(
-                Modifier.fillMaxSize(),
+                Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = state.reason
+                    text = "Couldn't load podcast feed",
+                    style = Typography.titleMedium,
+                    textAlign = TextAlign.Center
                 )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = state.reason.ifBlank { "Check the RSS URL and your network connection, then try again." },
+                    style = Typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = { vm.state = AddPodcastState.Idle() }
+                ) {
+                    Text(stringResource(R.string.common_action_retry))
+                }
             }
         }
     }

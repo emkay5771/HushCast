@@ -4,6 +4,7 @@ import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeModel
 import app.podiumpodcasts.podium.api.db.model.PodcastModel
 import app.podiumpodcasts.podium.ui.parseItunesDuration
 import app.podiumpodcasts.podium.ui.parsePubDate
+import app.podiumpodcasts.podium.utils.sha256
 import com.prof18.rssparser.model.RssChannel
 import com.prof18.rssparser.model.RssItem
 
@@ -20,7 +21,7 @@ fun RssChannel.toPodcast(
         author = itunesChannelData?.author ?: "",
         imageUrl = image?.url ?: "",
         imageSeedColor = oldPodcast?.imageSeedColor ?: 0,
-        languageCode = "unknown",
+        languageCode = "",
         fileSize = fileSize,
 
         overrideTitle = oldPodcast?.overrideTitle ?: "",
@@ -29,12 +30,21 @@ fun RssChannel.toPodcast(
     )
 }
 
+fun RssItem.computeEpisodeId(origin: String): String {
+    val stableKey = guid?.takeIf { it.isNotBlank() }
+        ?: audio?.takeIf { it.isNotBlank() }
+        ?: video?.takeIf { it.isNotBlank() }
+        ?: link?.takeIf { it.isNotBlank() }
+        ?: "${title.orEmpty()}|${pubDate.orEmpty()}".sha256()
+    return "$origin:$stableKey"
+}
+
 fun RssItem.toPodcastEpisode(
     podcast: PodcastModel,
     new: Boolean = false
 ): PodcastEpisodeModel {
     return PodcastEpisodeModel(
-        id = "${podcast.origin}:$guid",
+        id = computeEpisodeId(podcast.origin),
         guid = guid ?: "",
         origin = podcast.origin,
         link = link ?: "",

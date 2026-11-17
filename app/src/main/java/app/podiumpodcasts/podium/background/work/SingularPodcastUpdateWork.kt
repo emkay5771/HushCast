@@ -6,8 +6,10 @@ import app.podiumpodcasts.podium.api.db.model.PodcastModel
 import app.podiumpodcasts.podium.api.rss.FetchPodcastClient
 import app.podiumpodcasts.podium.api.rss.FetchPodcastClientResult
 import app.podiumpodcasts.podium.manager.DownloadManager
+import app.podiumpodcasts.podium.utils.rss.computeEpisodeId
 import app.podiumpodcasts.podium.utils.rss.toPodcast
 import app.podiumpodcasts.podium.utils.rss.toPodcastEpisode
+import java.util.concurrent.CancellationException
 
 class SingularPodcastUpdateWork(
     val context: Context,
@@ -18,41 +20,49 @@ class SingularPodcastUpdateWork(
 
     suspend fun doWork(
         oldPodcast: PodcastModel
-    ) {
-        val episodeIds = db.podcastEpisodes().getEpisodeIds(oldPodcast.origin)
+    ): Result<Int> {
+        return try {
+            val episodeIds = db.podcastEpisodes().getEpisodeIds(oldPodcast.origin).toHashSet()
+            val response = fetchPodcastClient.fetchNoCache(oldPodcast.origin)
 
-        val response = fetchPodcastClient.fetchNoCache(oldPodcast.origin)
-
-        if(response !is FetchPodcastClientResult.Success)
-            throw Exception(response.toString())
-
-        val podcast =
-            response.rssChannel.toPodcast(oldPodcast.origin, response.fileSize, oldPodcast)
-        db.podcasts().update(podcast)
-
-        val newEpisodes = response.rssChannel.items
-            .filter { !episodeIds.contains("${podcast.origin}:${it.guid}") }
-            .map { it.toPodcastEpisode(podcast = podcast, new = true) }
-
-        db.podcastEpisodes()
-            .insertAllAndUpdateNewEpisodesCount(
-                podcast.origin, *newEpisodes.toTypedArray()
-            )
-        newEpisodes.forEach {
-            db.podcastEpisodePlayStates().initState(it.id)
-        }
-
-        val subscription = db.podcastSubscriptions().getSync(podcast.origin)
-        if(subscription?.enableAutoDownload == true) newEpisodes.forEach {
-            try {
-                DownloadManager.downloadEpisode(context, db, it.id)
-            } catch(e: Exception) {
-                e.printStackTrace()
+            if (response !is FetchPodcastClientResult.Success) {
+                val err = (response as? FetchPodcastClientResult.Failure)?.e
+                    ?: Exception("Feed refresh failed")
+                return Result.failure(err)
             }
+
+            val podcast =
+                response.rssChannel.toPodcast(oldPodcast.origin, response.fileSize, oldPodcast)
+            db.podcasts().update(podcast)
+
+            val candidateEpisodes = response.rssChannel.items
+                .filter { !episodeIds.contains(it.computeEpisodeId(podcast.origin)) }
+                .map { it.toPodcastEpisode(podcast = podcast, new = true) }
+
+            val inserted = db.podcastEpisodes()
+                .insertAllAndUpdateNewEpisodesCount(
+                    podcast.origin, *candidateEpisodes.toTypedArray()
+                )
+
+            val subscription = db.podcastSubscriptions().getSync(podcast.origin)
+            if (subscription?.enableAutoDownload == true && inserted.isNotEmpty()) {
+                for (episode in inserted) {
+                    try {
+                        DownloadManager.downloadEpisode(context, db, episode.id)
+                    } catch (c: CancellationException) {
+                        throw c
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+
+            db.podcastSubscriptions().logUpdate(origin = podcast.origin)
+            Result.success(inserted.size)
+        } catch (c: CancellationException) {
+            throw c
+        } catch (e: Exception) {
+            Result.failure(e)
         }
-
-        db.podcastSubscriptions()
-            .logUpdate(origin = podcast.origin)
     }
-
 }

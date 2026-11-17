@@ -11,7 +11,26 @@ import app.podiumpodcasts.podium.R
 
 @OptIn(ExperimentalTextApi::class)
 fun googleSans() = FontFamily(
-    Font(R.font.google_sans_flex)
+    Font(
+        resId = R.font.google_sans_flex,
+        weight = FontWeight.Normal,
+        variationSettings = FontVariation.Settings(FontVariation.weight(400))
+    ),
+    Font(
+        resId = R.font.google_sans_flex,
+        weight = FontWeight.Medium,
+        variationSettings = FontVariation.Settings(FontVariation.weight(500))
+    ),
+    Font(
+        resId = R.font.google_sans_flex,
+        weight = FontWeight.SemiBold,
+        variationSettings = FontVariation.Settings(FontVariation.weight(600))
+    ),
+    Font(
+        resId = R.font.google_sans_flex,
+        weight = FontWeight.Bold,
+        variationSettings = FontVariation.Settings(FontVariation.weight(700))
+    )
 )
 
 @OptIn(ExperimentalTextApi::class)

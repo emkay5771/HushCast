@@ -287,4 +287,8 @@
     <string name="route_settings_synchronization_enable">Aktivieren</string>
     <string name="route_settings_synchronization_full_synchronize">Vollständige Synchronisation starten</string>
     <string name="route_settings_synchronization_last_synced">Letzter Sync: %1$s</string>
+    <string name="common_action_retry">Erneut versuchen</string>
+    <string name="route_up_next">Nächste Titel</string>
+    <string name="snackbar_marked_as_unplayed">Als ungespielt markiert</string>
+    <string name="common_error">Fehler</string>
 </resources>

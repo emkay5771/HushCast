@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +60,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -525,20 +528,27 @@ fun SyncedTranscriptCard(
                 muteWindows.filter { it.enabled }.sortedBy { it.startMs }
             }
             val activeRowIndex = remember(displayRows, currentPositionMs) {
-                val exact = displayRows.indexOfFirst { row ->
-                    when (row) {
-                        is TranscriptDisplayRow.ParagraphGroup -> currentPositionMs in row.startMs..row.endMs
-                        is TranscriptDisplayRow.SponsorGroup -> currentPositionMs in row.startMs..row.endMs
+                if (displayRows.isEmpty()) return@remember -1
+                var lo = 0
+                var hi = displayRows.lastIndex
+                var best = -1
+                while (lo <= hi) {
+                    val mid = (lo + hi) ushr 1
+                    val (s, e) = when (val row = displayRows[mid]) {
+                        is TranscriptDisplayRow.ParagraphGroup -> row.startMs to row.endMs
+                        is TranscriptDisplayRow.SponsorGroup -> row.startMs to row.endMs
+                    }
+                    if (currentPositionMs in s..e) {
+                        best = mid
+                        break
+                    } else if (currentPositionMs < s) {
+                        hi = mid - 1
+                    } else {
+                        best = mid
+                        lo = mid + 1
                     }
                 }
-                if (exact >= 0) exact
-                else displayRows.indexOfLast { row ->
-                    val s = when (row) {
-                        is TranscriptDisplayRow.ParagraphGroup -> row.startMs
-                        is TranscriptDisplayRow.SponsorGroup -> row.startMs
-                    }
-                    s <= currentPositionMs
-                }
+                best
             }
 
             val listState = rememberLazyListState(
@@ -547,11 +557,18 @@ fun SyncedTranscriptCard(
             val scope = rememberCoroutineScope()
             var followLive by remember { mutableStateOf(true) }
 
-            LaunchedEffect(listState.isScrollInProgress, activeRowIndex) {
-                if (listState.isScrollInProgress && activeRowIndex >= 0) {
-                    val visible = listState.layoutInfo.visibleItemsInfo.any { it.index == activeRowIndex }
-                    if (!visible) {
-                        followLive = false
+            val nestedScrollConnection = remember {
+                object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+                    override fun onPreScroll(
+                        available: Offset,
+                        source: androidx.compose.ui.input.nestedscroll.NestedScrollSource
+                    ): Offset {
+                        if (source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput &&
+                            kotlin.math.abs(available.y) > 2f
+                        ) {
+                            followLive = false
+                        }
+                        return Offset.Zero
                     }
                 }
             }
@@ -566,6 +583,7 @@ fun SyncedTranscriptCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f, fill = false)
+                    .nestedScroll(nestedScrollConnection)
             ) {
                 LazyColumn(
                     state = listState,
@@ -583,58 +601,34 @@ fun SyncedTranscriptCard(
                     ) { _, row ->
                         when (row) {
                             is TranscriptDisplayRow.SponsorGroup -> {
-                                var expanded by remember(row.startMs) { mutableStateOf(false) }
                                 val durSec = ((row.endMs - row.startMs) / 1000L).coerceAtLeast(1L)
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { expanded = !expanded }
-                                ) {
-                                    Column(modifier = Modifier.padding(12.dp)) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = "${row.displayLabel} (${durSec}s)",
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = MaterialTheme.colorScheme.onTertiaryContainer
-                                                )
-                                                Text(
-                                                    text = if (expanded) "Tap to collapse" else "Tap to expand",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
-                                                )
-                                            }
-                                            Spacer(Modifier.width(8.dp))
-                                            Button(
-                                                onClick = {
-                                                    if (onPlayAdSegment != null) {
-                                                        onPlayAdSegment(row.ad, row.startMs)
-                                                    } else {
-                                                        onSeekToMs(row.startMs)
-                                                    }
-                                                }
-                                            ) {
-                                                Text("Play", style = MaterialTheme.typography.labelSmall)
-                                            }
-                                        }
-                                        if (expanded) {
-                                            Spacer(Modifier.height(8.dp))
-                                            Text(
-                                                text = row.segments.joinToString(" ") { it.text.trim() },
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                                modifier = Modifier.clickable { onSeekToMs(row.startMs) }
-                                            )
-                                        }
-                                    }
+                                val durFormatted = if (durSec >= 60L) {
+                                    "%d:%02d".format(durSec / 60L, durSec % 60L)
+                                } else {
+                                    "${durSec}s"
                                 }
+                                AssistChip(
+                                    onClick = {
+                                        if (onPlayAdSegment != null) {
+                                            onPlayAdSegment(row.ad, row.startMs)
+                                        } else {
+                                            onSeekToMs(row.startMs)
+                                        }
+                                    },
+                                    label = {
+                                        Text(
+                                            text = "Sponsor skipped · $durFormatted",
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Rounded.SkipNext,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                )
                             }
 
                             is TranscriptDisplayRow.ParagraphGroup -> {
@@ -671,44 +665,94 @@ fun SyncedTranscriptCard(
                                             )
                                         }
                                         if (paragraphWords.isNotEmpty()) {
-                                            FlowRow(
-                                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                                            val errorColor = MaterialTheme.colorScheme.error
+                                            val errorContainer = MaterialTheme.colorScheme.errorContainer
+                                            val primaryColor = MaterialTheme.colorScheme.primary
+                                            val primaryContainer = MaterialTheme.colorScheme.primaryContainer
+                                            val normalColor = if (isActive) {
+                                                MaterialTheme.colorScheme.onSurface
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                                            }
+
+                                            val wordRanges = remember(paragraphWords) {
+                                                ArrayList<Triple<Int, Int, Word>>(paragraphWords.size)
+                                            }
+                                            val annotated = remember(
+                                                paragraphWords,
+                                                activeMuteWindows,
+                                                if (isActive) currentPositionMs / 100L else -1L,
+                                                normalColor
                                             ) {
-                                                paragraphWords.forEach { w ->
-                                                    val ws = (w.start * 1000.0).toLong()
-                                                    val we = (w.end * 1000.0).toLong()
-                                                    val isMuted = isWordInMuteWindows(ws, we, activeMuteWindows)
-                                                    val isSpokenNow = isActive && currentPositionMs in ws..we
-                                                    Surface(
-                                                        shape = RoundedCornerShape(6.dp),
-                                                        color = when {
-                                                            isMuted -> MaterialTheme.colorScheme.errorContainer
-                                                            isSpokenNow -> MaterialTheme.colorScheme.primary
-                                                            else -> Color.Transparent
-                                                        },
-                                                        modifier = Modifier.combinedClickable(
-                                                            onClick = { onSeekToMs(ws) },
-                                                            onLongClick = { onToggleWordMute(w, !isMuted) }
-                                                        )
-                                                    ) {
-                                                        Text(
-                                                            text = w.text.trim(),
-                                                            style = MaterialTheme.typography.bodyLarge.copy(
-                                                                fontWeight = if (isSpokenNow) FontWeight.SemiBold else FontWeight.Normal,
-                                                                textDecoration = if (isMuted) TextDecoration.LineThrough else TextDecoration.None
-                                                            ),
-                                                            color = when {
-                                                                isMuted -> MaterialTheme.colorScheme.onErrorContainer
-                                                                isSpokenNow -> MaterialTheme.colorScheme.onPrimary
-                                                                isActive -> MaterialTheme.colorScheme.onSurface
-                                                                else -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
-                                                            },
-                                                            modifier = Modifier.padding(horizontal = 2.dp, vertical = 1.dp)
-                                                        )
+                                                wordRanges.clear()
+                                                androidx.compose.ui.text.buildAnnotatedString {
+                                                    paragraphWords.forEachIndexed { idx, w ->
+                                                        val ws = (w.start * 1000.0).toLong()
+                                                        val we = (w.end * 1000.0).toLong()
+                                                        val isMuted = isWordInMuteWindows(ws, we, activeMuteWindows)
+                                                        val isSpokenNow = isActive && currentPositionMs in ws..we
+                                                        val startIdx = length
+                                                        val token = w.text.trim()
+                                                        if (isMuted || isSpokenNow) {
+                                                            pushStyle(
+                                                                androidx.compose.ui.text.SpanStyle(
+                                                                    color = if (isMuted) errorColor else primaryColor,
+                                                                    background = if (isMuted) errorContainer else primaryContainer,
+                                                                    fontWeight = if (isSpokenNow) FontWeight.Bold else FontWeight.Normal,
+                                                                    textDecoration = if (isMuted) TextDecoration.LineThrough else TextDecoration.None
+                                                                )
+                                                            )
+                                                            append(token)
+                                                            pop()
+                                                        } else {
+                                                            pushStyle(androidx.compose.ui.text.SpanStyle(color = normalColor))
+                                                            append(token)
+                                                            pop()
+                                                        }
+                                                        val endIdx = length
+                                                        wordRanges.add(Triple(startIdx, endIdx, w))
+                                                        if (idx < paragraphWords.lastIndex) append(" ")
                                                     }
                                                 }
                                             }
+
+                                            var textLayoutResult by remember {
+                                                mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null)
+                                            }
+
+                                            Text(
+                                                text = annotated,
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                onTextLayout = { textLayoutResult = it },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .pointerInput(paragraphWords, activeMuteWindows) {
+                                                        detectTapGestures(
+                                                            onTap = { pos ->
+                                                                val layout = textLayoutResult ?: return@detectTapGestures
+                                                                val offset = layout.getOffsetForPosition(pos)
+                                                                val hit = wordRanges.firstOrNull { (s, e, _) -> offset in s..e }
+                                                                if (hit != null) {
+                                                                    onSeekToMs((hit.third.start * 1000.0).toLong())
+                                                                } else {
+                                                                    onSeekToMs(row.startMs)
+                                                                }
+                                                            },
+                                                            onLongPress = { pos ->
+                                                                val layout = textLayoutResult ?: return@detectTapGestures
+                                                                val offset = layout.getOffsetForPosition(pos)
+                                                                val hit = wordRanges.firstOrNull { (s, e, _) -> offset in s..e }
+                                                                if (hit != null) {
+                                                                    val w = hit.third
+                                                                    val ws = (w.start * 1000.0).toLong()
+                                                                    val we = (w.end * 1000.0).toLong()
+                                                                    val isMuted = isWordInMuteWindows(ws, we, activeMuteWindows)
+                                                                    onToggleWordMute(w, !isMuted)
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                            )
                                         } else {
                                             Text(
                                                 text = row.segments.joinToString(" ") { it.text.trim() },
@@ -745,7 +789,7 @@ fun SyncedTranscriptCard(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(Modifier.width(6.dp))
-                        Text("Catch up to live", style = MaterialTheme.typography.labelMedium)
+                        Text("Follow playback", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }

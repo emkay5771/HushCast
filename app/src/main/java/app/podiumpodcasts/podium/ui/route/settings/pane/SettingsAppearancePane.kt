@@ -36,7 +36,7 @@ import app.podiumpodcasts.podium.ui.vm.SettingsViewModel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
-@SuppressLint("ParcelCreator")
+@kotlinx.parcelize.Parcelize
 @Serializable
 class SettingsAppearanceKey : SettingsPaneKey()
 

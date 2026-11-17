@@ -38,11 +38,14 @@ interface PodcastEpisodeDownloadDao {
     suspend fun getSync(episodeId: String): PodcastEpisodeDownloadModel?
 
     @Transaction
-    @Query("SELECT * FROM podcastEpisodeDownload WHERE timestamp<:timestamp")
-    suspend fun getOlderThanSync(timestamp: Long): List<PodcastEpisodeDownloadBundle>
+    @Query("SELECT * FROM podcastEpisodeDownload WHERE state = :downloadedStateValue AND timestamp > 0 AND timestamp < :timestamp")
+    suspend fun getOlderThanSync(
+        timestamp: Long,
+        downloadedStateValue: Int = PodcastEpisodeDownloadState.DOWNLOADED.value
+    ): List<PodcastEpisodeDownloadBundle>
 
-    @Query("SELECT SUM(size) FROM podcastEpisodeDownload")
-    fun totalSize(): Flow<Long>
+    @Query("SELECT SUM(size) FROM podcastEpisodeDownload WHERE state = :downloadedStateValue")
+    fun totalSize(downloadedStateValue: Int = PodcastEpisodeDownloadState.DOWNLOADED.value): Flow<Long>
 
     @Query("INSERT INTO podcastEpisodeDownload (episodeId,state,progress,size,timestamp) VALUES (:episodeId,0,0,0,0)")
     suspend fun add(episodeId: String)
@@ -50,13 +53,11 @@ interface PodcastEpisodeDownloadDao {
     @Query("UPDATE podcastEpisodeDownload SET state=:stateValue WHERE episodeId=:episodeId")
     suspend fun setState(episodeId: String, stateValue: Int)
 
-    @Query("UPDATE podcastEpisodeDownload SET progress=:progress,size=:size WHERE episodeId=:episodeId")
-    fun setProgress(episodeId: String, progress: Long, size: Long)
-
-    @Query("UPDATE podcastEpisodeDownload SET state=2, filename=:filename, timestamp=:timestamp WHERE episodeId=:episodeId")
+    @Query("UPDATE podcastEpisodeDownload SET state=2, filename=:filename, size=:size, progress=:size, timestamp=:timestamp WHERE episodeId=:episodeId")
     suspend fun registerDownload(
         episodeId: String,
         filename: String,
+        size: Long = 0L,
         timestamp: Long = System.currentTimeMillis()
     )
 

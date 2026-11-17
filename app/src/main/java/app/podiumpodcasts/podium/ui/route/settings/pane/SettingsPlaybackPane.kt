@@ -41,7 +41,7 @@ import app.podiumpodcasts.podium.ui.vm.SettingsViewModel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
-@SuppressLint("ParcelCreator")
+@kotlinx.parcelize.Parcelize
 @Serializable
 class SettingsPlaybackKey : SettingsPaneKey()
 
@@ -200,7 +200,7 @@ fun SettingsPlaybackPane(
 
             item {
                 val swipeRightAction = vm.repository.behavior.episodeSwipeRightAction.collectAsState(
-                    app.podiumpodcasts.podium.EpisodeSwipeAction.HEAR_LATER
+                    app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
                 )
                 val showPicker = remember { mutableStateOf(false) }
 
@@ -215,7 +215,7 @@ fun SettingsPlaybackPane(
                     description = swipeRightAction.value.label,
                     onClick = { showPicker.value = true },
                     index = 4,
-                    count = 6
+                    count = 8
                 )
 
                 if (showPicker.value) {
@@ -250,7 +250,7 @@ fun SettingsPlaybackPane(
                     description = swipeLeftAction.value.label,
                     onClick = { showPicker.value = true },
                     index = 5,
-                    count = 6
+                    count = 8
                 )
 
                 if (showPicker.value) {
@@ -264,6 +264,120 @@ fun SettingsPlaybackPane(
                             }
                         },
                         onDismiss = { showPicker.value = false }
+                    )
+                }
+            }
+
+            item {
+                val headsetNext = vm.repository.behavior.headsetNextAction.collectAsState(
+                    app.podiumpodcasts.podium.HeadsetNextAction.SKIP_FORWARD
+                )
+                val showPicker = remember { mutableStateOf(false) }
+
+                app.podiumpodcasts.podium.ui.component.settings.SettingsListItem(
+                    icon = {
+                        Icon(
+                            Icons.Rounded.Forward,
+                            "Headset Next button"
+                        )
+                    },
+                    label = "Headset Next button",
+                    description = headsetNext.value.label,
+                    onClick = { showPicker.value = true },
+                    index = 6,
+                    count = 8
+                )
+
+                if (showPicker.value) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { showPicker.value = false },
+                        title = { Text("Headset Next button") },
+                        text = {
+                            androidx.compose.foundation.layout.Column {
+                                app.podiumpodcasts.podium.HeadsetNextAction.entries.forEach { action ->
+                                    androidx.compose.foundation.layout.Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                showPicker.value = false
+                                                scope.launch { vm.repository.behavior.setHeadsetNextAction(action) }
+                                            }
+                                            .padding(vertical = 8.dp),
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                                    ) {
+                                        androidx.compose.material3.RadioButton(
+                                            selected = action == headsetNext.value,
+                                            onClick = {
+                                                showPicker.value = false
+                                                scope.launch { vm.repository.behavior.setHeadsetNextAction(action) }
+                                            }
+                                        )
+                                        Text(action.label, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {},
+                        dismissButton = {
+                            androidx.compose.material3.TextButton(onClick = { showPicker.value = false }) { Text("Cancel") }
+                        }
+                    )
+                }
+            }
+
+            item {
+                val headsetPrev = vm.repository.behavior.headsetPrevAction.collectAsState(
+                    app.podiumpodcasts.podium.HeadsetPrevAction.SKIP_BACK
+                )
+                val showPicker = remember { mutableStateOf(false) }
+
+                app.podiumpodcasts.podium.ui.component.settings.SettingsListItem(
+                    icon = {
+                        Icon(
+                            Icons.Rounded.Replay,
+                            "Headset Previous button"
+                        )
+                    },
+                    label = "Headset Previous button",
+                    description = headsetPrev.value.label,
+                    onClick = { showPicker.value = true },
+                    index = 7,
+                    count = 8
+                )
+
+                if (showPicker.value) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { showPicker.value = false },
+                        title = { Text("Headset Previous button") },
+                        text = {
+                            androidx.compose.foundation.layout.Column {
+                                app.podiumpodcasts.podium.HeadsetPrevAction.entries.forEach { action ->
+                                    androidx.compose.foundation.layout.Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable {
+                                                showPicker.value = false
+                                                scope.launch { vm.repository.behavior.setHeadsetPrevAction(action) }
+                                            }
+                                            .padding(vertical = 8.dp),
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                                    ) {
+                                        androidx.compose.material3.RadioButton(
+                                            selected = action == headsetPrev.value,
+                                            onClick = {
+                                                showPicker.value = false
+                                                scope.launch { vm.repository.behavior.setHeadsetPrevAction(action) }
+                                            }
+                                        )
+                                        Text(action.label, style = androidx.compose.material3.MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
+                            }
+                        },
+                        confirmButton = {},
+                        dismissButton = {
+                            androidx.compose.material3.TextButton(onClick = { showPicker.value = false }) { Text("Cancel") }
+                        }
                     )
                 }
             }

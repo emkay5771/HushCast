@@ -301,6 +301,25 @@ fun PodcastEpisodeDetailView(
                                     showSaveToList = true
                                 }
                             )
+                            DropdownMenuItem(
+                                text = { Text("Process with HushCast") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    downloadScope.launch {
+                                        app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                            context = downloadContext,
+                                            db = downloadDb,
+                                            episodeId = episode.id,
+                                            downloadMethod = if (hasDesktopUrl) {
+                                                app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
+                                            } else {
+                                                app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
+                                            },
+                                            forceReprocess = isAlreadyDownloaded
+                                        )
+                                    }
+                                }
+                            )
                             if (hasDesktopUrl) {
                                 DropdownMenuItem(
                                     text = {

@@ -1,15 +1,11 @@
 package app.podiumpodcasts.podium.background
 
 import android.content.Context
-import android.content.Intent
 import android.os.Bundle
-import android.view.KeyEvent
-import androidx.core.content.IntentCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService
@@ -17,21 +13,23 @@ import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
+import app.podiumpodcasts.podium.HeadsetNextAction
+import app.podiumpodcasts.podium.HeadsetPrevAction
 import app.podiumpodcasts.podium.R
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.guava.future
-import kotlinx.coroutines.plus
 
 enum class LibraryTabs(
     val id: String,
     val titleId: Int
 ) {
+    UP_NEXT("tab:up_next", R.string.route_up_next),
     CONTINUE_PLAYING("tab:continue_playing", R.string.route_continue_playing),
     NEW_EPISODES("tab:new_episodes", R.string.route_new_episodes),
     SUBSCRIPTIONS("tab:subscriptions", R.string.route_subscriptions),
@@ -59,7 +57,12 @@ class MediaLibrarySessionCallback(
     val service: PlaybackService
 ) : MediaLibrarySession.Callback {
 
-    private val scope = CoroutineScope(Dispatchers.Main) + Job()
+    private val job = SupervisorJob()
+    private val scope = CoroutineScope(Dispatchers.Main + job)
+
+    fun destroy() {
+        job.cancel()
+    }
 
     override fun onConnect(
         session: MediaSession,
@@ -88,15 +91,13 @@ class MediaLibrarySessionCallback(
         customCommand: SessionCommand,
         args: Bundle
     ): ListenableFuture<SessionResult> {
-        when(customCommand.customAction) {
+        when (customCommand.customAction) {
 
             COMMAND_SLEEP_TIMER_SET -> {
                 val trigger = customCommand.customExtras.getLong("trigger")
 
-                if(trigger != 0L) {
-                    service.startSleepTimer(
-                        trigger = trigger
-                    )
+                if (trigger != 0L) {
+                    service.startSleepTimer(trigger = trigger)
                 } else {
                     service.stopSleepTimer()
                 }
@@ -118,11 +119,8 @@ class MediaLibrarySessionCallback(
 
             COMMAND_CYCLE_SPEED -> {
                 val currentSpeed = session.player.playbackParameters.speed
-                val nextSpeed = when {
-                    currentSpeed < 1.5f -> 1.5f
-                    currentSpeed < 2.0f -> 2.0f
-                    else -> 1.0f
-                }
+                val presets = service.speedPresets.sorted()
+                val nextSpeed = presets.firstOrNull { it > currentSpeed + 0.01f } ?: presets.firstOrNull() ?: 1.0f
                 session.player.setPlaybackSpeed(nextSpeed)
 
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -130,7 +128,7 @@ class MediaLibrarySessionCallback(
 
             COMMAND_SET_SEEK_BACK_INCREMENT -> {
                 val increment = customCommand.customExtras.getLong("increment")
-                (session.player as? ExoPlayer)?.setSeekBackIncrementMs(increment)
+                service.updateSeekBackIncrement(increment)
 
                 return Futures.immediateFuture(
                     SessionResult(SessionResult.RESULT_SUCCESS)
@@ -139,7 +137,7 @@ class MediaLibrarySessionCallback(
 
             COMMAND_SET_SEEK_FORWARD_INCREMENT -> {
                 val increment = customCommand.customExtras.getLong("increment")
-                (session.player as? ExoPlayer)?.setSeekForwardIncrementMs(increment)
+                service.updateSeekForwardIncrement(increment)
 
                 return Futures.immediateFuture(
                     SessionResult(SessionResult.RESULT_SUCCESS)
@@ -147,53 +145,18 @@ class MediaLibrarySessionCallback(
             }
 
             else -> return super.onCustomCommand(session, controller, customCommand, args)
-
         }
     }
 
-    /**
-     * Remap skip backward and skip forward to seek back and seek forward
-     * To allow seeking using headphone buttons for example
-     */
-    override fun onMediaButtonEvent(
-        session: MediaSession,
-        controllerInfo: MediaSession.ControllerInfo,
-        intent: Intent
-    ): Boolean {
-        IntentCompat.getParcelableExtra(intent, Intent.EXTRA_KEY_EVENT, KeyEvent::class.java)
-            ?.let { keyEvent ->
-                if(keyEvent.action != KeyEvent.ACTION_UP) return@let
-
-                when(keyEvent.keyCode) {
-                    KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD,
-                    KeyEvent.KEYCODE_MEDIA_PREVIOUS -> {
-                        return true
-                    }
-
-                    KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD,
-                    KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                        session.player.seekForward()
-                        return true
-                    }
-                }
-            }
-
-        return super.onMediaButtonEvent(session, controllerInfo, intent)
-    }
-
-    /**
-     * Remap COMMAND_SEEK_TO_PREVIOUS and COMMAND_SEEK_TO_NEXT to seek back and seek forward
-     * To allow seeking using headphone buttons for example
-     */
     override fun onPlayerCommandRequest(
         session: MediaSession,
         controller: MediaSession.ControllerInfo,
         playerCommand: Int
     ): Int {
-        if(playerCommand == Player.COMMAND_SEEK_TO_PREVIOUS) {
+        if (playerCommand == Player.COMMAND_SEEK_TO_PREVIOUS && service.headsetPrevAction == HeadsetPrevAction.SKIP_BACK) {
             session.player.seekBack()
             return SessionResult.RESULT_INFO_SKIPPED
-        } else if(playerCommand == Player.COMMAND_SEEK_TO_NEXT) {
+        } else if (playerCommand == Player.COMMAND_SEEK_TO_NEXT && service.headsetNextAction == HeadsetNextAction.SKIP_FORWARD) {
             session.player.seekForward()
             return SessionResult.RESULT_INFO_SKIPPED
         }
@@ -201,20 +164,55 @@ class MediaLibrarySessionCallback(
         return super.onPlayerCommandRequest(session, controller, playerCommand)
     }
 
+    override fun onPlaybackResumption(
+        mediaSession: MediaSession,
+        controller: MediaSession.ControllerInfo
+    ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+        return scope.future(Dispatchers.IO) {
+            val queued = service.db.playbackQueue().getQueueSync()
+            val lastHistory = service.db.podcastHistory().getLast().first()
+            val lastId = lastHistory?.episode?.id ?: queued.firstOrNull()?.episodeId
+
+            val items = mutableListOf<MediaItem>()
+            var startPositionMs = 0L
+
+            if (lastId != null) {
+                val bundle = service.db.podcastEpisodes().getSyncNullable(lastId)
+                if (bundle != null) {
+                    startPositionMs = ((bundle.playState?.state ?: 0) * 1000L).coerceAtLeast(0L)
+                    items.add(bundle.createMediaItem(service))
+                }
+            }
+
+            for (q in queued) {
+                if (q.episodeId == lastId) continue
+                val bundle = service.db.podcastEpisodes().getSyncNullable(q.episodeId) ?: continue
+                items.add(bundle.createMediaItem(service))
+            }
+
+            if (items.isEmpty()) {
+                throw UnsupportedOperationException("No episode to resume")
+            }
+
+            MediaSession.MediaItemsWithStartPosition(items, 0, startPositionMs)
+        }
+    }
+
     override fun onGetLibraryRoot(
         session: MediaLibrarySession,
         browser: MediaSession.ControllerInfo,
         params: MediaLibraryService.LibraryParams?
     ): ListenableFuture<LibraryResult<MediaItem>> {
-        val extras = Bundle()
-        extras.putInt(
-            MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE,
-            MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM
-        )
-        extras.putInt(
-            MediaConstants.EXTRAS_KEY_CONTENT_STYLE_PLAYABLE,
-            MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_CATEGORY_LIST_ITEM
-        )
+        val extras = Bundle().apply {
+            putInt(
+                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE,
+                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM
+            )
+            putInt(
+                MediaConstants.EXTRAS_KEY_CONTENT_STYLE_PLAYABLE,
+                MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_CATEGORY_LIST_ITEM
+            )
+        }
 
         return Futures.immediateFuture(
             LibraryResult.ofItem(
@@ -244,11 +242,18 @@ class MediaLibrarySessionCallback(
         params: MediaLibraryService.LibraryParams?
     ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
         return scope.future(Dispatchers.IO) {
-            val items = when(parentId) {
+            val items = when (parentId) {
                 "root" -> {
-                    LibraryTabs.entries.map {
-                        it.toMediaItem(service)
-                    }
+                    LibraryTabs.entries.map { it.toMediaItem(service) }
+                }
+
+                LibraryTabs.UP_NEXT.id -> {
+                    service.db.playbackQueue().getQueueSync()
+                        .drop(page * pageSize)
+                        .take(pageSize)
+                        .mapNotNull { q ->
+                            service.db.podcastEpisodes().getSyncNullable(q.episodeId)?.createMediaItem(service)
+                        }
                 }
 
                 LibraryTabs.CONTINUE_PLAYING.id -> {
@@ -276,14 +281,13 @@ class MediaLibrarySessionCallback(
                 }
 
                 else -> {
-                    if(parentId.startsWith("podcast:")) {
+                    if (parentId.startsWith("podcast:")) {
                         val origin = parentId.removePrefix("podcast:")
-
                         service.db.podcastEpisodes()
                             .get(origin = origin, offset = page * pageSize, limit = pageSize)
                             .map { it.createMediaItem(service) }
                     } else {
-                        listOf()
+                        emptyList()
                     }
                 }
             }
@@ -298,14 +302,12 @@ class MediaLibrarySessionCallback(
         mediaItems: List<MediaItem>
     ): ListenableFuture<List<MediaItem>> {
         return scope.future(Dispatchers.IO) {
-            mediaItems.map { item ->
-                if(item.localConfiguration != null) return@map item
-                if(!item.mediaId.startsWith("episode:")) return@map item
+            mediaItems.mapNotNull { item ->
+                if (item.localConfiguration != null) return@mapNotNull item
+                if (!item.mediaId.startsWith("episode:")) return@mapNotNull item
 
                 val episodeId = item.mediaId.replaceFirst("episode:", "")
-                val bundle = service.db.podcastEpisodes().get(episodeId).first()
-
-                bundle.createMediaItem(service)
+                service.db.podcastEpisodes().getNullable(episodeId).first()?.createMediaItem(service)
             }
         }
     }
@@ -318,17 +320,16 @@ class MediaLibrarySessionCallback(
         startPositionMs: Long
     ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
         return scope.future(Dispatchers.IO) {
+            val resolved = mediaItems.mapNotNull { item ->
+                if (item.localConfiguration != null) return@mapNotNull item
+                if (!item.mediaId.startsWith("episode:")) return@mapNotNull item
+
+                val episodeId = item.mediaId.replaceFirst("episode:", "")
+                service.db.podcastEpisodes().getNullable(episodeId).first()?.createMediaItem(service)
+            }
             MediaSession.MediaItemsWithStartPosition(
-                mediaItems.map { item ->
-                    if(item.localConfiguration != null) return@map item
-                    if(!item.mediaId.startsWith("episode:")) return@map item
-
-                    val episodeId = item.mediaId.replaceFirst("episode:", "")
-                    val bundle = service.db.podcastEpisodes().get(episodeId).first()
-
-                    bundle.createMediaItem(service)
-                },
-                startIndex,
+                resolved,
+                startIndex.coerceIn(0, (resolved.size - 1).coerceAtLeast(0)),
                 startPositionMs
             )
         }

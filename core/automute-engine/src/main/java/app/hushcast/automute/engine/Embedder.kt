@@ -5,7 +5,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Text embeddings: Qwen3-Embedding-0.6B (Q8_0 GGUF) through llama.cpp.
+ * Text embeddings: Qwen3-Embedding-0.6B (q4_k_m GGUF) through llama.cpp.
  */
 class Embedder(modelPath: String, threads: Int = defaultThreads()) : AutoCloseable {
     private var handle = LlamaJni.load(modelPath, threads)
@@ -45,8 +45,9 @@ class Embedder(modelPath: String, threads: Int = defaultThreads()) : AutoCloseab
     }
 
     companion object {
-        const val MODEL_URL = "https://huggingface.co/dengcao/Qwen3-Embedding-0.6B-GGUF/resolve/main/Qwen3-Embedding-0.6B-q4_k_m.gguf"
-        val MODEL_SHA256: String? = null
+        const val MODEL_URL = "https://huggingface.co/dengcao/Qwen3-Embedding-0.6B-GGUF/resolve/999d5dcd1517b8812c32bde18bd674cff6d267fe/Qwen3-Embedding-0.6B-q4_k_m.gguf"
+        const val MODEL_SHA256 = "c608745221a03d45ee7328aab5ae180ef5db54c9a47eda43ef05f73156ba824b"
+        const val MODEL_SIZE = 394_704_832L
         const val MAX_CHARS = 2000
 
         fun input(text: String): String {

@@ -28,11 +28,10 @@ class NewPodcastEpisodeNotification(
         return NotificationChannel(
             channelId(),
             context.getString(R.string.notifications_new_podcast_episodes_channel_name),
-            NotificationManager.IMPORTANCE_HIGH
+            NotificationManager.IMPORTANCE_DEFAULT
         ).apply {
             description =
                 context.getString(R.string.notifications_new_podcast_episodes_channel_description)
-            enableVibration(true)
         }
     }
 
@@ -55,17 +54,29 @@ class NewPodcastEpisodeNotification(
             )
             .setContentText(episode.title)
             .setGroup(channelId())
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(deepLink.asPendingIntent(context, notificationId()))
             .setAutoCancel(true)
 
-        if(imageBitmap != null)
-            builder.setLargeIcon(imageBitmap)
-
+        postGroupSummary(context)
         return builder.build()
     }
 
+    private fun postGroupSummary(context: Context) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val summary = NotificationCompat.Builder(context, channelId())
+            .setSmallIcon(R.drawable.ic_notification_icon)
+            .setContentTitle(context.getString(R.string.notifications_new_podcast_episodes_channel_name))
+            .setGroup(channelId())
+            .setGroupSummary(true)
+            .setAutoCancel(true)
+            .build()
+        manager.notify(GROUP_SUMMARY_ID, summary)
+    }
+
     companion object {
+        private const val GROUP_SUMMARY_ID = 42001
+
         fun cancel(context: Context, episodeId: String) {
             cancel(context, episodeId.hashCode())
         }

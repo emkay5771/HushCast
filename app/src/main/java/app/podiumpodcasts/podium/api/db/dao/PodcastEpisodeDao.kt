@@ -132,7 +132,15 @@ interface PodcastEpisodeDao {
 
     @Transaction
     @Query("SELECT * FROM podcastEpisode WHERE id=:id")
+    fun getNullable(id: String): Flow<PodcastEpisodeBundle?>
+
+    @Transaction
+    @Query("SELECT * FROM podcastEpisode WHERE id=:id")
     suspend fun getSync(id: String): PodcastEpisodeBundle
+
+    @Transaction
+    @Query("SELECT * FROM podcastEpisode WHERE id=:id")
+    suspend fun getSyncNullable(id: String): PodcastEpisodeBundle?
 
     @Transaction
     @Query("SELECT * FROM podcastEpisode WHERE origin=:origin AND audioUrl=:audioUrl")
@@ -169,25 +177,44 @@ interface PodcastEpisodeDao {
     suspend fun insertAllAndUpdateNewEpisodesCount(
         origin: String,
         vararg episodes: PodcastEpisodeModel
-    ) {
-        _insertAll(*episodes)
-        _updateNewEpisodesCount(origin)
+    ): List<PodcastEpisodeModel> {
+        val unique = episodes.distinctBy { it.id }
+        if (unique.isEmpty()) return emptyList()
+        val rowIds = _insertAll(*unique.toTypedArray())
+        val inserted = unique.filterIndexed { index, _ -> rowIds.getOrElse(index) { -1L } != -1L }
+        if (inserted.isNotEmpty()) {
+            _initPlayStates(inserted.map { PodcastEpisodePlayStateModel(episodeId = it.id) })
+            _updateNewEpisodesCount(origin)
+        }
+        return inserted
     }
 
     @Update
     suspend fun update(episode: PodcastEpisodeModel)
 
+    @Query("UPDATE podcastEpisode SET duration = :durationSec WHERE id = :id AND (duration <= 0 OR duration != :durationSec)")
+    suspend fun updateDuration(id: String, durationSec: Int)
+
     @Query("DELETE FROM podcastEpisode WHERE id=:id")
     suspend fun delete(id: String)
 
-    @Insert
-    suspend fun _insertAll(vararg episodes: PodcastEpisodeModel)
+    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.IGNORE)
+    suspend fun _insertAll(vararg episodes: PodcastEpisodeModel): List<Long>
+
+    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.IGNORE)
+    suspend fun _initPlayStates(states: List<PodcastEpisodePlayStateModel>)
 
     @Query("UPDATE podcastEpisode SET new=1 WHERE id=:id")
     suspend fun _new(id: String)
 
     @Query("UPDATE podcastEpisode SET new=0 WHERE id=:id")
     suspend fun _unnew(id: String)
+
+    @Query("UPDATE podcastEpisode SET new=0 WHERE origin=:origin")
+    suspend fun markAllSeenByOrigin(origin: String)
+
+    @Query("UPDATE podcastEpisode SET new=0")
+    suspend fun markAllSeen()
 
     @Query(
         """

@@ -58,24 +58,24 @@ _base_image = (
     .apt_install("ffmpeg", "cmake", "build-essential", "git", "curl")
     .env({
         "GGML_CUDA": "1",
-        "CMAKE_ARGS": "-DGGML_CUDA=1 -DCMAKE_CUDA_ARCHITECTURES=75;80;86;89",
+        "CMAKE_ARGS": "-DGGML_CUDA=1 -DCMAKE_CUDA_ARCHITECTURES=75",
     })
     .pip_install(
-        "fastapi>=0.115.0",
-        "uvicorn[standard]>=0.30.0",
-        "httpx>=0.27.0",
-        "pydantic>=2.7.0",
-        "zeroconf>=0.132.0",
-        "numpy>=1.26.0",
-        "onnxruntime-gpu>=1.19.0",
-        "av>=12.0.0",
+        "fastapi==0.115.12",
+        "uvicorn[standard]==0.34.2",
+        "httpx==0.28.1",
+        "pydantic==2.11.3",
+        "zeroconf==0.146.5",
+        "numpy==2.2.5",
+        "onnxruntime-gpu==1.20.1",
+        "av==14.3.0",
     )
     .pip_install(
-        "pywhispercpp>=1.2.0",
+        "pywhispercpp==1.3.0",
         extra_options="--no-binary pywhispercpp",
     )
     .pip_install(
-        "llama-cpp-python>=0.3.0",
+        "llama-cpp-python==0.3.8",
         extra_options="--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124",
     )
     .run_commands(
@@ -120,7 +120,7 @@ def _ensure_models() -> None:
             with tmp.open("wb") as f:
                 for chunk in resp.iter_bytes(chunk_size=1024 * 1024):
                     f.write(chunk)
-        tmp.replace(dest)
+        os.replace(tmp, dest)
         print(f"Saved {dest} ({dest.stat().st_size / (1024 * 1024):.1f} MB)")
 
 
@@ -152,19 +152,32 @@ def fastapi_app():
     from hushcast_worker.server import create_app
     from hushcast_worker.storage import WorkerCache
 
+    token = (os.environ.get("HUSHCAST_WORKER_TOKEN") or "").strip()
+    if not token:
+        raise RuntimeError(
+            "HUSHCAST_WORKER_TOKEN secret is empty or missing. "
+            "Run: modal secret create hushcast-token HUSHCAST_WORKER_TOKEN=<token>"
+        )
+
     _ensure_models()
     cache = WorkerCache(CACHE_DIR)
     backend = LocalMlBackend(MODELS_DIR)
-    token = os.environ.get("HUSHCAST_WORKER_TOKEN") or None
-    return create_app(cache=cache, backend=backend, token=token)
+    return create_app(
+        cache=cache,
+        backend=backend,
+        token=token,
+        allow_lan_feeds=False,
+        public_deployment=True,
+        on_state_change=volume.commit,
+    )
 
 
 @app.local_entrypoint()
 def pair_qr(url: str, token: str = "") -> None:
     """Print a scannable hushcast://pair QR code for your deployed Modal URL."""
-    from hushcast_worker.cli import print_pairing_qr
+    from hushcast_worker.pairing import print_pairing_qr
 
-    print(f"HushCast Modal Worker")
+    print("HushCast Modal Worker")
     print(f"  URL:           {url.strip()}")
     if token:
         print(f"  Pairing Token: {token}")

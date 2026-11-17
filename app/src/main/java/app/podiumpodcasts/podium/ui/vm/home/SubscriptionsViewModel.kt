@@ -2,8 +2,10 @@ package app.podiumpodcasts.podium.ui.vm.home
 
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import androidx.paging.Pager
 import androidx.paging.PagingConfig
+import androidx.paging.cachedIn
 import app.podiumpodcasts.podium.api.db.AppDatabase
 
 class SubscriptionsViewModel(
@@ -11,6 +13,8 @@ class SubscriptionsViewModel(
 ) : ViewModel() {
 
     val lazyGridState = LazyGridState()
+
+    val subscriptionsFlow = db.podcastSubscriptions().allByNewEpisodesFlow()
 
     val subscriptions = Pager(
         PagingConfig(
@@ -20,6 +24,6 @@ class SubscriptionsViewModel(
         )
     ) {
         db.podcastSubscriptions().allByNewEpisodes()
-    }.flow
+    }.flow.cachedIn(viewModelScope)
 
 }

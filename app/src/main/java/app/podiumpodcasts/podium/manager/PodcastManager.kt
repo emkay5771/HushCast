@@ -59,8 +59,10 @@ class PodcastManager(
         episodes.forEach { it.imageSeedColor = podcast.imageSeedColor }
 
         db.podcasts().insertAll(podcast)
-        db.podcastEpisodes()._insertAll(*episodes.toTypedArray())
-        episodes.forEach { db.podcastEpisodePlayStates().initState(it.id) }
+        db.podcastEpisodes().insertAllAndUpdateNewEpisodesCount(
+            podcast.origin,
+            *episodes.toTypedArray()
+        )
         db.podcastSubscriptions().subscribe(podcast.origin)
 
         return AddPodcastResult.Created(

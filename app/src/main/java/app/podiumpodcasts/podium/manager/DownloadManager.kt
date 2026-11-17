@@ -31,8 +31,14 @@ class DownloadManager {
             downloadMethod: app.hushcast.automute.engine.DownloadAnalysisMethod? = null,
             forceReprocess: Boolean = false
         ) {
-            if(db.podcastEpisodeDownloads().getSync(episodeId) == null) {
+            val existing = db.podcastEpisodeDownloads().getSync(episodeId)
+            if (existing == null) {
                 db.podcastEpisodeDownloads().add(episodeId)
+            } else if (existing.state == app.podiumpodcasts.podium.api.db.model.PodcastEpisodeDownloadState.FAILED.value) {
+                db.podcastEpisodeDownloads().setState(
+                    episodeId,
+                    app.podiumpodcasts.podium.api.db.model.PodcastEpisodeDownloadState.NOT_DOWNLOADED.value
+                )
             }
 
             PodcastEpisodeDownloadWorker.enqueueDownload(
@@ -50,7 +56,11 @@ class DownloadManager {
             episode: PodcastEpisodeModel
         ) {
             val downloadFile = episode.craftDownloadFile(context)
-            if(downloadFile.exists()) downloadFile.delete()
+            if (downloadFile.exists()) downloadFile.delete()
+            val partFile = File(downloadFile.parentFile, "${downloadFile.name}.part")
+            if (partFile.exists()) partFile.delete()
+            val metaFile = File(downloadFile.parentFile, "${partFile.name}.meta")
+            if (metaFile.exists()) metaFile.delete()
 
             PodcastEpisodeDownloadWorker.stopDownload(
                 context = context,
@@ -63,7 +73,7 @@ class DownloadManager {
             runCatching {
                 app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
                     .dao()
-                    .clearAnalysisForEpisode(episode.id)
+                    .resetEpisodeStatusOnly(episode.id)
             }
         }
 

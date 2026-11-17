@@ -101,6 +101,8 @@ fun SettingsRoute(
     }
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val debugUnlocked = remember { androidx.compose.runtime.mutableStateOf(app.podiumpodcasts.podium.BuildConfig.DEBUG) }
+    val versionTapCount = remember { androidx.compose.runtime.mutableIntStateOf(0) }
 
     Scaffold(
         Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -142,7 +144,7 @@ fun SettingsRoute(
                         )
                     },
                     label = "Auto-Mute & Ad-Skip",
-                    description = "On-device AI models, muted words dictionary, ad blocker & diagnostics",
+                    description = "Word muting, sponsor skipping, models & desktop worker",
                     index = 0,
                     count = 1,
                     onClick = {
@@ -179,7 +181,13 @@ fun SettingsRoute(
                     count = 3,
 
                     onClick = {
-                        uriHandler.openUri(GITHUB_LINK)
+                        versionTapCount.intValue++
+                        if (versionTapCount.intValue >= 7 && !debugUnlocked.value) {
+                            debugUnlocked.value = true
+                            android.widget.Toast.makeText(context, "Debug settings unlocked", android.widget.Toast.LENGTH_SHORT).show()
+                        } else {
+                            uriHandler.openUri(GITHUB_LINK)
+                        }
                     }
                 )
             }
@@ -375,20 +383,22 @@ fun SettingsRoute(
                 )
             }
 
-            item {
-                Spacer(Modifier.height(32.dp))
-            }
+            if (debugUnlocked.value) {
+                item {
+                    Spacer(Modifier.height(32.dp))
+                }
 
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(Icons.Rounded.Work, "Debug")
-                    },
-                    label = "Debug",
-                    onClick = {
-                        onPane(SettingsDebugKey())
-                    }
-                )
+                item {
+                    SettingsListItem(
+                        icon = {
+                            Icon(Icons.Rounded.Work, "Debug")
+                        },
+                        label = "Debug",
+                        onClick = {
+                            onPane(SettingsDebugKey())
+                        }
+                    )
+                }
             }
         }
     }

@@ -33,13 +33,11 @@ object CpuTopology {
     }
 
     fun isThermallyThrottled(context: Context): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return false
         return pm.currentThermalStatus >= PowerManager.THERMAL_STATUS_SEVERE
     }
 
     fun thermalStatusLabel(context: Context): String {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return "Normal"
         val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return "Normal"
         return when (pm.currentThermalStatus) {
             PowerManager.THERMAL_STATUS_NONE,

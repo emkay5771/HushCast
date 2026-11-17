@@ -42,7 +42,8 @@ data class DesktopAdSegmentDto(
     val endMs: Long,
     val confidence: Float,
     val isHighConfidence: Boolean,
-    val label: String
+    val label: String,
+    val adClass: String = "sponsor_ad"
 )
 
 @Serializable

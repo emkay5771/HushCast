@@ -81,8 +81,11 @@ fun DownloadsRoute(
                             contentDescription = "Play all"
                         ) {
                             val episodes = pager.itemSnapshotList.items
-                                .filter { it.download.state == PodcastEpisodeDownloadState.DOWNLOADED.value }
-                                .map { PodcastEpisodeBundle(it.episode, it.playState, it.download) }
+                                .mapNotNull { item ->
+                                    val ep = item.episode ?: return@mapNotNull null
+                                    if (item.download.state != PodcastEpisodeDownloadState.DOWNLOADED.value) return@mapNotNull null
+                                    PodcastEpisodeBundle(ep, item.playState, item.download)
+                                }
                             if(episodes.isNotEmpty()) {
                                 playerVm.play(context, episodes.first())
                                 episodes.drop(1).forEach { playerVm.enqueue(context, it) }
@@ -93,14 +96,20 @@ fun DownloadsRoute(
                             contentDescription = "Add all to Up Next"
                         ) {
                             pager.itemSnapshotList.items
-                                .filter { it.download.state == PodcastEpisodeDownloadState.DOWNLOADED.value }
+                                .mapNotNull { item ->
+                                    val ep = item.episode ?: return@mapNotNull null
+                                    if (item.download.state != PodcastEpisodeDownloadState.DOWNLOADED.value) return@mapNotNull null
+                                    PodcastEpisodeBundle(ep, item.playState, item.download)
+                                }
                                 .forEach {
-                                    playerVm.enqueue(context, PodcastEpisodeBundle(it.episode, it.playState, it.download))
+                                    playerVm.enqueue(context, it)
                                 }
                         }
-                        val playedDownloads = pager.itemSnapshotList.items.filter {
-                            it.download.state == PodcastEpisodeDownloadState.DOWNLOADED.value &&
-                                it.playState?.played == true
+                        val playedDownloads = pager.itemSnapshotList.items.mapNotNull { item ->
+                            val ep = item.episode ?: return@mapNotNull null
+                            if (item.download.state == PodcastEpisodeDownloadState.DOWNLOADED.value &&
+                                item.playState?.played == true
+                            ) ep else null
                         }
                         if (playedDownloads.isNotEmpty()) {
                             val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -109,11 +118,11 @@ fun DownloadsRoute(
                                 contentDescription = "Remove played downloads"
                             ) {
                                 scope.launch {
-                                    playedDownloads.forEach {
+                                    playedDownloads.forEach { ep ->
                                         app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
                                             context = context,
                                             db = db,
-                                            episode = it.episode
+                                            episode = ep
                                         )
                                     }
                                     android.widget.Toast.makeText(
@@ -169,20 +178,21 @@ fun DownloadsRoute(
             ) {
                 items(
                     count = pager.itemCount,
-                    key = pager.itemKey { it.episode.id }
+                    key = pager.itemKey { it.download.episodeId }
                 ) {
                     val bundle = pager[it] ?: return@items
+                    val episode = bundle.episode ?: return@items
 
                     PodcastEpisodeListItem(
                         modifier = Modifier.animateItem(),
 
                         bundle = PodcastEpisodeBundle(
-                            episode = bundle.episode,
+                            episode = episode,
                             playState = bundle.playState,
                             download = bundle.download
                         ),
 
-                        descriptionText = bundle.episode.podcastTitle,
+                        descriptionText = episode.podcastTitle,
 
                         trailingContent = {
                             if(bundle.download.state != PodcastEpisodeDownloadState.NOT_DOWNLOADED.value) {
@@ -196,7 +206,8 @@ fun DownloadsRoute(
                                         text = when(bundle.download.state) {
                                             PodcastEpisodeDownloadState.DOWNLOADING.value ->
                                                 formatFileSize(bundle.download.progress)
-
+                                            PodcastEpisodeDownloadState.FAILED.value ->
+                                                "Failed"
                                             else ->
                                                 formatFileSize(bundle.download.size)
                                         },
@@ -214,7 +225,7 @@ fun DownloadsRoute(
                         ),
 
                         onClick = {
-                            onClickEpisode(bundle.episode)
+                            onClickEpisode(episode)
                         }
                     )
                 }

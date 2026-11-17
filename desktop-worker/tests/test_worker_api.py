@@ -247,3 +247,133 @@ def test_job_lifecycle_auth_and_sha256_serving(tmp_path: Path) -> None:
         assert clear_all.json()["removedFiles"] >= 1
         assert client.get("/v1/episodes", headers=headers).json() == []
 
+
+def test_auth_required_unless_insecure_no_auth(tmp_path: Path) -> None:
+    import pytest
+
+    cache = WorkerCache(tmp_path / "cache")
+    with pytest.raises(ValueError, match="Worker token is required"):
+        create_app(cache=cache, backend=FakeBackend(), token=None)
+
+
+def test_models_not_ready_returns_503(tmp_path: Path) -> None:
+    class UnreadyBackend(FakeBackend):
+        def models_ready(self) -> bool:
+            return False
+
+    cache = WorkerCache(tmp_path / "cache")
+    app = create_app(cache=cache, backend=UnreadyBackend(), token="t")
+    with TestClient(app) as client:
+        assert client.get("/v1/health").status_code == 503
+        res = client.post(
+            "/v1/jobs",
+            headers={"Authorization": "Bearer t"},
+            json={"episodeId": "ep1", "audioUrl": "https://example.com/1.mp3"},
+        )
+        assert res.status_code == 503
+
+
+def test_ssrf_validation_blocks_loopback_metadata_and_private_lan() -> None:
+    import pytest
+    from hushcast_worker.audio import validate_fetch_url
+
+    for bad in (
+        "file:///etc/passwd",
+        "http://127.0.0.1:8080/a.mp3",
+        "http://localhost/a.mp3",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://metadata.google.internal/",
+    ):
+        with pytest.raises(ValueError):
+            validate_fetch_url(bad, allow_lan_feeds=False)
+
+    with pytest.raises(ValueError):
+        validate_fetch_url("http://192.168.1.10/a.mp3", allow_lan_feeds=False)
+    assert validate_fetch_url("http://192.168.1.10/a.mp3", allow_lan_feeds=True).startswith("http://192.168.1.10")
+
+
+def test_sha256_validation_and_public_hostname(tmp_path: Path) -> None:
+    cache = WorkerCache(tmp_path / "cache")
+    app = create_app(cache=cache, backend=FakeBackend(), token="t", public_deployment=True)
+    with TestClient(app) as client:
+        h = client.get("/v1/health")
+        assert h.status_code == 200
+        assert h.json()["hostname"] == ""
+
+        bad = client.get("/v1/episodes/not-a-sha/bundle", headers={"Authorization": "Bearer t"})
+        assert bad.status_code == 400
+
+
+def test_cancel_job_and_job_persistence(tmp_path: Path) -> None:
+    import asyncio
+
+    async def slow_downloader(url: str, dest: Path, on_bytes):
+        await asyncio.sleep(2.0)
+        dest.write_bytes(b"abc")
+        return hashlib.sha256(b"abc").hexdigest(), "audio/mpeg"
+
+    cache_dir = tmp_path / "cache"
+    cache = WorkerCache(cache_dir)
+    app = create_app(cache=cache, backend=FakeBackend(), token="t", downloader=slow_downloader)
+    headers = {"Authorization": "Bearer t"}
+    with TestClient(app) as client:
+        res = client.post(
+            "/v1/jobs",
+            headers=headers,
+            json={"episodeId": "ep1", "audioUrl": "https://example.com/slow.mp3"},
+        )
+        jid = res.json()["jobId"]
+        cancelled = client.delete(f"/v1/jobs/{jid}", headers=headers)
+        assert cancelled.status_code == 200
+        assert cancelled.json()["state"] == "CANCELLED"
+
+    # Reload from disk
+    reloaded = WorkerCache(cache_dir).load_jobs()
+    assert jid in reloaded
+    assert reloaded[jid].state == JobState.CANCELLED
+
+
+def test_ad_tagger_decoder_and_pitch_parity() -> None:
+    from hushcast_worker.ad_tagger import compute_segment_features, decode_ad_segments
+    from hushcast_worker.audio import estimate_pitch_hz
+
+    segs = [
+        SegmentDto(start=0.0, end=2.0, text="Welcome back.", nWords=2, speaker=0),
+        SegmentDto(start=2.0, end=5.0, text="This episode is brought to you by Acme.", nWords=8, speaker=0),
+        SegmentDto(start=5.0, end=8.0, text="Visit acme.com today.", nWords=3, speaker=0),
+        SegmentDto(start=8.0, end=11.0, text="Support the show as a member.", nWords=6, speaker=1),
+        SegmentDto(start=11.0, end=14.0, text="Join our membership today.", nWords=4, speaker=1),
+    ]
+    feats = compute_segment_features(None, segs, duration_sec=14.0)
+    assert feats.shape == (5, 28)
+    assert np.isclose(feats[1, 14], 2.0 / 14.0)
+    assert np.isclose(feats[1, 15], 3.0)
+    assert feats[1, 16] == 8.0
+    assert feats[3, 17] == 1.0  # speaker change
+
+    probs = np.array(
+        [
+            [0.95, 0.02, 0.01, 0.01, 0.01],
+            [0.05, 0.90, 0.02, 0.02, 0.01],
+            [0.05, 0.85, 0.05, 0.03, 0.02],
+            [0.05, 0.02, 0.02, 0.88, 0.03],
+            [0.05, 0.02, 0.02, 0.90, 0.01],
+        ],
+        dtype=np.float32,
+    )
+    ads = decode_ad_segments(probs, segs)
+    assert len(ads) == 2
+    assert ads[0].adClass == "sponsor_ad"
+    assert ads[0].isHighConfidence is True
+    assert ads[0].label == "Sponsor: Acme"
+    # F6: membership_pitch is marked only (not high-confidence auto-skip)
+    assert ads[1].adClass == "membership_pitch"
+    assert ads[1].isHighConfidence is False
+
+    # Pitch test on 150 Hz sine wave
+    t = np.arange(16000, dtype=np.float32) / 16000.0
+    sine = np.sin(2.0 * np.pi * 150.0 * t)
+    f0 = estimate_pitch_hz(sine, sr=16000)
+    assert 145.0 <= f0 <= 155.0
+
+

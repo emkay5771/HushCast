@@ -2,10 +2,10 @@ package app.podiumpodcasts.podium.api.db.model
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.ForeignKey
+import androidx.room.ForeignKey.Companion.CASCADE
 import androidx.room.PrimaryKey
 import app.podiumpodcasts.podium.R
-import app.podiumpodcasts.podium.utils.sha256
-import java.io.File
 
 enum class PodcastEpisodeDownloadState(
     val value: Int,
@@ -13,10 +13,19 @@ enum class PodcastEpisodeDownloadState(
 ) {
     NOT_DOWNLOADED(0, R.string.common_waiting),
     DOWNLOADING(1, R.string.common_downloading),
-    DOWNLOADED(2, R.string.common_downloaded)
+    DOWNLOADED(2, R.string.common_downloaded),
+    FAILED(3, R.string.common_error)
 }
 
-@Entity("podcastEpisodeDownload")
+@Entity(
+    tableName = "podcastEpisodeDownload",
+    foreignKeys = [ForeignKey(
+        entity = PodcastEpisodeModel::class,
+        parentColumns = arrayOf("id"),
+        childColumns = arrayOf("episodeId"),
+        onDelete = CASCADE
+    )]
+)
 data class PodcastEpisodeDownloadModel(
     @PrimaryKey
     @ColumnInfo("episodeId")
@@ -33,6 +42,7 @@ data class PodcastEpisodeDownloadModel(
     val timestamp: Long
 ) {
     fun parseState(): PodcastEpisodeDownloadState {
-        return PodcastEpisodeDownloadState.entries.find { it.value == state }!!
+        return PodcastEpisodeDownloadState.entries.find { it.value == state }
+            ?: PodcastEpisodeDownloadState.NOT_DOWNLOADED
     }
 }

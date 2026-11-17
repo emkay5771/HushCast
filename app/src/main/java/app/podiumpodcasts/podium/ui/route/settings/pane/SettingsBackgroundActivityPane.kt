@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material.icons.rounded.SignalCellularAlt
 import androidx.compose.material3.Badge
@@ -41,7 +42,7 @@ import app.podiumpodcasts.podium.ui.vm.UPDATE_PODCASTS_INTERVAL_VALUES
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
-@SuppressLint("ParcelCreator")
+@kotlinx.parcelize.Parcelize
 @Serializable
 class SettingsBackgroundActivityKey : SettingsPaneKey()
 
@@ -105,7 +106,7 @@ fun SettingsBackgroundActivityPane(
                     description = stringResource(R.string.route_settings_background_activity_allow_update_while_roaming_description),
 
                     index = 0,
-                    count = 2
+                    count = 3
                 )
             }
 
@@ -179,7 +180,49 @@ fun SettingsBackgroundActivityPane(
                     },
 
                     index = 1,
-                    count = 2
+                    count = 3
+                )
+            }
+
+            item {
+                val notifyEnabled = vm.repository.behavior.enableNewEpisodeNotifications.collectAsState(false)
+                val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                    androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+                ) { granted ->
+                    if (granted) {
+                        scope.launch {
+                            vm.repository.behavior.setEnableNewEpisodeNotifications(true)
+                        }
+                    }
+                }
+
+                SettingsSwitchListItem(
+                    checked = notifyEnabled.value,
+                    onCheckedChange = { enable ->
+                        if (enable && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            val hasPerm = androidx.core.content.ContextCompat.checkSelfPermission(
+                                context,
+                                android.Manifest.permission.POST_NOTIFICATIONS
+                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                            if (!hasPerm) {
+                                permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                return@SettingsSwitchListItem
+                            }
+                        }
+                        scope.launch {
+                            vm.repository.behavior.setEnableNewEpisodeNotifications(enable)
+                        }
+                    },
+                    icon = {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Rounded.Notifications,
+                            "New episode notifications"
+                        )
+                    },
+                    label = "New episode notifications",
+                    description = "Notify when subscribed podcasts publish new episodes",
+                    index = 2,
+                    count = 3
                 )
             }
         }

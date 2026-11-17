@@ -28,6 +28,17 @@ interface PodcastSubscriptionDao {
         LEFT JOIN podcastEpisode e ON e.origin = s.origin
         GROUP BY s.origin
         ORDER BY COALESCE(MAX(e.pubDate), 0) DESC, s.newEpisodes DESC
+        """
+    )
+    fun allByNewEpisodesFlow(): Flow<List<PodcastSubscriptionBundle>>
+
+    @Transaction
+    @Query(
+        """
+        SELECT s.* FROM podcastSubscription s
+        LEFT JOIN podcastEpisode e ON e.origin = s.origin
+        GROUP BY s.origin
+        ORDER BY COALESCE(MAX(e.pubDate), 0) DESC, s.newEpisodes DESC
         LIMIT :limit OFFSET :offset
         """
     )

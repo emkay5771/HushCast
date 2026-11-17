@@ -20,9 +20,14 @@ class App : Application(), SingletonImageLoader.Factory {
         val settingsRepository = SettingsRepository(this)
 
         MainScope().launch {
+            app.podiumpodcasts.podium.background.HushCastEngineBridge.loadFromSettings(settingsRepository)
+            PodcastGridOrganization.init(this@App)
+
             if(settingsRepository.sync.enable.first()) {
+                val syncInterval = settingsRepository.sync.intervalMinutes.first().toLong()
                 PartialSynchronizationWorker.schedule(
-                    context = this@App
+                    context = this@App,
+                    repeatIntervalMinutes = syncInterval
                 )
 
                 PartialSynchronizationWorker.enqueue(

@@ -4,49 +4,53 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import app.podiumpodcasts.podium.api.db.model.MediaMetadataExtra
 
-
-fun MediaMetadata.getOrigin(): String {
-    return extras?.getString(MediaMetadataExtra.ORIGIN.name)!!
+fun MediaMetadata.getOrigin(): String? {
+    return extras?.getString(MediaMetadataExtra.ORIGIN.name)
 }
 
-fun MediaMetadata.getEpisodeId(): String {
-    return extras?.getString(MediaMetadataExtra.EPISODE_ID.name)!!
+fun MediaMetadata.getEpisodeId(): String? {
+    return extras?.getString(MediaMetadataExtra.EPISODE_ID.name)
 }
 
-fun MediaMetadata.getAudioUrl(): String {
-    return extras?.getString(MediaMetadataExtra.AUDIO_URL.name)!!
+fun MediaMetadata.getAudioUrl(): String? {
+    return extras?.getString(MediaMetadataExtra.AUDIO_URL.name)
 }
 
-fun MediaMetadata.getImageSeedColor(): Int {
-    return extras?.getInt(MediaMetadataExtra.IMAGE_SEED_COLOR.name)!!
+fun MediaMetadata.getImageSeedColor(): Int? {
+    val bundle = extras ?: return null
+    return if (bundle.containsKey(MediaMetadataExtra.IMAGE_SEED_COLOR.name)) {
+        bundle.getInt(MediaMetadataExtra.IMAGE_SEED_COLOR.name)
+    } else {
+        null
+    }
 }
 
 fun MediaMetadata.isDownload(): Boolean {
-    return extras?.getBoolean(MediaMetadataExtra.IS_DOWNLOAD.name)!!
+    return extras?.getBoolean(MediaMetadataExtra.IS_DOWNLOAD.name, false) ?: false
 }
 
 fun MediaMetadata.getResumeAt(): Long? {
     return extras?.getLong(MediaMetadataExtra.RESUME_AT.name)?.let {
-        when(it) {
+        when (it) {
             0L -> null
             else -> it
         }
     }
 }
 
-fun MediaItem.getOrigin(): String {
+fun MediaItem.getOrigin(): String? {
     return mediaMetadata.getOrigin()
 }
 
-fun MediaItem.getEpisodeId(): String {
+fun MediaItem.getEpisodeId(): String? {
     return mediaMetadata.getEpisodeId()
 }
 
-fun MediaItem.getAudioUrl(): String {
+fun MediaItem.getAudioUrl(): String? {
     return mediaMetadata.getAudioUrl()
 }
 
-fun MediaItem.getImageSeedColor(): Int {
+fun MediaItem.getImageSeedColor(): Int? {
     return mediaMetadata.getImageSeedColor()
 }
 

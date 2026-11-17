@@ -47,6 +47,10 @@ import app.podiumpodcasts.podium.ui.dialog.bottomsheet.PodcastPreviewBottomSheet
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.vm.discover.DiscoverSearchState
 import app.podiumpodcasts.podium.ui.vm.discover.DiscoverSearchViewModel
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
@@ -66,6 +70,18 @@ fun DiscoverSearch(
     val db = LocalDatabase.current
 
     val vm = viewModel(key = countryCode) { DiscoverSearchViewModel(countryCode, db) }
+
+    @OptIn(FlowPreview::class)
+    androidx.compose.runtime.LaunchedEffect(searchBarState.currentValue) {
+        if (searchBarState.currentValue == SearchBarValue.Expanded) {
+            androidx.compose.runtime.snapshotFlow { textFieldState.text.toString() }
+                .debounce(250L)
+                .distinctUntilChanged()
+                .collectLatest { query ->
+                    if (query.isNotBlank()) vm.search(query)
+                }
+        }
+    }
 
     val appBarWithSearchColors = SearchBarDefaults.appBarWithSearchColors(
         searchBarColors = SearchBarDefaults.containedColors(state = searchBarState)

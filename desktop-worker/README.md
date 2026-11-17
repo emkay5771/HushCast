@@ -13,11 +13,17 @@ uv venv && source .venv/bin/activate
 CMAKE_ARGS="-DGGML_METAL=on" uv pip install -e ".[ml,dev]"
 ```
 
-### Download Models into `~/.hushcast-worker/models/`
+### Prerequisites
+- Python 3.10+
+- `ffmpeg` and `ffprobe` on `PATH` (for example `brew install ffmpeg` on macOS, or `sudo apt install ffmpeg` on Debian/Ubuntu; `ffprobe` is used to extract embedded podcast chapters).
 
-1. `ggml-base.en-q5_1.bin` — [HuggingFace](https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin)
-2. `Qwen3-Embedding-0.6B-Q8_0.gguf` — Qwen3-Embedding-0.6B GGUF
-3. `ad_tagger.onnx` — automatically picked up from `../core/automute-engine/src/main/assets/ad_tagger.onnx`
+### Download Models & Self-Test
+
+```bash
+hushcast-worker setup
+```
+
+This downloads `ggml-base.en-q5_1.bin` and `Qwen3-Embedding-0.6B-Q8_0.gguf` into `~/.hushcast-worker/models/`, verifies checksums, copies `ad_tagger.onnx`, and checks `ffmpeg`/`ffprobe` and ML imports.
 
 ### Run
 

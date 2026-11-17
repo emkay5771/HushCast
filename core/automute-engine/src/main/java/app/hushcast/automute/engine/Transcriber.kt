@@ -21,6 +21,13 @@ class PcmBuffer(initialSamples: Int = 16000 * 60 * 10) : AutoCloseable {
         size += count
     }
 
+    fun keepTail(samples: Int) {
+        check(handle != 0L) { "PcmBuffer closed" }
+        val kept = samples.coerceIn(0, size)
+        WhisperJni.pcmKeepTail(handle, kept)
+        size = kept
+    }
+
     override fun close() {
         if (handle != 0L) {
             WhisperJni.pcmFree(handle)
@@ -123,9 +130,17 @@ class Transcriber(
     }
 
     companion object {
-        const val BASE_EN_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en-q5_1.bin"
-        const val TINY_EN_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en-q5_1.bin"
-        const val SILERO_VAD_URL = "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin"
+        const val BASE_EN_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en-q5_1.bin"
+        const val BASE_EN_SHA256 = "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f"
+        const val BASE_EN_SIZE = 59_721_011L
+
+        const val TINY_EN_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-tiny.en-q5_1.bin"
+        const val TINY_EN_SHA256 = "c77c5766f1cef09b6b7d47f21b546cbddd4157886b3b5d6d4f709e91e66c7c2b"
+        const val TINY_EN_SIZE = 32_166_155L
+
+        const val SILERO_VAD_URL = "https://huggingface.co/ggml-org/whisper-vad/resolve/9ffd54a1e1ee413ddf265af9913beaf518d1639b/ggml-silero-v5.1.2.bin"
+        const val SILERO_VAD_SHA256 = "29940d98d42b91fbd05ce489f3ecf7c72f0a42f027e4875919a28fb4c04ea2cf"
+        const val SILERO_VAD_SIZE = 885_098L
     }
 }
 

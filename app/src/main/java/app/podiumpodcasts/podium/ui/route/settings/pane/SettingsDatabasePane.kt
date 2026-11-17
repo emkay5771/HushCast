@@ -38,7 +38,7 @@ import app.podiumpodcasts.podium.ui.vm.ExportDatabaseState
 import app.podiumpodcasts.podium.ui.vm.SettingsViewModel
 import kotlinx.serialization.Serializable
 
-@SuppressLint("ParcelCreator")
+@kotlinx.parcelize.Parcelize
 @Serializable
 class SettingsDatabaseKey : SettingsPaneKey()
 

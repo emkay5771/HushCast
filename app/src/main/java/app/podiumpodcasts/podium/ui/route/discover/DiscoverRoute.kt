@@ -67,20 +67,59 @@ fun DiscoverRoute(
     val disableApplePodcastsApi = settingsRepository.privacy.disableApplePodcastsApi
         .collectAsState(false)
 
-    if(disableApplePodcastsApi.value) {
-        Text("Discover isn't available")
-        return
-    }
-
     val defaultCountryCode = remember { getCountryCode(context) }
     val discoverCountryCode = settingsRepository.behavior.getDiscoverCountryCode(defaultCountryCode)
         .collectAsState(defaultCountryCode)
 
-    val vm = viewModel<DiscoverViewModel>()
-
     val textFieldState = rememberTextFieldState()
     val searchBarState = rememberSearchBarState()
 
+    if(disableApplePodcastsApi.value) {
+        Scaffold(
+            topBar = {
+                DiscoverSearch(
+                    countryCode = discoverCountryCode.value,
+                    textFieldState = textFieldState,
+                    searchBarState = searchBarState,
+                    actions = {
+                        IconButton(onClick = onClickAddPodcast) {
+                            Icon(
+                                Icons.Rounded.Add,
+                                contentDescription = stringResource(R.string.common_action_add)
+                            )
+                        }
+                    },
+                    onClickPodcast = onClickPodcast
+                )
+            }
+        ) { inset ->
+            Box(
+                modifier = Modifier
+                    .padding(inset)
+                    .fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                app.podiumpodcasts.podium.ui.component.layout.InfoLayout(
+                    icon = Icons.Rounded.Language,
+                    title = { "Apple Podcasts charts disabled" }
+                ) {
+                    Text(
+                        text = "Search above using Podcast Index, or add a podcast directly by RSS URL.",
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    androidx.compose.material3.Button(
+                        onClick = onClickAddPodcast,
+                        modifier = Modifier.padding(top = 12.dp)
+                    ) {
+                        Text("Add by RSS URL")
+                    }
+                }
+            }
+        }
+        return
+    }
+
+    val vm = viewModel<DiscoverViewModel>()
     val pagerState = rememberPagerState { Topics.entries.size }
 
     val showCountryCodeSelector = remember { mutableStateOf(false) }

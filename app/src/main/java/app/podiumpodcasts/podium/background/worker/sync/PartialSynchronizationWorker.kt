@@ -244,24 +244,34 @@ class PartialSynchronizationWorker(
 
         fun schedule(
             context: Context,
-            repeatIntervalMinutes: Long = 15L
+            repeatIntervalMinutes: Long = 60L,
+            replace: Boolean = false
         ) {
-            WorkManager.getInstance(context)
-                .enqueueUniquePeriodicWork(
-                    uniqueWorkName = "PeriodicSynchronizationWorker",
-                    existingPeriodicWorkPolicy = ExistingPeriodicWorkPolicy.KEEP,
-                    request = PeriodicWorkRequestBuilder<PartialSynchronizationWorker>(
-                        repeatIntervalMinutes,
-                        TimeUnit.MINUTES
-                    )
-                        .setInitialDelay(10L, TimeUnit.MINUTES)
-                        .setConstraints(
-                            Constraints(
-                                requiredNetworkType = NetworkType.NOT_ROAMING,
-                                requiresBatteryNotLow = true
-                            )
-                        ).build()
+            val wm = WorkManager.getInstance(context)
+            if (repeatIntervalMinutes <= 0L) {
+                wm.cancelUniqueWork("PeriodicSynchronizationWorker")
+                return
+            }
+            val safeMinutes = repeatIntervalMinutes.coerceAtLeast(15L)
+            wm.enqueueUniquePeriodicWork(
+                uniqueWorkName = "PeriodicSynchronizationWorker",
+                existingPeriodicWorkPolicy = if (replace) {
+                    ExistingPeriodicWorkPolicy.UPDATE
+                } else {
+                    ExistingPeriodicWorkPolicy.KEEP
+                },
+                request = PeriodicWorkRequestBuilder<PartialSynchronizationWorker>(
+                    safeMinutes,
+                    TimeUnit.MINUTES
                 )
+                    .setInitialDelay(10L, TimeUnit.MINUTES)
+                    .setConstraints(
+                        Constraints(
+                            requiredNetworkType = NetworkType.NOT_ROAMING,
+                            requiresBatteryNotLow = true
+                        )
+                    ).build()
+            )
         }
     }
 }

@@ -11,7 +11,7 @@ find_package(Threads REQUIRED)
 
 set(LLAMA_TAG   "b11671" CACHE STRING "llama.cpp release tag")
 set(WHISPER_TAG "v1.9.5" CACHE STRING "whisper.cpp release tag")
-set(HUSHCAST_ARM_ARCH "armv8.2-a+dotprod+fp16" CACHE STRING "CPU features for Android arm64 builds")
+set(HUSHCAST_ARM_ARCH "armv8-a" CACHE STRING "CPU features for Android arm64 builds")
 
 set(COMMON_ARGS
     -DCMAKE_BUILD_TYPE=Release
@@ -49,6 +49,7 @@ foreach(l ${GGML_LIBS})
 endforeach()
 ExternalProject_Add(llama_ext
     URL https://github.com/ggml-org/llama.cpp/archive/refs/tags/${LLAMA_TAG}.tar.gz
+    URL_HASH SHA256=dbbbf2509a404ff5479bce0507360fb0e1ff655811974fe5e79e4312a2902c52
     ${EXTRACT_TS}
     CMAKE_ARGS ${COMMON_ARGS} -DCMAKE_INSTALL_PREFIX=${LLAMA_PREFIX}
         -DLLAMA_BUILD_COMMON=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF
@@ -62,6 +63,7 @@ foreach(l ${GGML_LIBS})
 endforeach()
 ExternalProject_Add(whisper_ext
     URL https://github.com/ggml-org/whisper.cpp/archive/refs/tags/${WHISPER_TAG}.tar.gz
+    URL_HASH SHA256=ff1a9053feb509ff9d7729703355541ae9690073a6b1c40eb692c962e0dc1720
     ${EXTRACT_TS}
     CMAKE_ARGS ${COMMON_ARGS} -DCMAKE_INSTALL_PREFIX=${WHISPER_PREFIX}
         -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_SERVER=OFF

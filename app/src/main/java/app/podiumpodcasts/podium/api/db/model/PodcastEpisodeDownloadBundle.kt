@@ -9,10 +9,10 @@ data class PodcastEpisodeDownloadBundle(
         parentColumn = "episodeId",
         entityColumn = "id"
     )
-    val episode: PodcastEpisodeModel,
+    val episode: PodcastEpisodeModel?,
     @Relation(
         parentColumn = "episodeId",
         entityColumn = "episodeId"
     )
-    val playState: PodcastEpisodePlayStateModel,
+    val playState: PodcastEpisodePlayStateModel?,
 )

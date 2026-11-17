@@ -4,6 +4,7 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import app.podiumpodcasts.podium.api.db.dao.ChapterSkipDao
 import app.podiumpodcasts.podium.api.db.dao.ListDao
 import app.podiumpodcasts.podium.api.db.dao.ListItemDao
 import app.podiumpodcasts.podium.api.db.dao.PodcastDao
@@ -15,6 +16,7 @@ import app.podiumpodcasts.podium.api.db.dao.PodcastSubscriptionDao
 import app.podiumpodcasts.podium.api.db.dao.QueueDao
 import app.podiumpodcasts.podium.api.db.dao.SyncActionDao
 import app.podiumpodcasts.podium.api.db.dao.statistics.UpdatePodcastRunDao
+import app.podiumpodcasts.podium.api.db.model.ChapterSkipModel
 import app.podiumpodcasts.podium.api.db.model.ListItemModel
 import app.podiumpodcasts.podium.api.db.model.ListModel
 import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeDownloadModel
@@ -42,8 +44,9 @@ import app.podiumpodcasts.podium.api.db.model.statistics.UpdatePodcastRunModel
         UpdatePodcastRunModel::class,
 
         SyncActionModel::class,
-        QueueItemModel::class
-    ], version = 16
+        QueueItemModel::class,
+        ChapterSkipModel::class
+    ], version = 17, exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun podcasts(): PodcastDao
@@ -60,11 +63,12 @@ abstract class AppDatabase : RoomDatabase() {
 
     abstract fun syncActions(): SyncActionDao
     abstract fun playbackQueue(): QueueDao
+    abstract fun chapterSkips(): ChapterSkipDao
 }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        db.execSQL("ALTER TABLE podcastSubscription ADD COLUMN lastUpdate INTEGER NOT NULL")
+        db.execSQL("ALTER TABLE podcastSubscription ADD COLUMN lastUpdate INTEGER NOT NULL DEFAULT 0")
     }
 }
 
@@ -273,6 +277,69 @@ val MIGRATION_15_16 = object : Migration(15, 16) {
     }
 }
 
+val MIGRATION_16_17 = object : Migration(16, 17) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_podcastEpisode_origin_pubDate` ON `podcastEpisode` (`origin`, `pubDate`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_podcastEpisode_pubDate` ON `podcastEpisode` (`pubDate`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_listItem_listId` ON `listItem` (`listId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_listItem_contentId` ON `listItem` (`contentId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_podcastHistory_timestamp` ON `podcastHistory` (`timestamp`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_podcastHistory_episodeId` ON `podcastHistory` (`episodeId`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_podcastEpisodePlayState_played_lastUpdate` ON `podcastEpisodePlayState` (`played`, `lastUpdate`)")
+
+        // Rebuild podcastEpisodeDownload with CASCADE foreign key (D9)
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `podcastEpisodeDownload_new` (
+                `episodeId` TEXT NOT NULL,
+                `state` INTEGER NOT NULL,
+                `filename` TEXT,
+                `progress` INTEGER NOT NULL,
+                `size` INTEGER NOT NULL,
+                `timestamp` INTEGER NOT NULL,
+                PRIMARY KEY(`episodeId`),
+                FOREIGN KEY(`episodeId`) REFERENCES `podcastEpisode`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            INSERT INTO `podcastEpisodeDownload_new` (`episodeId`, `state`, `filename`, `progress`, `size`, `timestamp`)
+            SELECT d.`episodeId`, d.`state`, d.`filename`, d.`progress`, d.`size`, d.`timestamp`
+            FROM `podcastEpisodeDownload` d
+            INNER JOIN `podcastEpisode` e ON e.`id` = d.`episodeId`
+            """.trimIndent()
+        )
+        db.execSQL("DROP TABLE `podcastEpisodeDownload`")
+        db.execSQL("ALTER TABLE `podcastEpisodeDownload_new` RENAME TO `podcastEpisodeDownload`")
+
+        // Migrate Hear Later (listId = -1) items into Up Next (playbackQueue) and remove Hear Later (UI1)
+        db.execSQL(
+            """
+            INSERT OR IGNORE INTO `playbackQueue` (`episodeId`, `position`, `addedAt`)
+            SELECT `contentId`,
+                   COALESCE((SELECT MAX(`position`) FROM `playbackQueue`), -1) + ROW_NUMBER() OVER (ORDER BY `position` ASC),
+                   0
+            FROM `listItem`
+            WHERE `listId` = -1
+            """.trimIndent()
+        )
+        db.execSQL("DELETE FROM `list` WHERE `id` = -1")
+
+        // Room-backed chapter skips (P4)
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `chapterSkip` (
+                `episodeId` TEXT NOT NULL,
+                `skippedStartsCsv` TEXT NOT NULL,
+                PRIMARY KEY(`episodeId`),
+                FOREIGN KEY(`episodeId`) REFERENCES `podcastEpisode`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent()
+        )
+    }
+}
+
 val ALL_MIGRATIONS = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
@@ -288,5 +355,6 @@ val ALL_MIGRATIONS = arrayOf(
     MIGRATION_12_13,
     MIGRATION_13_14,
     MIGRATION_14_15,
-    MIGRATION_15_16
+    MIGRATION_15_16,
+    MIGRATION_16_17
 )

@@ -1,0 +1,169 @@
+package app.podiumpodcasts.podium.ui.component
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import app.podiumpodcasts.podium.SubscriptionsBadgeMode
+import app.podiumpodcasts.podium.SubscriptionsLayout
+import app.podiumpodcasts.podium.SubscriptionsSort
+import app.podiumpodcasts.podium.ui.theme.Typography
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun PodcastGridOptionsSheet(
+    layout: SubscriptionsLayout,
+    sort: SubscriptionsSort,
+    badgeMode: SubscriptionsBadgeMode,
+    showGridTitles: Boolean,
+    hasFolders: Boolean,
+    reorderMode: Boolean,
+    onLayoutChange: (SubscriptionsLayout) -> Unit,
+    onSortChange: (SubscriptionsSort) -> Unit,
+    onBadgeModeChange: (SubscriptionsBadgeMode) -> Unit,
+    onShowGridTitlesChange: (Boolean) -> Unit,
+    onToggleReorderMode: (Boolean) -> Unit,
+    onNewFolder: () -> Unit,
+    onOrganizeFolders: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+        ) {
+            Text("Podcasts Options", style = Typography.titleLargeEmphasized)
+            Spacer(Modifier.height(16.dp))
+
+            Text("Layout", style = Typography.labelLarge)
+            Spacer(Modifier.height(8.dp))
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                val options = listOf(
+                    SubscriptionsLayout.LARGE_GRID to "Large Grid",
+                    SubscriptionsLayout.SMALL_GRID to "Small Grid",
+                    SubscriptionsLayout.LIST to "List"
+                )
+                options.forEachIndexed { idx, (value, label) ->
+                    SegmentedButton(
+                        selected = layout == value,
+                        onClick = { onLayoutChange(value) },
+                        shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
+                    ) { Text(label) }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Text("Sort by", style = Typography.labelLarge)
+            Spacer(Modifier.height(8.dp))
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                val options = listOf(
+                    SubscriptionsSort.RECENTLY_ADDED to "New Episodes",
+                    SubscriptionsSort.A_Z to "A–Z",
+                    SubscriptionsSort.CUSTOM to "Custom"
+                )
+                options.forEachIndexed { idx, (value, label) ->
+                    SegmentedButton(
+                        selected = sort == value,
+                        onClick = { onSortChange(value) },
+                        shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
+                    ) { Text(label) }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Text("Badges", style = Typography.labelLarge)
+            Spacer(Modifier.height(8.dp))
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                val options = listOf(
+                    SubscriptionsBadgeMode.UNPLAYED_COUNT to "Count",
+                    SubscriptionsBadgeMode.LATEST_ONLY to "Dot",
+                    SubscriptionsBadgeMode.OFF to "Off"
+                )
+                options.forEachIndexed { idx, (value, label) ->
+                    SegmentedButton(
+                        selected = badgeMode == value,
+                        onClick = { onBadgeModeChange(value) },
+                        shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
+                    ) { Text(label) }
+                }
+            }
+
+            if (layout != SubscriptionsLayout.LIST) {
+                Spacer(Modifier.height(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Reorder mode (drag & drop)", style = Typography.bodyLarge)
+                    Switch(
+                        checked = reorderMode,
+                        onCheckedChange = onToggleReorderMode
+                    )
+                }
+            }
+
+            if (layout == SubscriptionsLayout.LARGE_GRID) {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Show titles in grid", style = Typography.bodyLarge)
+                    Switch(
+                        checked = showGridTitles,
+                        onCheckedChange = onShowGridTitlesChange
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(
+                onClick = {
+                    onDismiss()
+                    onNewFolder()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Rounded.Add, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text("New Folder")
+            }
+            if (hasFolders) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        onDismiss()
+                        onOrganizeFolders()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Organize Folders")
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}

@@ -68,7 +68,7 @@ fun MediaItemListItem(
     val context = LocalContext.current
     val appDb = LocalDatabase.current
     val scope = rememberCoroutineScope()
-    val episodeId = remember(mediaItem) { mediaItem.getEpisodeId() }
+    val episodeId = remember(mediaItem) { mediaItem.getEpisodeId().orEmpty() }
     val autoMuteDb = remember(context) { AutoMuteDatabase.getInstance(context) }
     val statusMap by autoMuteDb.statusMapFlow.collectAsState()
     val analysisStatus = statusMap[episodeId]

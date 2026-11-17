@@ -30,6 +30,7 @@ class AdSegmentDto(BaseModel):
     confidence: float
     isHighConfidence: bool
     label: str
+    adClass: str = "sponsor_ad"
 
 
 class DesktopChapterDto(BaseModel):
@@ -63,6 +64,7 @@ class JobState(str, Enum):
     TAGGING = "TAGGING"
     READY = "READY"
     FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
 
 
 class DesktopJobRequest(BaseModel):

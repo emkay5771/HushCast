@@ -8,16 +8,26 @@ import app.podiumpodcasts.podium.api.rss.FetchPodcastClientResult
 import app.podiumpodcasts.podium.background.notification.DebugUpdateNotification
 import app.podiumpodcasts.podium.background.notification.NewPodcastEpisodeNotification
 import app.podiumpodcasts.podium.manager.DownloadManager
+import app.podiumpodcasts.podium.utils.rss.computeEpisodeId
 import app.podiumpodcasts.podium.utils.rss.toPodcastEpisode
 import coil3.Bitmap
-import coil3.ImageLoader
+import coil3.SingletonImageLoader
 import coil3.request.ErrorResult
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.request.allowHardware
 import coil3.toBitmap
 import com.prof18.rssparser.model.RssChannel
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.CancellationException
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 const val HEADER_OVERHEAD = 1024L
 
@@ -28,129 +38,132 @@ class PodcastUpdateWork(
 ) {
 
     val fetchPodcastClient = FetchPodcastClient()
-
-    var imageBitmapMap = mutableMapOf<String, Bitmap>()
+    private val imageBitmapMap = ConcurrentHashMap<String, Bitmap>()
 
     suspend fun doWork() {
         val enableDebugUpdateNotification =
             settingsRepository.debug.enableUpdateNotification.first()
 
         val subscriptions = db.podcastSubscriptions().allSortedByLastUpdate()
+        val semaphore = Semaphore(4)
+        val cachedPodcasts = AtomicInteger(0)
+        val dataUsage = AtomicLong(0L)
 
-        var cachedPodcasts = 0
-        var dataUsage = 0L
-
-        for(subscription in subscriptions) {
-            val origin = subscription.podcast.origin
-
-            val response = fetchPodcastClient.fetch(
-                origin = origin,
-                lastModified = subscription.subscription.cacheLastModified,
-                eTag = subscription.subscription.cacheETag,
-                contentLength = subscription.subscription.cacheContentLength
-            )
-
-            if(enableDebugUpdateNotification) {
-                DebugUpdateNotification(subscription, response)
-                    .send(context)
-            }
-
-            when(response) {
-                is FetchPodcastClientResult.Success -> {
-                    dataUsage += response.fileSize + HEADER_OVERHEAD
-
-                    val episodeIds = db.podcastEpisodes().getEpisodeIds(origin)
-                    val podcast = subscription.podcast
-
-                    val newEpisodes = response.rssChannel.items
-                        .filter { !episodeIds.contains("$origin:${it.guid}") }
-                        .map { it.toPodcastEpisode(podcast = podcast, new = true) }
-
-                    if(subscription.subscription.enableNotifications) for(episode in newEpisodes) NewPodcastEpisodeNotification(
-                        podcastTitle = podcast.fetchTitle(),
-                        episode = episode,
-                        imageBitmap = loadBitmap(response.rssChannel)
-                    ).send(context)
-
-                    db.podcastEpisodes()
-                        .insertAllAndUpdateNewEpisodesCount(
-                            podcast.origin, *newEpisodes.toTypedArray()
-                        )
-                    newEpisodes.forEach {
-                        db.podcastEpisodePlayStates().initState(it.id)
-                    }
-
-                    if(subscription.subscription.enableAutoDownload) newEpisodes.forEach {
+        coroutineScope {
+            subscriptions.map { subscription ->
+                async {
+                    semaphore.withPermit {
+                        val origin = subscription.podcast.origin
                         try {
-                            DownloadManager.downloadEpisode(
-                                context = context,
-                                db = db,
-                                episodeId = it.id,
-                                auto = true
+                            val response = fetchPodcastClient.fetch(
+                                origin = origin,
+                                lastModified = subscription.subscription.cacheLastModified,
+                                eTag = subscription.subscription.cacheETag,
+                                contentLength = subscription.subscription.cacheContentLength
                             )
-                        } catch(e: Exception) {
+
+                            if (enableDebugUpdateNotification) {
+                                DebugUpdateNotification(subscription, response).send(context)
+                            }
+
+                            when (response) {
+                                is FetchPodcastClientResult.Success -> {
+                                    dataUsage.addAndGet(response.fileSize + HEADER_OVERHEAD)
+
+                                    val episodeIds = db.podcastEpisodes().getEpisodeIds(origin).toHashSet()
+                                    val podcast = subscription.podcast
+
+                                    val candidateEpisodes = response.rssChannel.items
+                                        .filter { !episodeIds.contains(it.computeEpisodeId(origin)) }
+                                        .map { it.toPodcastEpisode(podcast = podcast, new = true) }
+
+                                    val inserted = db.podcastEpisodes()
+                                        .insertAllAndUpdateNewEpisodesCount(
+                                            podcast.origin, *candidateEpisodes.toTypedArray()
+                                        )
+
+                                    if (subscription.subscription.enableNotifications && inserted.isNotEmpty()) {
+                                        val bmp = loadBitmap(response.rssChannel)
+                                        for (episode in inserted) {
+                                            NewPodcastEpisodeNotification(
+                                                podcastTitle = podcast.fetchTitle(),
+                                                episode = episode,
+                                                imageBitmap = bmp
+                                            ).send(context)
+                                        }
+                                    }
+
+                                    if (subscription.subscription.enableAutoDownload && inserted.isNotEmpty()) {
+                                        for (episode in inserted) {
+                                            try {
+                                                DownloadManager.downloadEpisode(
+                                                    context = context,
+                                                    db = db,
+                                                    episodeId = episode.id,
+                                                    auto = true
+                                                )
+                                            } catch (c: CancellationException) {
+                                                throw c
+                                            } catch (e: Exception) {
+                                                e.printStackTrace()
+                                            }
+                                        }
+                                    }
+
+                                    db.podcastSubscriptions().logUpdate(origin = origin)
+                                    db.podcastSubscriptions().storeCacheValues(
+                                        origin = origin,
+                                        lastModified = response.lastModified,
+                                        eTag = response.eTag,
+                                        contentLength = response.contentLength
+                                    )
+                                }
+
+                                is FetchPodcastClientResult.Unchanged -> {
+                                    dataUsage.addAndGet(HEADER_OVERHEAD)
+                                    cachedPodcasts.incrementAndGet()
+                                    db.podcastSubscriptions().logUpdate(origin = origin)
+                                }
+
+                                is FetchPodcastClientResult.Failure -> {
+                                    dataUsage.addAndGet(HEADER_OVERHEAD)
+                                }
+                            }
+                        } catch (c: CancellationException) {
+                            throw c
+                        } catch (e: Exception) {
                             e.printStackTrace()
                         }
                     }
-
-                    db.podcastSubscriptions()
-                        .logUpdate(origin = origin)
-                    db.podcastSubscriptions()
-                        .storeCacheValues(
-                            origin = origin,
-                            lastModified = response.lastModified,
-                            eTag = response.eTag,
-                            contentLength = response.contentLength
-                        )
                 }
-
-                is FetchPodcastClientResult.Unchanged -> {
-                    dataUsage += HEADER_OVERHEAD
-                    cachedPodcasts += 1
-
-                    db.podcastSubscriptions()
-                        .logUpdate(origin = origin)
-                }
-
-                is FetchPodcastClientResult.Failure -> {
-                    dataUsage += HEADER_OVERHEAD
-                    // TODO: do something better
-                }
-            }
+            }.awaitAll()
         }
 
-        // don't log run when only a few podcasts are cached
-        // because large requests can mess up avg
-        if(cachedPodcasts >= 2) {
-            db.statisticsUpdatePodcastRun()
-                .log(dataUsage)
+        if (cachedPodcasts.get() >= 2) {
+            db.statisticsUpdatePodcastRun().log(dataUsage.get())
         }
     }
 
     suspend fun loadBitmap(rssChannel: RssChannel): Bitmap? {
-        if(rssChannel.image?.url == null) return null
+        val url = rssChannel.image?.url ?: return null
+        imageBitmapMap[url]?.let { return it }
 
-        if(imageBitmapMap.contains(rssChannel.image!!.url))
-            return imageBitmapMap[rssChannel.image!!.url]
-
-        val loader = ImageLoader(context)
-
+        val loader = SingletonImageLoader.get(context)
         val request = ImageRequest.Builder(context)
-            .data(rssChannel.image!!.url)
+            .data(url)
             .allowHardware(false)
             .build()
 
         val result = loader.execute(request)
-        if(result is ErrorResult) {
+        if (result is ErrorResult) {
             result.throwable.printStackTrace()
             return null
-        } else if(result is SuccessResult) {
+        } else if (result is SuccessResult) {
             val bitmap = result.image.toBitmap()
-            imageBitmapMap[rssChannel.image!!.url!!] = bitmap
+            imageBitmapMap[url] = bitmap
             return bitmap
         }
 
         return null
     }
-
 }

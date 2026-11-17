@@ -8,9 +8,11 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeModel
 import app.podiumpodcasts.podium.ui.DetailPaneKey
@@ -100,6 +102,10 @@ fun Navigation(
     NavDisplay(
         backStack = backStack,
         onBack = onBack,
+        entryDecorators = listOf(
+            rememberSaveableStateHolderNavEntryDecorator(),
+            rememberViewModelStoreNavEntryDecorator()
+        ),
         transitionSpec = {
             (fadeIn(animationSpec = tween(180)) +
                     scaleIn(initialScale = 0.96f, animationSpec = tween(180)))
@@ -233,7 +239,7 @@ fun Navigation(
                         },
                         onPane = {
                             onOpenPane(
-                                it
+                                app.podiumpodcasts.podium.ui.DetailPaneKey.SettingsKey(it)
                             )
                         }
                     ) {

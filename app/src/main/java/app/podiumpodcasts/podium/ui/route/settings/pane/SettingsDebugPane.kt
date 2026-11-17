@@ -48,7 +48,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
-@SuppressLint("ParcelCreator")
+@kotlinx.parcelize.Parcelize
 @Serializable
 class SettingsDebugKey : SettingsPaneKey()
 

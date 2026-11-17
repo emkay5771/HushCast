@@ -47,19 +47,20 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.paging.compose.collectAsLazyPagingItems
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.SubscriptionsBadgeMode
 import app.podiumpodcasts.podium.SubscriptionsLayout
 import app.podiumpodcasts.podium.SubscriptionsSort
+import app.podiumpodcasts.podium.ui.component.PodcastGridOptionsSheet
 import app.podiumpodcasts.podium.ui.component.common.BackButton
 import app.podiumpodcasts.podium.ui.component.media.FloatingMediaPlayerSpacer
 import app.podiumpodcasts.podium.ui.component.model.SubscriptionCard
 import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
-import app.podiumpodcasts.podium.ui.theme.Typography
 import app.podiumpodcasts.podium.ui.vm.home.SubscriptionsViewModel
 import kotlinx.coroutines.launch
 
@@ -75,11 +76,13 @@ fun SubscriptionsRoute(
     val vm = viewModel { SubscriptionsViewModel(db) }
 
     val subscriptions = vm.subscriptions.collectAsLazyPagingItems()
-    val layout by settingsRepository.appearance.subscriptionsLayout.collectAsState(SubscriptionsLayout.LARGE_GRID)
-    val sort by settingsRepository.appearance.subscriptionsSort.collectAsState(SubscriptionsSort.RECENTLY_ADDED)
-    val badgeMode by settingsRepository.appearance.subscriptionsBadgeMode.collectAsState(SubscriptionsBadgeMode.UNPLAYED_COUNT)
+    val layout by settingsRepository.appearance.subscriptionsLayout.collectAsStateWithLifecycle(SubscriptionsLayout.LARGE_GRID)
+    val sort by settingsRepository.appearance.subscriptionsSort.collectAsStateWithLifecycle(SubscriptionsSort.RECENTLY_ADDED)
+    val badgeMode by settingsRepository.appearance.subscriptionsBadgeMode.collectAsStateWithLifecycle(SubscriptionsBadgeMode.UNPLAYED_COUNT)
+    val showGridTitles by settingsRepository.appearance.showGridTitles.collectAsStateWithLifecycle(true)
 
     var showOptionsSheet by remember { mutableStateOf(false) }
+    var reorderMode by remember { mutableStateOf(false) }
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
@@ -92,69 +95,35 @@ fun SubscriptionsRoute(
     }
 
     if(showOptionsSheet) {
-        ModalBottomSheet(onDismissRequest = { showOptionsSheet = false }) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text("Subscriptions Options", style = Typography.titleLargeEmphasized)
-                Spacer(Modifier.height(16.dp))
-
-                Text("Layout", style = Typography.labelLarge)
-                Spacer(Modifier.height(8.dp))
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    val options = listOf(
-                        SubscriptionsLayout.LARGE_GRID to "Large Grid",
-                        SubscriptionsLayout.SMALL_GRID to "Small Grid",
-                        SubscriptionsLayout.LIST to "List"
-                    )
-                    options.forEachIndexed { idx, (value, label) ->
-                        SegmentedButton(
-                            selected = layout == value,
-                            onClick = { scope.launch { settingsRepository.appearance.setSubscriptionsLayout(value) } },
-                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
-                        ) { Text(label) }
-                    }
+        PodcastGridOptionsSheet(
+            layout = layout,
+            sort = sort,
+            badgeMode = badgeMode,
+            showGridTitles = showGridTitles,
+            hasFolders = false,
+            reorderMode = reorderMode,
+            onLayoutChange = { value ->
+                scope.launch { settingsRepository.appearance.setSubscriptionsLayout(value) }
+            },
+            onSortChange = { value ->
+                scope.launch { settingsRepository.appearance.setSubscriptionsSort(value) }
+            },
+            onBadgeModeChange = { value ->
+                scope.launch { settingsRepository.appearance.setSubscriptionsBadgeMode(value) }
+            },
+            onShowGridTitlesChange = { enabled ->
+                scope.launch { settingsRepository.appearance.setShowGridTitles(enabled) }
+            },
+            onToggleReorderMode = { enabled ->
+                reorderMode = enabled
+                if (enabled && sort != SubscriptionsSort.CUSTOM) {
+                    scope.launch { settingsRepository.appearance.setSubscriptionsSort(SubscriptionsSort.CUSTOM) }
                 }
-
-                Spacer(Modifier.height(16.dp))
-                Text("Sort by", style = Typography.labelLarge)
-                Spacer(Modifier.height(8.dp))
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    val options = listOf(
-                        SubscriptionsSort.RECENTLY_ADDED to "New Episodes",
-                        SubscriptionsSort.A_Z to "A–Z"
-                    )
-                    options.forEachIndexed { idx, (value, label) ->
-                        SegmentedButton(
-                            selected = sort == value,
-                            onClick = { scope.launch { settingsRepository.appearance.setSubscriptionsSort(value) } },
-                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
-                        ) { Text(label) }
-                    }
-                }
-
-                Spacer(Modifier.height(16.dp))
-                Text("Badges", style = Typography.labelLarge)
-                Spacer(Modifier.height(8.dp))
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    val options = listOf(
-                        SubscriptionsBadgeMode.UNPLAYED_COUNT to "Count",
-                        SubscriptionsBadgeMode.LATEST_ONLY to "Dot",
-                        SubscriptionsBadgeMode.OFF to "Off"
-                    )
-                    options.forEachIndexed { idx, (value, label) ->
-                        SegmentedButton(
-                            selected = badgeMode == value,
-                            onClick = { scope.launch { settingsRepository.appearance.setSubscriptionsBadgeMode(value) } },
-                            shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
-                        ) { Text(label) }
-                    }
-                }
-                Spacer(Modifier.height(24.dp))
-            }
-        }
+            },
+            onNewFolder = { },
+            onOrganizeFolders = { },
+            onDismiss = { showOptionsSheet = false }
+        )
     }
 
     Scaffold(
@@ -249,6 +218,8 @@ fun SubscriptionsRoute(
                     SubscriptionCard(
                         bundle = item,
                         badgeMode = badgeMode,
+                        showTitles = showGridTitles,
+                        compact = layout == SubscriptionsLayout.SMALL_GRID,
                         onClick = { onClickPodcast(item.podcast.origin) }
                     )
                 }

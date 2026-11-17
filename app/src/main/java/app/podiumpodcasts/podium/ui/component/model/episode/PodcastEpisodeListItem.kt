@@ -17,12 +17,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItemColors
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -40,6 +42,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,10 +54,15 @@ import app.hushcast.automute.storage.AutoMuteDatabase
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeBundle
 import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeDownloadState
+import app.podiumpodcasts.podium.api.download.DownloadTracker
+import app.podiumpodcasts.podium.manager.DownloadManager
 import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
 import app.podiumpodcasts.podium.ui.formatPubDate
+import kotlinx.coroutines.launch
 import app.podiumpodcasts.podium.ui.theme.Typography
 import app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalFoundationApi::class)
@@ -74,15 +84,26 @@ fun PodcastEpisodeListItem(
     count: Int = 0,
     isSelected: Boolean = false,
     showArtwork: Boolean = true,
+    inQueue: Boolean? = null,
     onLongClick: (() -> Unit)? = null,
     colors: ListItemColors = ListItemDefaults.segmentedColors(),
     onClick: () -> Unit
 ) {
     val context = LocalContext.current
+    val db = app.podiumpodcasts.podium.ui.helper.LocalDatabase.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val playerVm = viewModel<MediaPlayerViewModel>()
     val autoMuteDb = remember(context) { AutoMuteDatabase.getInstance(context) }
-    val statusMap by autoMuteDb.statusMapFlow.collectAsState()
-    val analysisStatus = statusMap[bundle.episode.id]
+    val analysisStatus by remember(bundle.episode.id, autoMuteDb) {
+        autoMuteDb.statusMapFlow
+            .map { it[bundle.episode.id] }
+            .distinctUntilChanged()
+    }.collectAsState(initial = null)
+    val downloadProgress by remember(bundle.episode.id) {
+        DownloadTracker.progress
+            .map { it[bundle.episode.id] }
+            .distinctUntilChanged()
+    }.collectAsState(initial = null)
     val readinessBadge = remember(analysisStatus?.badge) {
         runCatching {
             analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) }
@@ -93,6 +114,9 @@ fun PodcastEpisodeListItem(
     val durationSec = bundle.episode.duration
     val progressSec = bundle.playState?.state ?: 0
     val hasProgress = !isPlayed && durationSec > 0 && progressSec > 0
+    val progressFraction = if (hasProgress) {
+        (progressSec.toFloat() / durationSec.toFloat()).coerceIn(0f, 1f)
+    } else 0f
 
     val formattedDuration = remember(durationSec, progressSec, isPlayed) {
         formatPocketCastsDuration(
@@ -104,7 +128,10 @@ fun PodcastEpisodeListItem(
 
     val isDownloaded = bundle.download?.state == PodcastEpisodeDownloadState.DOWNLOADED.value
     val isDownloading = bundle.download?.state == PodcastEpisodeDownloadState.DOWNLOADING.value
-    val inQueue = playerVm.queue.contains(bundle.episode.id)
+    val isFailed = bundle.download?.state == PodcastEpisodeDownloadState.FAILED.value
+    val isProcessed = readinessBadge == ReadinessBadge.READY || readinessBadge == ReadinessBadge.WORD_MUTE_READY
+    val isAnalyzing = readinessBadge == ReadinessBadge.ANALYZING
+    val isInQueue = inQueue ?: playerVm.queue.contains(bundle.episode.id)
     val isCurrentlyEpisode = playerVm.metadataEpisodeId == bundle.episode.id
     val isActivelyPlaying = isCurrentlyEpisode && playerVm.isPlaying
 
@@ -120,10 +147,19 @@ fun PodcastEpisodeListItem(
     }
 
     val clickModifier = if (onLongClick != null) {
-        Modifier.combinedClickable(
-            onClick = onClick,
-            onLongClick = onLongClick
-        )
+        Modifier
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
+            .semantics {
+                customActions = listOf(
+                    CustomAccessibilityAction("Select episode") {
+                        onLongClick()
+                        true
+                    }
+                )
+            }
     } else {
         Modifier.combinedClickable(
             onClick = onClick
@@ -145,7 +181,6 @@ fun PodcastEpisodeListItem(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Left: artwork or selection check
             if (isSelected) {
                 Box(
                     modifier = Modifier.size(52.dp),
@@ -172,7 +207,6 @@ fun PodcastEpisodeListItem(
                 )
             }
 
-            // Middle: date added + AI badge, title, status + duration
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -200,43 +234,6 @@ fun PodcastEpisodeListItem(
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
-
-                    val badgeLabel = when (readinessBadge) {
-                        ReadinessBadge.READY -> {
-                            val stage = analysisStatus?.stageLabel.orEmpty()
-                            when {
-                                stage.contains("Cloud", ignoreCase = true) || stage.contains("Modal", ignoreCase = true) -> "Cloud AI"
-                                stage.contains("Desktop", ignoreCase = true) -> "Desktop AI"
-                                else -> "On-Device AI"
-                            }
-                        }
-                        ReadinessBadge.WORD_MUTE_READY -> "Word-Mute"
-                        ReadinessBadge.ANALYZING -> "${analysisStatus?.progressPercent ?: 0}%"
-                        ReadinessBadge.NOT_PROCESSED -> null
-                    }
-                    if (badgeLabel != null) {
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = when (readinessBadge) {
-                                ReadinessBadge.READY -> MaterialTheme.colorScheme.primaryContainer
-                                ReadinessBadge.WORD_MUTE_READY -> MaterialTheme.colorScheme.secondaryContainer
-                                ReadinessBadge.ANALYZING -> MaterialTheme.colorScheme.tertiaryContainer
-                                ReadinessBadge.NOT_PROCESSED -> MaterialTheme.colorScheme.surfaceVariant
-                            }
-                        ) {
-                            Text(
-                                text = badgeLabel,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = when (readinessBadge) {
-                                    ReadinessBadge.READY -> MaterialTheme.colorScheme.onPrimaryContainer
-                                    ReadinessBadge.WORD_MUTE_READY -> MaterialTheme.colorScheme.onSecondaryContainer
-                                    ReadinessBadge.ANALYZING -> MaterialTheme.colorScheme.onTertiaryContainer
-                                    ReadinessBadge.NOT_PROCESSED -> MaterialTheme.colorScheme.onSurfaceVariant
-                                }
-                            )
-                        }
-                    }
                 }
 
                 Text(
@@ -252,7 +249,7 @@ fun PodcastEpisodeListItem(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    if (inQueue) {
+                    if (isInQueue) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Rounded.PlaylistPlay,
                             contentDescription = "In Up Next",
@@ -261,18 +258,74 @@ fun PodcastEpisodeListItem(
                         )
                     }
 
-                    if (isDownloaded) {
-                        Icon(
-                            imageVector = Icons.Rounded.CheckCircle,
-                            contentDescription = "Downloaded",
-                            tint = Color(0xFF4CAF50),
-                            modifier = Modifier.size(14.dp)
-                        )
-                    } else if (isDownloading) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(13.dp),
-                            strokeWidth = 2.dp
-                        )
+                    when {
+                        isDownloading -> {
+                            val pct = downloadProgress?.percent
+                            Text(
+                                text = if (pct != null && pct >= 0) "Downloading $pct%" else "Downloading…",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1
+                            )
+                        }
+                        isAnalyzing -> {
+                            val pct = analysisStatus?.progressPercent ?: 0
+                            Text(
+                                text = "Processing $pct%",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1
+                            )
+                        }
+                        isFailed -> {
+                            Surface(
+                                onClick = {
+                                    scope.launch {
+                                        DownloadManager.downloadEpisode(context, db, bundle.episode.id)
+                                    }
+                                },
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.errorContainer
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.ErrorOutline,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Text(
+                                        text = stringResource(R.string.common_action_retry),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer
+                                    )
+                                }
+                            }
+                        }
+                        else -> {
+                            if (isDownloaded) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CheckCircle,
+                                    contentDescription = "Downloaded",
+                                    tint = Color(0xFF4CAF50),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                            if (isProcessed) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Shield,
+                                    contentDescription = "HushCast ready",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
                     }
 
                     if (formattedDuration.isNotEmpty()) {
@@ -285,8 +338,14 @@ fun PodcastEpisodeListItem(
                     }
 
                     if (isPlayed) {
+                        Icon(
+                            imageVector = Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(13.dp)
+                        )
                         Text(
-                            text = "• Played",
+                            text = "Played",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -295,56 +354,69 @@ fun PodcastEpisodeListItem(
                     trailingContent()
                 }
 
-                if (hasProgress) {
-                    Spacer(Modifier.height(2.dp))
-                    LinearProgressIndicator(
-                        progress = { (progressSec.toFloat() / durationSec.toFloat()).coerceIn(0f, 1f) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(2.5.dp)
-                            .clip(RoundedCornerShape(2.dp))
-                    )
-                }
-
                 supportingContent?.invoke()
             }
 
-            // Right: Pocket Casts-style circular play/pause button
-            Surface(
-                onClick = {
-                    if (!isCurrentlyEpisode) {
-                        playerVm.play(context, bundle)
-                    } else if (playerVm.isPlaying) {
-                        playerVm.pause()
-                    } else if (playerVm.canResumeCurrentEpisode) {
-                        playerVm.play()
-                    } else {
-                        playerVm.play(context, bundle)
-                    }
-                },
-                shape = CircleShape,
-                color = if (isActivelyPlaying) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    Color.Transparent
-                },
-                border = BorderStroke(
-                    width = 1.75.dp,
-                    color = MaterialTheme.colorScheme.primary
-                ),
-                modifier = Modifier.size(36.dp)
+            // Right: circular play/pause/replay button with progress ring
+            Box(
+                modifier = Modifier.size(38.dp),
+                contentAlignment = Alignment.Center
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = if (isActivelyPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = if (isActivelyPlaying) "Pause" else "Play",
-                        tint = if (isActivelyPlaying) {
-                            MaterialTheme.colorScheme.onPrimary
-                        } else {
-                            MaterialTheme.colorScheme.primary
-                        },
-                        modifier = Modifier.size(20.dp)
+                if (hasProgress && !isActivelyPlaying) {
+                    CircularProgressIndicator(
+                        progress = { progressFraction },
+                        modifier = Modifier.size(38.dp),
+                        strokeWidth = 2.5.dp,
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
                     )
+                }
+                Surface(
+                    onClick = {
+                        if (!isCurrentlyEpisode) {
+                            playerVm.play(context, bundle)
+                        } else if (playerVm.isPlaying) {
+                            playerVm.pause()
+                        } else if (playerVm.canResumeCurrentEpisode) {
+                            playerVm.play()
+                        } else {
+                            playerVm.play(context, bundle)
+                        }
+                    },
+                    shape = CircleShape,
+                    color = if (isActivelyPlaying) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        Color.Transparent
+                    },
+                    border = if (!hasProgress || isActivelyPlaying) {
+                        BorderStroke(
+                            width = 1.75.dp,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    } else null,
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = when {
+                                isActivelyPlaying -> Icons.Rounded.Pause
+                                isPlayed -> Icons.Rounded.Replay
+                                else -> Icons.Rounded.PlayArrow
+                            },
+                            contentDescription = when {
+                                isActivelyPlaying -> "Pause"
+                                isPlayed -> "Replay"
+                                else -> "Play"
+                            },
+                            tint = if (isActivelyPlaying) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.primary
+                            },
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
                 }
             }
         }

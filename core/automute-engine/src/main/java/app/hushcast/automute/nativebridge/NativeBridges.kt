@@ -64,6 +64,9 @@ internal object WhisperJni {
     external fun pcmFree(pcm: Long)
 
     @JvmStatic
+    external fun pcmKeepTail(pcm: Long, keepSamples: Int)
+
+    @JvmStatic
     external fun resamplerNew(inRate: Int, outRate: Int): Long
 
     @JvmStatic

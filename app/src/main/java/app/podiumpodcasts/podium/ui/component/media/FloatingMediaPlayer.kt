@@ -121,12 +121,13 @@ fun FloatingMediaPlayer(
                             .height(FloatingMediaPlayerHeight)
                             .border(1.dp, MaterialTheme.colorScheme.primary, CircleShape)
                             .pointerInput(Unit) {
+                                val thresholdPx = 40.dp.toPx()
                                 var totalDrag = 0f
                                 detectVerticalDragGestures(
                                     onDragStart = { totalDrag = 0f },
                                     onVerticalDrag = { _, dragAmount ->
                                         totalDrag += dragAmount
-                                        if(totalDrag < -40f) {
+                                        if(totalDrag < -thresholdPx) {
                                             totalDrag = 0f
                                             onClick()
                                         }

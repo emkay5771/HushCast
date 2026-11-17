@@ -86,6 +86,7 @@ fun MediaPlayerQueueBottomSheet(
     val tapUpNextToPlay = settingsRepository.behavior.tapUpNextToPlay.collectAsState(true)
 
     var showClearDialog by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
 
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true
@@ -93,12 +94,30 @@ fun MediaPlayerQueueBottomSheet(
 
     val headerCount = if(vm.mediaMetadata != null) 2 else 1
 
+    val localQueue = remember { androidx.compose.runtime.mutableStateListOf<androidx.media3.common.MediaItem>() }
+    var isDragging by remember { mutableStateOf(false) }
+    var dragFromIdx by remember { androidx.compose.runtime.mutableIntStateOf(-1) }
+    var dragToIdx by remember { androidx.compose.runtime.mutableIntStateOf(-1) }
+
+    androidx.compose.runtime.LaunchedEffect(vm.queueItems.toList(), isDragging) {
+        if (!isDragging) {
+            localQueue.clear()
+            localQueue.addAll(vm.queueItems)
+        }
+    }
+
     val lazyListState = rememberLazyListState()
     val reorderableLazyListState = rememberReorderableLazyListState(
         lazyListState = lazyListState
     ) { from, to ->
         if(from.index >= headerCount && to.index >= headerCount) {
-            vm.moveQueueItem(from.index - headerCount, to.index - headerCount)
+            val fromQ = from.index - headerCount
+            val toQ = to.index - headerCount
+            if (fromQ in localQueue.indices && toQ in localQueue.indices && fromQ != toQ) {
+                if (dragFromIdx == -1) dragFromIdx = fromQ
+                dragToIdx = toQ
+                localQueue.add(toQ, localQueue.removeAt(fromQ))
+            }
         }
     }
 
@@ -106,7 +125,7 @@ fun MediaPlayerQueueBottomSheet(
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
             title = { Text("Clear Up Next?") },
-            text = { Text("Remove all ${vm.queueIndex.size} queued episodes? The currently playing episode will keep playing.") },
+            text = { Text("Remove all ${localQueue.size} queued episodes? The currently playing episode will keep playing.") },
             dismissButton = {
                 TextButton(onClick = { showClearDialog = false }) {
                     Text("Cancel")
@@ -137,6 +156,7 @@ fun MediaPlayerQueueBottomSheet(
             sheetState = sheetState,
             onDismissRequest = onDismiss
         ) {
+            Box(modifier = Modifier.fillMaxWidth()) {
             LazyColumn(
                 state = lazyListState,
                 verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
@@ -237,7 +257,7 @@ fun MediaPlayerQueueBottomSheet(
                     }
                 }
 
-                if(vm.queueIndex.isEmpty()) {
+                if(localQueue.isEmpty()) {
                     item(key = "EMPTY") {
                         Card(
                             modifier = Modifier
@@ -277,89 +297,138 @@ fun MediaPlayerQueueBottomSheet(
                     }
                 } else {
                     items(
-                        count = vm.queueIndex.size,
-                        key = { queueIndexIndex ->
-                            vm.queue.getOrNull(queueIndexIndex) ?: vm.queueIndex[queueIndexIndex]
+                        count = localQueue.size,
+                        key = { idx ->
+                            localQueue[idx].getEpisodeId().orEmpty().ifBlank { idx.toString() }
                         }
                     ) { queueIndexIndex ->
-                        val index = vm.queueIndex[queueIndexIndex]
-                        val itemKey = vm.queue.getOrNull(queueIndexIndex) ?: index
-                        val mediaItem = vm.rememberMediaItemAt(index)
+                        val mediaItem = localQueue[queueIndexIndex]
+                        val itemKey = mediaItem.getEpisodeId().orEmpty().ifBlank { queueIndexIndex.toString() }
 
                         ReorderableItem(
                             state = reorderableLazyListState,
                             key = itemKey
                         ) {
-                            mediaItem?.let {
-                                val dismissState = rememberSwipeToDismissBoxState()
-                                if(dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
-                                    vm.dequeue(mediaItem.getEpisodeId())
+                            val dismissState = rememberSwipeToDismissBoxState(
+                                confirmValueChange = { value ->
+                                    if (value != SwipeToDismissBoxValue.Settled) {
+                                        val removedEpisodeId = mediaItem.getEpisodeId().orEmpty()
+                                        if (removedEpisodeId.isNotEmpty()) {
+                                            vm.dequeue(removedEpisodeId)
+                                        }
+                                        scope.launch {
+                                            val result = snackbarHostState.showSnackbar(
+                                                message = "Removed from Up Next",
+                                                actionLabel = "Undo",
+                                                duration = androidx.compose.material3.SnackbarDuration.Short
+                                            )
+                                            if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
+                                                vm.playNextMediaItem(mediaItem)
+                                            }
+                                        }
+                                        true
+                                    } else {
+                                        false
+                                    }
                                 }
+                            )
 
-                                SwipeToDismissBox(
-                                    state = dismissState,
-                                    backgroundContent = {
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .clip(RoundedCornerShape(16.dp))
-                                                .background(MaterialTheme.colorScheme.errorContainer)
-                                                .padding(horizontal = 20.dp),
-                                            contentAlignment = Alignment.CenterEnd
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Delete,
-                                                contentDescription = "Remove from queue",
-                                                tint = MaterialTheme.colorScheme.onErrorContainer
+                            SwipeToDismissBox(
+                                state = dismissState,
+                                backgroundContent = {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(MaterialTheme.colorScheme.errorContainer)
+                                            .padding(horizontal = 20.dp),
+                                        contentAlignment = Alignment.CenterEnd
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Delete,
+                                            contentDescription = "Remove from queue",
+                                            tint = MaterialTheme.colorScheme.onErrorContainer
+                                        )
+                                    }
+                                }
+                            ) {
+                                MediaItemListItem(
+                                    modifier = Modifier
+                                        .animateItem()
+                                        .longPressDraggableHandle(
+                                            onDragStarted = {
+                                                isDragging = true
+                                                dragFromIdx = -1
+                                                dragToIdx = -1
+                                            },
+                                            onDragStopped = {
+                                                if (dragFromIdx >= 0 && dragToIdx >= 0 && dragFromIdx != dragToIdx) {
+                                                    vm.moveQueueItem(dragFromIdx, dragToIdx)
+                                                }
+                                                isDragging = false
+                                                dragFromIdx = -1
+                                                dragToIdx = -1
+                                            }
+                                        ),
+                                    dragModifier = Modifier.draggableHandle(
+                                        onDragStarted = {
+                                            isDragging = true
+                                            dragFromIdx = -1
+                                            dragToIdx = -1
+                                        },
+                                        onDragStopped = {
+                                            if (dragFromIdx >= 0 && dragToIdx >= 0 && dragFromIdx != dragToIdx) {
+                                                vm.moveQueueItem(dragFromIdx, dragToIdx)
+                                            }
+                                            isDragging = false
+                                            dragFromIdx = -1
+                                            dragToIdx = -1
+                                        }
+                                    ),
+                                    mediaItem = mediaItem,
+                                    index = queueIndexIndex,
+                                    count = localQueue.size,
+                                    onMoveToTop = if(queueIndexIndex > 0) {
+                                        { vm.moveToTopOfQueue(queueIndexIndex) }
+                                    } else null,
+                                    onOpenDetails = {
+                                        scope.launch {
+                                            sheetState.hide()
+                                            onDismiss()
+                                            onOpenEpisode(
+                                                mediaItem.getOrigin().orEmpty(),
+                                                mediaItem.getEpisodeId().orEmpty()
                                             )
                                         }
-                                    }
-                                ) {
-                                    MediaItemListItem(
-                                        modifier = Modifier
-                                            .animateItem()
-                                            .longPressDraggableHandle(),
-                                        dragModifier = Modifier.draggableHandle(),
-                                        mediaItem = mediaItem,
-                                        index = queueIndexIndex,
-                                        count = vm.queueIndex.size,
-                                        onMoveToTop = if(queueIndexIndex > 0) {
-                                            { vm.moveToTopOfQueue(queueIndexIndex) }
-                                        } else null,
-                                        onOpenDetails = {
+                                    },
+                                    onClick = {
+                                        if(tapUpNextToPlay.value) {
+                                            vm.playFromQueue(queueIndexIndex)
+                                            scope.launch {
+                                                sheetState.hide()
+                                                onDismiss()
+                                            }
+                                        } else {
                                             scope.launch {
                                                 sheetState.hide()
                                                 onDismiss()
                                                 onOpenEpisode(
-                                                    mediaItem.getOrigin(),
-                                                    mediaItem.getEpisodeId()
+                                                    mediaItem.getOrigin().orEmpty(),
+                                                    mediaItem.getEpisodeId().orEmpty()
                                                 )
                                             }
-                                        },
-                                        onClick = {
-                                            if(tapUpNextToPlay.value) {
-                                                vm.playFromQueue(queueIndexIndex)
-                                                scope.launch {
-                                                    sheetState.hide()
-                                                    onDismiss()
-                                                }
-                                            } else {
-                                                scope.launch {
-                                                    sheetState.hide()
-                                                    onDismiss()
-                                                    onOpenEpisode(
-                                                        mediaItem.getOrigin(),
-                                                        mediaItem.getEpisodeId()
-                                                    )
-                                                }
-                                            }
                                         }
-                                    )
-                                }
+                                    }
+                                )
                             }
                         }
                     }
                 }
+            }
+            androidx.compose.material3.SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
             }
         }
     }

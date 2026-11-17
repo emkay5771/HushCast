@@ -6,6 +6,7 @@ import app.hushcast.automute.dsp.AdSkipPlaybackObserver
 import app.hushcast.automute.dsp.AutoMuteAudioProcessor
 import app.hushcast.automute.dsp.MuteActionMode
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -76,6 +77,21 @@ object HushCastEngineBridge {
         skippedChapterRanges = emptyList()
     }
 
+    fun getSkippedChapterRanges(): List<app.hushcast.automute.dsp.SkipAwareSeekCalculator.SkipRange> =
+        skippedChapterRanges
+
+    fun checkSkippedChapterPosition(player: androidx.media3.common.Player): Boolean {
+        if (!player.isPlaying) return false
+        val pos = player.currentPosition
+        for (range in skippedChapterRanges) {
+            if (pos in range.startMs until (range.endMs - 500L)) {
+                player.seekTo(range.endMs)
+                return true
+            }
+        }
+        return false
+    }
+
     fun getActiveSkipRanges(): List<app.hushcast.automute.dsp.SkipAwareSeekCalculator.SkipRange> {
         return adSkipObserver.getActiveAutoSkipRanges() + skippedChapterRanges
     }
@@ -90,5 +106,13 @@ object HushCastEngineBridge {
 
     fun setCastingExternal(casting: Boolean) {
         _isCastingExternal.value = casting
+    }
+
+    suspend fun loadFromSettings(settingsRepository: app.podiumpodcasts.podium.SettingsRepository) {
+        wordMutingEnabled = settingsRepository.hushCast.wordMutingEnabled.firstOrNull() ?: true
+        defaultActionMode = settingsRepository.hushCast.muteActionMode.firstOrNull()
+            ?: MuteActionMode.HARD_SILENCE
+        defaultAdPolicy = settingsRepository.hushCast.adPolicyMode.firstOrNull()
+            ?: AdPolicyMode.AUTO_SKIP
     }
 }

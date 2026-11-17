@@ -88,17 +88,29 @@ class PodcastDetailViewModel(
     var selectedDestination by mutableStateOf(Destinations.EPISODES)
 
     var isRefreshing by mutableStateOf(false)
+    var refreshError by mutableStateOf<String?>(null)
 
     val showSettingsBottomSheet = mutableStateOf(false)
     val showDeleteDialog = mutableStateOf(false)
+    val showUnsubscribeDialog = mutableStateOf(false)
 
     val lazyListState = LazyListState()
     val snackbarHostState = SnackbarHostState()
 
     fun updatePodcast(context: Context, podcast: PodcastModel) {
         viewModelScope.launch {
-            SingularPodcastUpdateWork(context, db)
-                .doWork(podcast)
+            isRefreshing = true
+            refreshError = null
+            try {
+                SingularPodcastUpdateWork(context, db)
+                    .doWork(podcast)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                refreshError = e.message ?: "Could not refresh podcast"
+            } finally {
+                isRefreshing = false
+            }
         }
     }
 

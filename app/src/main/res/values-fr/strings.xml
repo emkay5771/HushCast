@@ -271,4 +271,9 @@
     <string name="route_settings_privacy">Confidentialité</string>
     <string name="route_settings_privacy_disable_apple_podcasts_api">Désactiver l\'utilisation de l\'API d\'Apple Podcasts</string>
     <string name="route_settings_privacy_disable_apple_podcasts_api_description">Si cette option est activée, podium n\'utilisera plus l\'API d\'Apple Podcasts</string>
+    <string name="common_action_retry">Réessayer</string>
+    <string name="route_continue_playing_empty_title">Tout est à jour</string>
+    <string name="route_up_next">À suivre</string>
+    <string name="snackbar_marked_as_unplayed">Marqué comme non lu</string>
+    <string name="common_error">Erreur</string>
 </resources>

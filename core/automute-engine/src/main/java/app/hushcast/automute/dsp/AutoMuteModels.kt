@@ -39,5 +39,6 @@ data class AdWindow(
     val endMs: Long,
     val confidence: Float,
     val isHighConfidence: Boolean = confidence >= 0.80f,
-    val label: String = if (confidence >= 0.80f) "Sponsor / Ad" else "Suggested Ad"
+    val label: String = if (confidence >= 0.80f) "Sponsor / Ad" else "Suggested Ad",
+    val adClass: String = "sponsor_ad"
 )

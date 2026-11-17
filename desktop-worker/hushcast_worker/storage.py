@@ -1,24 +1,35 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Optional
 
-from .models import PIPELINE_VERSION, DesktopAnalysisBundle, DesktopReadyEpisode
+from .models import (
+    PIPELINE_VERSION,
+    DesktopAnalysisBundle,
+    DesktopJobResponse,
+    DesktopReadyEpisode,
+    DesktopSearchHit,
+    JobState,
+)
 
 
 class WorkerCache:
-    """Content-addressed disk cache keyed by fileSha256."""
+    """Content-addressed disk cache keyed by fileSha256, plus persisted job states."""
 
     def __init__(self, root_dir: Path) -> None:
         self.root_dir = root_dir
         self.episodes_dir = root_dir / "episodes"
         self.tmp_dir = root_dir / "tmp"
+        self.jobs_dir = root_dir / "jobs"
         self.index_path = root_dir / "index.json"
         self.episodes_dir.mkdir(parents=True, exist_ok=True)
         self.tmp_dir.mkdir(parents=True, exist_ok=True)
+        self.jobs_dir.mkdir(parents=True, exist_ok=True)
         self._index: dict[str, dict] = self._load_index()
+        self._search_cache: dict[str, tuple] = {}
 
     def _load_index(self) -> dict[str, dict]:
         if not self.index_path.exists():
@@ -34,7 +45,7 @@ class WorkerCache:
     def _save_index(self) -> None:
         tmp = self.index_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self._index, indent=2), encoding="utf-8")
-        tmp.replace(self.index_path)
+        os.replace(tmp, self.index_path)
 
     def audio_path(self, sha256: str) -> Path:
         return self.episodes_dir / f"{sha256}.audio"
@@ -45,8 +56,11 @@ class WorkerCache:
     def embeddings_path(self, sha256: str) -> Path:
         return self.episodes_dir / f"{sha256}.emb.npy"
 
-    def has_complete(self, sha256: str, *, require_current_pipeline: bool = False) -> bool:
-        if not (self.audio_path(sha256).exists() and self.bundle_path(sha256).exists()):
+    def has_audio(self, sha256: str) -> bool:
+        return self.audio_path(sha256).exists()
+
+    def has_bundle(self, sha256: str, *, require_current_pipeline: bool = False) -> bool:
+        if not self.bundle_path(sha256).exists():
             return False
         if require_current_pipeline:
             meta = self._index["by_sha"].get(sha256, {})
@@ -54,9 +68,22 @@ class WorkerCache:
                 return False
         return True
 
+    def has_complete(
+        self,
+        sha256: str,
+        *,
+        require_current_pipeline: bool = False,
+        require_audio: bool = False,
+    ) -> bool:
+        if not self.has_bundle(sha256, require_current_pipeline=require_current_pipeline):
+            return False
+        if require_audio and not self.has_audio(sha256):
+            return False
+        return True
+
     def lookup_by_url(self, audio_url: str) -> Optional[str]:
         sha = self._index["by_url"].get(audio_url)
-        if sha and self.has_complete(sha, require_current_pipeline=True):
+        if sha and self.has_bundle(sha, require_current_pipeline=True):
             return sha
         return None
 
@@ -79,18 +106,24 @@ class WorkerCache:
     ) -> None:
         dest_audio = self.audio_path(sha256)
         if not dest_audio.exists():
-            audio_tmp_path.replace(dest_audio)
+            os.replace(audio_tmp_path, dest_audio)
         else:
             audio_tmp_path.unlink(missing_ok=True)
 
         dest_bundle = self.bundle_path(sha256)
-        dest_bundle.write_text(bundle.model_dump_json(indent=2), encoding="utf-8")
+        tmp_bundle = dest_bundle.with_suffix(".bundle.tmp")
+        tmp_bundle.write_text(bundle.model_dump_json(indent=2), encoding="utf-8")
+        os.replace(tmp_bundle, dest_bundle)
 
         if embeddings is not None:
             import numpy as np
 
-            np.save(self.embeddings_path(sha256), np.asarray(embeddings, dtype=np.float32))
+            emb_path = self.embeddings_path(sha256)
+            tmp_emb = emb_path.with_suffix(".emb.tmp.npy")
+            np.save(tmp_emb, np.asarray(embeddings, dtype=np.float32))
+            os.replace(tmp_emb, emb_path)
 
+        self._search_cache.pop(sha256, None)
         self._index["by_url"][audio_url] = sha256
         self._index["by_sha"][sha256] = {
             "fileSha256": sha256,
@@ -99,7 +132,8 @@ class WorkerCache:
             "audioUrl": audio_url,
             "contentType": content_type,
             "durationSec": bundle.durationSec,
-            "audioBytes": dest_audio.stat().st_size,
+            "audioBytes": dest_audio.stat().st_size if dest_audio.exists() else 0,
+            "hasAudio": dest_audio.exists(),
             "wordCount": len(bundle.wordIndexBlob.words),
             "adCount": len(bundle.adSegments),
             "pipelineVersion": bundle.pipelineVersion,
@@ -107,9 +141,8 @@ class WorkerCache:
         }
         self._save_index()
 
-    def semantic_search(self, query_vec, top_k: int = 15):
+    def semantic_search(self, query_vec, top_k: int = 15) -> list[DesktopSearchHit]:
         import numpy as np
-        from .models import DesktopSearchHit
 
         q = np.asarray(query_vec, dtype=np.float32).reshape(-1)
         q_norm = float(np.linalg.norm(q))
@@ -117,17 +150,23 @@ class WorkerCache:
             q = q / q_norm
 
         hits: list[DesktopSearchHit] = []
-        for sha, meta in self._index["by_sha"].items():
-            emb_file = self.embeddings_path(sha)
-            bundle_file = self.bundle_path(sha)
-            if not emb_file.exists() or not bundle_file.exists():
-                continue
-            mat = np.load(emb_file)
-            if mat.ndim != 2 or mat.shape[0] == 0:
-                continue
-            bundle = self.get_bundle(sha)
-            if bundle is None or not bundle.wordIndexBlob.segments:
-                continue
+        for sha, meta in list(self._index["by_sha"].items()):
+            cached = self._search_cache.get(sha)
+            if cached is None:
+                emb_file = self.embeddings_path(sha)
+                bundle_file = self.bundle_path(sha)
+                if not emb_file.exists() or not bundle_file.exists():
+                    continue
+                mat = np.load(emb_file)
+                if mat.ndim != 2 or mat.shape[0] == 0:
+                    continue
+                bundle = self.get_bundle(sha)
+                if bundle is None or not bundle.wordIndexBlob.segments:
+                    continue
+                self._search_cache[sha] = (mat, bundle)
+            else:
+                mat, bundle = cached
+
             scores = mat @ q
             n = min(len(scores), len(bundle.wordIndexBlob.segments))
             top_indices = np.argsort(scores[:n])[::-1][: min(5, n)]
@@ -156,15 +195,17 @@ class WorkerCache:
     def list_ready(self) -> list[DesktopReadyEpisode]:
         out: list[DesktopReadyEpisode] = []
         for sha, meta in self._index["by_sha"].items():
-            if not self.has_complete(sha):
+            if not self.has_bundle(sha):
                 continue
+            audio_p = self.audio_path(sha)
+            audio_bytes = audio_p.stat().st_size if audio_p.exists() else 0
             out.append(
                 DesktopReadyEpisode(
                     fileSha256=sha,
                     episodeId=meta.get("episodeId", ""),
                     title=meta.get("title", ""),
                     durationSec=float(meta.get("durationSec", 0.0)),
-                    audioBytes=int(meta.get("audioBytes", 0)),
+                    audioBytes=audio_bytes,
                     wordCount=int(meta.get("wordCount", 0)),
                     adCount=int(meta.get("adCount", 0)),
                     createdAtMs=int(meta.get("createdAtMs", 0)),
@@ -173,9 +214,45 @@ class WorkerCache:
         out.sort(key=lambda e: e.createdAtMs, reverse=True)
         return out
 
-    def clear(self, *, audio_only: bool = False) -> dict[str, int]:
+    def save_job(self, job: DesktopJobResponse) -> None:
+        path = self.jobs_dir / f"{job.jobId}.json"
+        tmp = path.with_suffix(".tmp")
+        payload = {
+            "job": job.model_dump(mode="json"),
+            "updatedAt": time.time(),
+        }
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp, path)
+
+    def load_jobs(self, *, ttl_seconds: float = 86400.0) -> dict[str, DesktopJobResponse]:
+        out: dict[str, DesktopJobResponse] = {}
+        now = time.time()
+        if not self.jobs_dir.exists():
+            return out
+        for entry in self.jobs_dir.iterdir():
+            if not entry.is_file() or entry.suffix != ".json":
+                continue
+            try:
+                data = json.loads(entry.read_text(encoding="utf-8"))
+                updated_at = float(data.get("updatedAt", 0.0))
+                job = DesktopJobResponse.model_validate(data["job"])
+                if job.state in (JobState.READY, JobState.FAILED, JobState.CANCELLED) and (now - updated_at) > ttl_seconds:
+                    entry.unlink(missing_ok=True)
+                    continue
+                out[job.jobId] = job
+            except Exception:
+                entry.unlink(missing_ok=True)
+        return out
+
+    def clear(
+        self,
+        *,
+        audio_only: bool = False,
+        active_job_ids: Optional[set[str]] = None,
+    ) -> dict[str, int]:
         removed_files = 0
         freed_bytes = 0
+        active_prefixes = {f"{jid}." for jid in (active_job_ids or set())}
 
         for directory in (self.episodes_dir, self.tmp_dir):
             if not directory.exists():
@@ -185,6 +262,8 @@ class WorkerCache:
                     continue
                 if audio_only and directory == self.episodes_dir and entry.suffix != ".audio":
                     continue
+                if directory == self.tmp_dir and any(entry.name.startswith(p) for p in active_prefixes):
+                    continue
                 try:
                     size = entry.stat().st_size
                 except OSError:
@@ -193,9 +272,14 @@ class WorkerCache:
                 removed_files += 1
                 freed_bytes += size
 
-        if not audio_only:
+        if audio_only:
+            for meta in self._index["by_sha"].values():
+                meta["hasAudio"] = False
+                meta["audioBytes"] = 0
+            self._save_index()
+        else:
+            self._search_cache.clear()
             self._index = {"by_url": {}, "by_sha": {}}
             self._save_index()
 
         return {"removedFiles": removed_files, "freedBytes": freed_bytes}
-

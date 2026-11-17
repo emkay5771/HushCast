@@ -146,7 +146,7 @@ fun NewEpisodesRoute(
                     val itemPlayerVm = viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
                     val itemSettings = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
                     val itemSwipeRightAction = itemSettings.behavior.episodeSwipeRightAction.collectAsState(
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.HEAR_LATER
+                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
                     ).value
 
                     val markedAsSeen = stringResource(R.string.snackbar_marked_as_seen)

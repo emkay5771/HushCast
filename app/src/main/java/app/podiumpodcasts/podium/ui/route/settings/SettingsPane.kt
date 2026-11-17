@@ -29,10 +29,10 @@ import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsSynchronizationK
 import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsSynchronizationPane
 import kotlinx.serialization.Serializable
 
-@SuppressLint("ParcelCreator")
 @Serializable
-open class SettingsPaneKey : DetailPaneKey()
+abstract class SettingsPaneKey : android.os.Parcelable
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun SettingsPane(
     showBackButton: Boolean,

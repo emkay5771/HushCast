@@ -4,6 +4,8 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -27,39 +29,64 @@ data class PodcastGridState(
  * Persists Pocket Casts-style podcast folders and custom drag-and-drop grid order.
  */
 object PodcastGridOrganization {
-    private const val PREFS_NAME = "hushcast_podcast_grid"
-    private const val KEY_STATE = "grid_state_json"
+    private const val LEGACY_PREFS_NAME = "hushcast_podcast_grid"
+    private const val LEGACY_KEY_STATE = "grid_state_json"
 
     private val json = Json { ignoreUnknownKeys = true }
     private val _state = MutableStateFlow(PodcastGridState())
     val state: StateFlow<PodcastGridState> = _state.asStateFlow()
+    private val ioScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     @Volatile
     private var initialized = false
 
-    fun init(context: Context) {
+    suspend fun init(context: Context) {
         if (initialized) return
-        synchronized(this) {
-            if (initialized) return
-            val raw = context.applicationContext
-                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .getString(KEY_STATE, null)
-            if (raw != null) {
-                runCatching { json.decodeFromString<PodcastGridState>(raw) }
+        val appContext = context.applicationContext
+        val repo = SettingsRepository(appContext)
+        val dsRaw = repo.appearance.podcastGridStateRaw.firstOrNull()?.takeIf { it.isNotBlank() }
+        if (dsRaw != null) {
+            runCatching { json.decodeFromString<PodcastGridState>(dsRaw) }
+                .getOrNull()
+                ?.let { _state.value = it }
+        } else {
+            // Migrate legacy SharedPreferences if present
+            val legacyPrefs = appContext.getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
+            val legacyRaw = legacyPrefs.getString(LEGACY_KEY_STATE, null)
+            if (legacyRaw != null) {
+                runCatching { json.decodeFromString<PodcastGridState>(legacyRaw) }
+                    .getOrNull()
+                    ?.let {
+                        _state.value = it
+                        repo.appearance.setPodcastGridStateRaw(legacyRaw)
+                    }
+                legacyPrefs.edit().clear().apply()
+            }
+        }
+        initialized = true
+    }
+
+    private fun ensureInitSync(context: Context) {
+        if (!initialized) {
+            // Synchronous fallback if called from a non-suspend UI callback before init completes
+            val legacyRaw = context.applicationContext
+                .getSharedPreferences(LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
+                .getString(LEGACY_KEY_STATE, null)
+            if (legacyRaw != null && _state.value == PodcastGridState()) {
+                runCatching { json.decodeFromString<PodcastGridState>(legacyRaw) }
                     .getOrNull()
                     ?.let { _state.value = it }
             }
-            initialized = true
         }
     }
 
     private fun save(context: Context, next: PodcastGridState) {
         _state.value = next
-        context.applicationContext
-            .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_STATE, json.encodeToString(next))
-            .apply()
+        val encoded = json.encodeToString(next)
+        val appContext = context.applicationContext
+        ioScope.launch {
+            SettingsRepository(appContext).appearance.setPodcastGridStateRaw(encoded)
+        }
     }
 
     fun folderKey(folderId: String) = "folder:$folderId"
@@ -71,7 +98,7 @@ object PodcastGridOrganization {
         colorIndex: Int = 0,
         initialOrigins: List<String> = emptyList()
     ): PodcastFolder {
-        init(context)
+        ensureInitSync(context)
         val cur = _state.value
         val id = UUID.randomUUID().toString().take(8)
         val cleanedFolders = cur.folders.map { f ->
@@ -86,7 +113,7 @@ object PodcastGridOrganization {
     }
 
     fun renameFolder(context: Context, folderId: String, newName: String) {
-        init(context)
+        ensureInitSync(context)
         val cur = _state.value
         val updated = cur.folders.map {
             if (it.id == folderId) it.copy(name = newName.trim().ifEmpty { it.name }) else it
@@ -95,7 +122,7 @@ object PodcastGridOrganization {
     }
 
     fun deleteFolder(context: Context, folderId: String) {
-        init(context)
+        ensureInitSync(context)
         val cur = _state.value
         val target = cur.folders.find { it.id == folderId } ?: return
         val restoredKeys = target.origins.map { podcastKey(it) }
@@ -106,7 +133,7 @@ object PodcastGridOrganization {
     }
 
     fun addPodcastToFolder(context: Context, origin: String, folderId: String) {
-        init(context)
+        ensureInitSync(context)
         val cur = _state.value
         val updatedFolders = cur.folders.map { f ->
             when {
@@ -120,7 +147,7 @@ object PodcastGridOrganization {
     }
 
     fun removePodcastFromFolder(context: Context, origin: String, folderId: String) {
-        init(context)
+        ensureInitSync(context)
         val cur = _state.value
         val updatedFolders = cur.folders.map { f ->
             if (f.id == folderId) f.copy(origins = f.origins - origin) else f
@@ -130,7 +157,7 @@ object PodcastGridOrganization {
     }
 
     fun reorderVisibleKeys(context: Context, visibleKeys: List<String>, fromIndex: Int, toIndex: Int) {
-        init(context)
+        ensureInitSync(context)
         if (fromIndex !in visibleKeys.indices || toIndex !in visibleKeys.indices || fromIndex == toIndex) return
         val mutable = visibleKeys.toMutableList()
         val moved = mutable.removeAt(fromIndex)
@@ -141,7 +168,7 @@ object PodcastGridOrganization {
     }
 
     fun moveFolderPodcast(context: Context, folderId: String, origin: String, delta: Int) {
-        init(context)
+        ensureInitSync(context)
         val cur = _state.value
         val updatedFolders = cur.folders.map { f ->
             if (f.id != folderId) f
@@ -161,7 +188,7 @@ object PodcastGridOrganization {
     }
 
     fun moveFolder(context: Context, folderId: String, delta: Int) {
-        init(context)
+        ensureInitSync(context)
         val cur = _state.value
         val idx = cur.folders.indexOfFirst { it.id == folderId }
         if (idx < 0) return

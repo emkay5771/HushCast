@@ -71,7 +71,7 @@ import app.podiumpodcasts.podium.ui.vm.SettingsViewModel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
-@SuppressLint("ParcelCreator")
+@kotlinx.parcelize.Parcelize
 @Serializable
 class SettingsSynchronizationKey : SettingsPaneKey()
 
@@ -194,7 +194,7 @@ fun SettingsSynchronizationPane(
                             label = stringResource(R.string.route_settings_synchronization_synchronize_now),
 
                             index = 0,
-                            count = 2,
+                            count = 3,
 
                             onClick = {
                                 scope.launch {
@@ -211,7 +211,7 @@ fun SettingsSynchronizationPane(
                             label = stringResource(R.string.route_settings_synchronization_full_synchronize),
 
                             index = 1,
-                            count = 2,
+                            count = 3,
 
                             onClick = {
                                 scope.launch {
@@ -219,6 +219,76 @@ fun SettingsSynchronizationPane(
                                 }
                             }
                         )
+                    }
+
+                    item {
+                        val intervalMinutes = vm.repository.sync.intervalMinutes.collectAsState(60)
+                        val showIntervalPicker = remember { mutableStateOf(false) }
+                        val intervalLabel = when (intervalMinutes.value) {
+                            0 -> "Manual only"
+                            15 -> "Every 15 minutes"
+                            60 -> "Every hour"
+                            360 -> "Every 6 hours"
+                            1440 -> "Every 24 hours"
+                            else -> "Every ${intervalMinutes.value} minutes"
+                        }
+
+                        SettingsListItem(
+                            modifier = Modifier.animateItem(),
+                            label = "Sync interval",
+                            description = intervalLabel,
+                            index = 2,
+                            count = 3,
+                            onClick = { showIntervalPicker.value = true }
+                        )
+
+                        if (showIntervalPicker.value) {
+                            val options = listOf(
+                                0 to "Manual only",
+                                15 to "Every 15 minutes",
+                                60 to "Every hour",
+                                360 to "Every 6 hours",
+                                1440 to "Every 24 hours"
+                            )
+                            androidx.compose.material3.AlertDialog(
+                                onDismissRequest = { showIntervalPicker.value = false },
+                                title = { Text("Sync interval") },
+                                text = {
+                                    Column {
+                                        options.forEach { (mins, label) ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                androidx.compose.material3.RadioButton(
+                                                    selected = intervalMinutes.value == mins,
+                                                    onClick = {
+                                                        showIntervalPicker.value = false
+                                                        scope.launch {
+                                                            vm.repository.sync.setIntervalMinutes(mins)
+                                                            PartialSynchronizationWorker.schedule(
+                                                                context = context,
+                                                                repeatIntervalMinutes = mins.toLong(),
+                                                                replace = true
+                                                            )
+                                                        }
+                                                    }
+                                                )
+                                                Text(label, style = MaterialTheme.typography.bodyMedium)
+                                            }
+                                        }
+                                    }
+                                },
+                                confirmButton = {},
+                                dismissButton = {
+                                    androidx.compose.material3.TextButton(onClick = { showIntervalPicker.value = false }) {
+                                        Text("Cancel")
+                                    }
+                                }
+                            )
+                        }
                     }
 
                     item {

@@ -11,7 +11,7 @@ android {
     ndkVersion = "27.2.12479018"
 
     defaultConfig {
-        minSdk = 26
+        minSdk = 34
         consumerProguardFiles("consumer-rules.pro")
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -47,6 +47,10 @@ configurations.configureEach {
     }
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.serialization.json)
@@ -67,4 +71,5 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation("org.json:json:20240303")
     testImplementation("com.microsoft.onnxruntime:onnxruntime:1.20.0")
+    testImplementation("androidx.room:room-testing:${libs.versions.room.get()}")
 }

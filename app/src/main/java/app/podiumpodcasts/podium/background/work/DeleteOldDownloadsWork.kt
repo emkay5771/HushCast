@@ -20,10 +20,15 @@ class DeleteOldDownloadsWork(
             .getOlderThanSync(System.currentTimeMillis() - (afterSeconds * 1000L))
 
         for(bundle in bundles) {
+            val episode = bundle.episode
+            if (episode == null) {
+                db.podcastEpisodeDownloads().delete(bundle.download.episodeId)
+                continue
+            }
             DownloadManager.deleteEpisodeDownload(
                 context = context,
                 db = db,
-                episode = bundle.episode
+                episode = episode
             )
         }
 

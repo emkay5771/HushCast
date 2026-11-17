@@ -48,7 +48,13 @@ data class EpisodeWordIndexEntity(
     val durationSec: Double,
     val wordCount: Int,
     val compressedBlob: ByteArray,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val encoderDelayMs: Int = 0
+)
+
+data class WordIndexRef(
+    val fileSha256: String,
+    val episodeId: String
 )
 
 @Entity(
@@ -79,7 +85,8 @@ data class AdSegmentEntity(
     val endMs: Long,
     val confidence: Float,
     val isHighConfidence: Boolean,
-    val label: String
+    val label: String,
+    val adClass: String = "sponsor_ad"
 )
 
 @Entity(tableName = "mute_rules")
@@ -109,7 +116,8 @@ data class EpisodeAnalysisStatusEntity(
     val errorMessage: String? = null,
     val peakRssMb: Int = 0,
     val analysisDurationMs: Long = 0L,
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val encoderDelayMs: Int = 0
 )
 
 @Entity(tableName = "episode_insights")
@@ -135,6 +143,9 @@ interface AutoMuteDao {
     @Query("SELECT * FROM episode_word_index")
     suspend fun getAllWordIndices(): List<EpisodeWordIndexEntity>
 
+    @Query("SELECT fileSha256, episodeId FROM episode_word_index")
+    suspend fun getAllWordIndexRefs(): List<WordIndexRef>
+
     @Query("DELETE FROM mute_segments WHERE fileSha256 = :sha256")
     suspend fun deleteMuteSegments(sha256: String)
 
@@ -143,6 +154,29 @@ interface AutoMuteDao {
 
     @Query("SELECT * FROM mute_segments WHERE fileSha256 = :sha256 ORDER BY startMs ASC")
     suspend fun getMuteSegments(sha256: String): List<MuteSegmentEntity>
+
+    @androidx.room.Transaction
+    suspend fun replaceMuteSegments(sha256: String, segments: List<MuteSegmentEntity>) {
+        val existingDisabled = getMuteSegments(sha256)
+            .filter { !it.enabled }
+            .map { it.ruleId to it.startMs }
+            .toHashSet()
+        deleteMuteSegments(sha256)
+        if (segments.isNotEmpty()) {
+            val preserved = if (existingDisabled.isEmpty()) {
+                segments
+            } else {
+                segments.map { seg ->
+                    if ((seg.ruleId to seg.startMs) in existingDisabled) {
+                        seg.copy(enabled = false)
+                    } else {
+                        seg
+                    }
+                }
+            }
+            insertMuteSegments(preserved)
+        }
+    }
 
     @Query("SELECT * FROM mute_segments WHERE episodeId = :episodeId ORDER BY startMs ASC")
     fun observeMuteSegmentsByEpisode(episodeId: String): Flow<List<MuteSegmentEntity>>
@@ -155,6 +189,14 @@ interface AutoMuteDao {
 
     @Insert
     suspend fun insertAdSegments(segments: List<AdSegmentEntity>)
+
+    @androidx.room.Transaction
+    suspend fun replaceAdSegments(sha256: String, segments: List<AdSegmentEntity>) {
+        deleteAdSegments(sha256)
+        if (segments.isNotEmpty()) {
+            insertAdSegments(segments)
+        }
+    }
 
     @Query("SELECT * FROM ad_segments WHERE fileSha256 = :sha256 ORDER BY startMs ASC")
     suspend fun getAdSegments(sha256: String): List<AdSegmentEntity>
@@ -269,6 +311,42 @@ interface AutoMuteDao {
         deleteMuteSegmentsByEpisode(episodeId)
         deleteAdSegmentsByEpisode(episodeId)
     }
+
+    @Query("DELETE FROM episode_analysis_status WHERE episodeId = :episodeId")
+    suspend fun resetEpisodeStatusOnly(episodeId: String)
+
+    @Query(
+        """
+        DELETE FROM episode_word_index
+        WHERE fileSha256 NOT IN (
+            SELECT fileSha256 FROM episode_word_index ORDER BY createdAt DESC LIMIT :keepCount
+        )
+        """
+    )
+    suspend fun pruneOldWordIndices(keepCount: Int = 500)
+
+    @Query(
+        """
+        DELETE FROM mute_segments
+        WHERE fileSha256 NOT IN (SELECT fileSha256 FROM episode_word_index)
+        """
+    )
+    suspend fun pruneOrphanMuteSegments()
+
+    @Query(
+        """
+        DELETE FROM ad_segments
+        WHERE fileSha256 NOT IN (SELECT fileSha256 FROM episode_word_index)
+        """
+    )
+    suspend fun pruneOrphanAdSegments()
+
+    @androidx.room.Transaction
+    suspend fun pruneHashCache(keepCount: Int = 500) {
+        pruneOldWordIndices(keepCount)
+        pruneOrphanMuteSegments()
+        pruneOrphanAdSegments()
+    }
 }
 
 @Database(
@@ -281,8 +359,8 @@ interface AutoMuteDao {
         EpisodeAnalysisStatusEntity::class,
         EpisodeInsightsEntity::class
     ],
-    version = 2,
-    exportSchema = false
+    version = 3,
+    exportSchema = true
 )
 abstract class AutoMuteDatabase : RoomDatabase() {
     abstract fun dao(): AutoMuteDao
@@ -318,13 +396,28 @@ abstract class AutoMuteDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `ad_segments` ADD COLUMN `adClass` TEXT NOT NULL DEFAULT 'sponsor_ad'")
+                db.execSQL("ALTER TABLE `episode_word_index` ADD COLUMN `encoderDelayMs` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `episode_analysis_status` ADD COLUMN `encoderDelayMs` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getInstance(context: Context): AutoMuteDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     AutoMuteDatabase::class.java,
                     "hushcast_automute.db"
-                ).addMigrations(MIGRATION_1_2).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { INSTANCE = it }
+            }
+        }
+
+        fun closeInstance() {
+            synchronized(this) {
+                INSTANCE?.close()
+                INSTANCE = null
             }
         }
     }
@@ -370,5 +463,6 @@ fun AdSegmentEntity.toDomain() = AdWindow(
     endMs = endMs,
     confidence = confidence,
     isHighConfidence = isHighConfidence,
-    label = label
+    label = label,
+    adClass = adClass
 )

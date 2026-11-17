@@ -6,13 +6,14 @@ import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.PlayerMessage
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -23,10 +24,13 @@ import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionCommand
+import androidx.room.withTransaction
 import app.hushcast.automute.dsp.AdPolicyMode
 import app.hushcast.automute.dsp.HushCastAudioProcessorChain
 import app.hushcast.automute.storage.AutoMuteDatabase
 import app.hushcast.automute.storage.toDomain
+import app.podiumpodcasts.podium.HeadsetNextAction
+import app.podiumpodcasts.podium.HeadsetPrevAction
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.SettingsRepository
 import app.podiumpodcasts.podium.api.db.model.MediaMetadataExtra
@@ -41,10 +45,12 @@ import app.podiumpodcasts.podium.utils.getOrigin
 import app.podiumpodcasts.podium.utils.getResumeAt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 const val COMMAND_SLEEP_TIMER_SET = "app.podiumpodcasts.podium.COMMAND_SLEEP_TIMER_SET"
@@ -56,6 +62,9 @@ const val COMMAND_SET_SEEK_BACK_INCREMENT =
 const val COMMAND_SET_SEEK_FORWARD_INCREMENT =
     "app.podiumpodcasts.podium.COMMAND_SET_SEEK_FORWARD_INCREMENT"
 
+const val EXTRA_SLEEP_TIMER_TRIGGER = "sleep_timer_trigger"
+
+@OptIn(UnstableApi::class)
 class PlaybackService : MediaLibraryService() {
 
     val db by lazy {
@@ -66,44 +75,39 @@ class PlaybackService : MediaLibraryService() {
         AutoMuteDatabase.getInstance(this)
     }
 
-    private val settingsRepository = SettingsRepository(this)
+    private val settingsRepository by lazy { SettingsRepository(this) }
 
     private val job = SupervisorJob()
-    private val scope = CoroutineScope(job)
+    private val scope = CoroutineScope(job + Dispatchers.Main)
 
+    private lateinit var exoPlayer: ExoPlayer
     private var mediaSession: MediaLibrarySession? = null
+    private var sessionCallback: MediaLibrarySessionCallback? = null
 
     private var currentSkipEndingValue: Int = 0
+    @Volatile var currentSeekBackIncrementMs: Long = 10_000L
+    @Volatile var currentSeekForwardIncrementMs: Long = 10_000L
+    @Volatile var speedPresets: List<Float> = listOf(0.8f, 1.0f, 1.2f, 1.5f, 1.8f, 2.0f)
+    @Volatile var headsetNextAction: HeadsetNextAction = HeadsetNextAction.SKIP_FORWARD
+    @Volatile var headsetPrevAction: HeadsetPrevAction = HeadsetPrevAction.SKIP_BACK
 
-    private var updatePlayStateHandler: Handler = Handler(Looper.getMainLooper())
-    private var updatePlayStateRunnable = Runnable {
-        if(mediaSession?.player?.isPlaying != true) return@Runnable
+    private val scheduledMessages = mutableListOf<PlayerMessage>()
+    private var lastStartedEpisodeId: String? = null
+
+    private val updatePlayStateHandler: Handler = Handler(Looper.getMainLooper())
+    private val updatePlayStateRunnable = Runnable {
+        if (mediaSession?.player?.isPlaying != true) return@Runnable
         enqueueUpdatePlayState()
         updatePlayState()
     }
 
-    private var skipEndingHandler: Handler = Handler(Looper.getMainLooper())
-    private var skipEndingRunnable = Runnable {
-        if(mediaSession?.player?.isPlaying != true) return@Runnable
-        enqueueSkipEnding()
-        checkSkipEnding()
-    }
-
-    private val adSkipHandler: Handler = Handler(Looper.getMainLooper())
-    private val adSkipRunnable = object : Runnable {
-        override fun run() {
-            val player = mediaSession?.player ?: return
-            if(!player.isPlaying) return
-            HushCastEngineBridge.adSkipObserver.checkPosition(player)
-            adSkipHandler.postDelayed(this, 300L)
-        }
-    }
-
-    private var sleepTimerHandler: Handler = Handler(Looper.getMainLooper())
+    private val sleepTimerHandler: Handler = Handler(Looper.getMainLooper())
     var sleepTimerTrigger: Long? = null
+        private set
     private val sleepTimerFadeDurationMs = 10_000L
-    private var sleepTimerRunnable = Runnable {
+    private val sleepTimerRunnable = Runnable {
         sleepTimerTrigger = null
+        publishSleepTimerExtra()
         mediaSession?.player?.let { p ->
             p.pause()
             p.volume = 1.0f
@@ -114,8 +118,8 @@ class PlaybackService : MediaLibraryService() {
             val trigger = sleepTimerTrigger ?: return
             val player = mediaSession?.player ?: return
             val remaining = trigger - System.currentTimeMillis()
-            if(remaining <= 0L) return
-            if(remaining <= sleepTimerFadeDurationMs) {
+            if (remaining <= 0L) return
+            if (remaining <= sleepTimerFadeDurationMs) {
                 player.volume = (remaining.toFloat() / sleepTimerFadeDurationMs.toFloat()).coerceIn(0.05f, 1.0f)
                 sleepTimerHandler.postDelayed(this, 250L)
             } else {
@@ -125,30 +129,15 @@ class PlaybackService : MediaLibraryService() {
         }
     }
 
-    @OptIn(UnstableApi::class)
     override fun onCreate() {
         super.onCreate()
 
         setMediaNotificationProvider(
             DefaultMediaNotificationProvider.Builder(this).build()
                 .apply {
-                    setSmallIcon(
-                        R.drawable.ic_notification_icon
-                    )
+                    setSmallIcon(R.drawable.ic_notification_icon)
                 }
         )
-
-        val seekBackIncrement = runBlocking {
-            settingsRepository.behavior.playerSeekBackIncrement.first()
-        }
-
-        val seekForwardIncrement = runBlocking {
-            settingsRepository.behavior.playerSeekForwardIncrement.first()
-        }
-
-        val playbackSpeed = runBlocking {
-            settingsRepository.behavior.playerPlaybackSpeed.first()
-        }
 
         val renderersFactory = object : DefaultRenderersFactory(this) {
             override fun buildAudioSink(
@@ -169,10 +158,10 @@ class PlaybackService : MediaLibraryService() {
         val extractorsFactory = DefaultExtractorsFactory()
             .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)
 
-        val exoPlayer = ExoPlayer.Builder(this, renderersFactory)
+        exoPlayer = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(DefaultMediaSourceFactory(this, extractorsFactory))
-            .setSeekBackIncrementMs(seekBackIncrement)
-            .setSeekForwardIncrementMs(seekForwardIncrement)
+            .setSeekBackIncrementMs(currentSeekBackIncrementMs)
+            .setSeekForwardIncrementMs(currentSeekForwardIncrementMs)
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(C.USAGE_MEDIA)
@@ -183,9 +172,7 @@ class PlaybackService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
 
-        exoPlayer.setPlaybackSpeed(playbackSpeed)
-
-        val player = object : androidx.media3.common.ForwardingPlayer(exoPlayer) {
+        val player = object : ForwardingPlayer(exoPlayer) {
             override fun seekForward() {
                 val skipRanges = HushCastEngineBridge.getActiveSkipRanges()
                 if (skipRanges.isEmpty()) {
@@ -194,7 +181,7 @@ class PlaybackService : MediaLibraryService() {
                 }
                 val target = app.hushcast.automute.dsp.SkipAwareSeekCalculator.computeForwardTargetMs(
                     fromMs = currentPosition,
-                    incrementMs = seekForwardIncrement,
+                    incrementMs = currentSeekForwardIncrementMs,
                     durationMs = duration,
                     skipRanges = skipRanges
                 )
@@ -209,20 +196,47 @@ class PlaybackService : MediaLibraryService() {
                 }
                 val target = app.hushcast.automute.dsp.SkipAwareSeekCalculator.computeBackTargetMs(
                     fromMs = currentPosition,
-                    incrementMs = seekBackIncrement,
+                    incrementMs = currentSeekBackIncrementMs,
                     skipRanges = skipRanges
                 )
                 seekTo(target)
             }
         }
 
-        mediaSession = MediaLibrarySession.Builder(this, player, MediaLibrarySessionCallback(this))
+        val callback = MediaLibrarySessionCallback(this)
+        sessionCallback = callback
+
+        mediaSession = MediaLibrarySession.Builder(this, player, callback)
             .setMediaButtonPreferences(buildMediaButtons(exoPlayer))
             .setSessionActivity(
                 DeepLink.OpenMediaPlayer()
                     .asPendingIntent(this, 42)!!
             )
             .build()
+
+        // Load persisted settings asynchronously on startup (F2, P9, P22)
+        scope.launch {
+            HushCastEngineBridge.loadFromSettings(settingsRepository)
+            val backInc = settingsRepository.behavior.playerSeekBackIncrement.first()
+            val fwdInc = settingsRepository.behavior.playerSeekForwardIncrement.first()
+            val speed = settingsRepository.behavior.playerPlaybackSpeed.first()
+            currentSeekBackIncrementMs = backInc
+            currentSeekForwardIncrementMs = fwdInc
+            exoPlayer.setSeekBackIncrementMs(backInc)
+            exoPlayer.setSeekForwardIncrementMs(fwdInc)
+            exoPlayer.setPlaybackSpeed(speed)
+            mediaSession?.setMediaButtonPreferences(buildMediaButtons(exoPlayer))
+        }
+
+        scope.launch {
+            settingsRepository.behavior.speedPresets.collect { speedPresets = it }
+        }
+        scope.launch {
+            settingsRepository.behavior.headsetNextAction.collect { headsetNextAction = it }
+        }
+        scope.launch {
+            settingsRepository.behavior.headsetPrevAction.collect { headsetPrevAction = it }
+        }
 
         scope.launch {
             HushCastEngineBridge.adSkipEvents.collect { event ->
@@ -233,55 +247,51 @@ class PlaybackService : MediaLibraryService() {
         scope.launch {
             downloadedEpisodeEvents.collect { downloadedId ->
                 val bundle = withContext(Dispatchers.IO) {
-                    runCatching { db.podcastEpisodes().getSync(downloadedId) }.getOrNull()
+                    db.podcastEpisodes().getSyncNullable(downloadedId)
                 } ?: return@collect
                 val localItem = bundle.createMediaItem(this@PlaybackService)
 
-                withContext(Dispatchers.Main) {
-                    val p = mediaSession?.player
-                    if (p != null) {
-                        val currentIdx = p.currentMediaItemIndex
-                        for(i in 0 until p.mediaItemCount) {
-                            val item = p.getMediaItemAt(i)
-                            val extras = item.mediaMetadata.extras
-                            val epId = extras?.getString(MediaMetadataExtra.EPISODE_ID.name)
-                            val isAlreadyDownload = extras?.getBoolean(MediaMetadataExtra.IS_DOWNLOAD.name) ?: false
-                            if(epId == downloadedId && !isAlreadyDownload) {
-                                if(i == currentIdx) {
-                                    val posMs = p.currentPosition.coerceAtLeast(0L)
-                                    val wasPlaying = p.playWhenReady
-                                    p.replaceMediaItem(i, localItem)
-                                    p.seekTo(i, posMs)
-                                    p.prepare()
-                                    p.playWhenReady = wasPlaying
-                                } else {
-                                    p.replaceMediaItem(i, localItem)
-                                }
+                val p = mediaSession?.player
+                if (p != null) {
+                    val currentIdx = p.currentMediaItemIndex
+                    for (i in 0 until p.mediaItemCount) {
+                        val item = p.getMediaItemAt(i)
+                        val extras = item.mediaMetadata.extras
+                        val epId = extras?.getString(MediaMetadataExtra.EPISODE_ID.name)
+                        val isAlreadyDownload = extras?.getBoolean(MediaMetadataExtra.IS_DOWNLOAD.name) ?: false
+                        if (epId == downloadedId && !isAlreadyDownload) {
+                            if (i == currentIdx) {
+                                val posMs = p.currentPosition.coerceAtLeast(0L)
+                                val wasPlaying = p.playWhenReady
+                                p.replaceMediaItem(i, localItem)
+                                p.seekTo(i, posMs)
+                                p.prepare()
+                                p.playWhenReady = wasPlaying
+                            } else {
+                                p.replaceMediaItem(i, localItem)
                             }
                         }
                     }
-                    val activeEpId = p?.currentMediaItem?.getEpisodeId() ?: HushCastEngineBridge.currentEpisodeId
-                    val activeOrigin = p?.currentMediaItem?.getOrigin() ?: bundle.episode.origin
-                    if (activeEpId == downloadedId) {
-                        loadHushCastForEpisode(downloadedId, activeOrigin)
-                    }
+                }
+                val activeEpId = p?.currentMediaItem?.getEpisodeId() ?: HushCastEngineBridge.currentEpisodeId
+                val activeOrigin = p?.currentMediaItem?.getOrigin() ?: bundle.episode.origin
+                if (activeEpId == downloadedId) {
+                    loadHushCastForEpisode(downloadedId, activeOrigin)
                 }
             }
         }
 
         scope.launch {
             app.hushcast.automute.worker.EpisodeAnalysisWorker.analysisCompletedEvents.collect { analyzedId ->
-                withContext(Dispatchers.Main) {
-                    val p = mediaSession?.player
-                    val activeEpId = p?.currentMediaItem?.getEpisodeId() ?: HushCastEngineBridge.currentEpisodeId
-                    if (activeEpId == analyzedId) {
-                        val activeOrigin = p?.currentMediaItem?.getOrigin()
-                            ?: withContext(Dispatchers.IO) {
-                                runCatching { db.podcastEpisodes().getSync(analyzedId)?.episode?.origin }.getOrNull()
-                            }
-                            ?: return@withContext
-                        loadHushCastForEpisode(analyzedId, activeOrigin)
-                    }
+                val p = mediaSession?.player
+                val activeEpId = p?.currentMediaItem?.getEpisodeId() ?: HushCastEngineBridge.currentEpisodeId
+                if (activeEpId == analyzedId) {
+                    val activeOrigin = p?.currentMediaItem?.getOrigin()
+                        ?: withContext(Dispatchers.IO) {
+                            db.podcastEpisodes().getSyncNullable(analyzedId)?.episode?.origin
+                        }
+                        ?: return@collect
+                    loadHushCastForEpisode(analyzedId, activeOrigin)
                 }
             }
         }
@@ -289,12 +299,28 @@ class PlaybackService : MediaLibraryService() {
         registerPlayStateListener()
     }
 
-    private var loadHushCastJob: kotlinx.coroutines.Job? = null
+    fun updateSeekBackIncrement(incrementMs: Long) {
+        currentSeekBackIncrementMs = incrementMs
+        exoPlayer.setSeekBackIncrementMs(incrementMs)
+        mediaSession?.setMediaButtonPreferences(buildMediaButtons(exoPlayer))
+    }
+
+    fun updateSeekForwardIncrement(incrementMs: Long) {
+        currentSeekForwardIncrementMs = incrementMs
+        exoPlayer.setSeekForwardIncrementMs(incrementMs)
+        mediaSession?.setMediaButtonPreferences(buildMediaButtons(exoPlayer))
+    }
+
+    private var loadHushCastJob: Job? = null
 
     private fun loadHushCastForEpisode(episodeId: String, origin: String) {
         HushCastEngineBridge.currentEpisodeId = episodeId
         loadHushCastJob?.cancel()
         loadHushCastJob = scope.launch(Dispatchers.IO) {
+            val globalWordMuting = settingsRepository.hushCast.wordMutingEnabled.firstOrNull() ?: true
+            val podcastWordMuting = settingsRepository.hushCast.podcastWordMuting(origin).firstOrNull()
+            HushCastEngineBridge.autoMuteProcessor.isEnabled = podcastWordMuting ?: globalWordMuting
+
             val status = autoMuteDb.dao().getStatus(episodeId)
             val sha = status?.fileSha256?.takeIf { it.isNotBlank() }
             if (sha != null) {
@@ -304,48 +330,97 @@ class PlaybackService : MediaLibraryService() {
                 val policy = policyStr?.let {
                     runCatching { AdPolicyMode.valueOf(it) }.getOrNull()
                 } ?: HushCastEngineBridge.defaultAdPolicy
+                HushCastEngineBridge.autoMuteProcessor.encoderDelayOffsetMs = status.encoderDelayMs.toLong()
                 HushCastEngineBridge.autoMuteProcessor.updateWindows(mutes)
                 HushCastEngineBridge.adSkipObserver.setEpisodeAds(ads, policy)
-                android.util.Log.i(
-                    "HushCastPerf",
-                    "Loaded playback windows: ep=$episodeId sha=${sha.take(8)} mutes=${mutes.count { it.enabled }}/${mutes.size} ads=${ads.size} (highConf=${ads.count { it.isHighConfidence }}) policy=$policy wordMuteEnabled=${HushCastEngineBridge.wordMutingEnabled}"
-                )
             } else {
+                HushCastEngineBridge.autoMuteProcessor.encoderDelayOffsetMs = 0L
                 HushCastEngineBridge.autoMuteProcessor.updateWindows(emptyList())
                 HushCastEngineBridge.adSkipObserver.clear()
-                android.util.Log.i(
-                    "HushCastPerf",
-                    "Cleared playback windows (no sha): ep=$episodeId badge=${status?.badge}"
-                )
+            }
+
+            withContext(Dispatchers.Main) {
+                checkActiveSkipsNow()
+                schedulePositionCallbacks()
             }
         }
     }
 
+    private fun checkActiveSkipsNow() {
+        val player = mediaSession?.player ?: return
+        if (!HushCastEngineBridge.adSkipObserver.checkPosition(player)) {
+            HushCastEngineBridge.checkSkippedChapterPosition(player)
+        }
+    }
+
+    fun schedulePositionCallbacks() {
+        scheduledMessages.forEach { runCatching { it.cancel() } }
+        scheduledMessages.clear()
+
+        val player = mediaSession?.player ?: return
+
+        // Schedule PlayerMessages for auto-skip ads (P5)
+        for (range in HushCastEngineBridge.adSkipObserver.getActiveAutoSkipRanges()) {
+            val msg = exoPlayer.createMessage { _, _ ->
+                HushCastEngineBridge.adSkipObserver.checkPosition(player)
+            }
+                .setPosition(range.startMs)
+                .setLooper(Looper.getMainLooper())
+                .setDeleteAfterDelivery(false)
+                .send()
+            scheduledMessages.add(msg)
+        }
+
+        // Schedule PlayerMessages for skipped chapters (P4, P5)
+        for (range in HushCastEngineBridge.getSkippedChapterRanges()) {
+            val msg = exoPlayer.createMessage { _, _ ->
+                HushCastEngineBridge.checkSkippedChapterPosition(player)
+            }
+                .setPosition(range.startMs)
+                .setLooper(Looper.getMainLooper())
+                .setDeleteAfterDelivery(false)
+                .send()
+            scheduledMessages.add(msg)
+        }
+
+        // Schedule PlayerMessage for podcast skipEnding (P5)
+        val duration = exoPlayer.duration
+        if (currentSkipEndingValue > 0 && duration > currentSkipEndingValue * 1000L) {
+            val targetMs = duration - (currentSkipEndingValue * 1000L)
+            val msg = exoPlayer.createMessage { _, _ ->
+                if (exoPlayer.isPlaying && exoPlayer.currentPosition >= targetMs) {
+                    exoPlayer.seekTo(exoPlayer.duration)
+                }
+            }
+                .setPosition(targetMs)
+                .setLooper(Looper.getMainLooper())
+                .setDeleteAfterDelivery(false)
+                .send()
+            scheduledMessages.add(msg)
+        }
+    }
+
     companion object {
-        private val downloadedEpisodeEvents = kotlinx.coroutines.flow.MutableSharedFlow<String>(
-            extraBufferCapacity = 16
-        )
+        private val downloadedEpisodeEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
 
         fun notifyEpisodeDownloaded(episodeId: String) {
             downloadedEpisodeEvents.tryEmit(episodeId)
         }
     }
 
-    fun buildMediaButtons(
-        player: ExoPlayer
-    ): List<CommandButton> {
+    fun buildMediaButtons(player: ExoPlayer): List<CommandButton> {
         val seekBack = CommandButton.Builder(
-            when(player.seekBackIncrement) {
+            when (currentSeekBackIncrementMs) {
                 5000L -> CommandButton.ICON_SKIP_BACK_5
-                10000L -> CommandButton.ICON_SKIP_FORWARD_10
-                15000L -> CommandButton.ICON_SKIP_FORWARD_15
-                30000L -> CommandButton.ICON_SKIP_FORWARD_30
-                else -> CommandButton.ICON_SKIP_FORWARD
+                10000L -> CommandButton.ICON_SKIP_BACK_10
+                15000L -> CommandButton.ICON_SKIP_BACK_15
+                30000L -> CommandButton.ICON_SKIP_BACK_30
+                else -> CommandButton.ICON_SKIP_BACK
             }
         )
             .setPlayerCommand(Player.COMMAND_SEEK_BACK)
             .setCustomIconResId(
-                when(player.seekBackIncrement) {
+                when (currentSeekBackIncrementMs) {
                     5000L -> R.drawable.ic_replay_5
                     10000L -> R.drawable.ic_replay_10
                     30000L -> R.drawable.ic_replay_30
@@ -356,7 +431,7 @@ class PlaybackService : MediaLibraryService() {
             .build()
 
         val seekForward = CommandButton.Builder(
-            when(player.seekForwardIncrement) {
+            when (currentSeekForwardIncrementMs) {
                 5000L -> CommandButton.ICON_SKIP_FORWARD_5
                 10000L -> CommandButton.ICON_SKIP_FORWARD_10
                 15000L -> CommandButton.ICON_SKIP_FORWARD_15
@@ -366,7 +441,7 @@ class PlaybackService : MediaLibraryService() {
         )
             .setPlayerCommand(Player.COMMAND_SEEK_FORWARD)
             .setCustomIconResId(
-                when(player.seekForwardIncrement) {
+                when (currentSeekForwardIncrementMs) {
                     5000L -> R.drawable.ic_forward_5
                     10000L -> R.drawable.ic_forward_10
                     30000L -> R.drawable.ic_forward_30
@@ -382,11 +457,7 @@ class PlaybackService : MediaLibraryService() {
             .setDisplayName(getString(R.string.common_action_toggle_playback_speed))
             .build()
 
-        return listOf(
-            seekBack,
-            seekForward,
-            playbackSpeed
-        )
+        return listOf(seekBack, seekForward, playbackSpeed)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? {
@@ -394,7 +465,8 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private fun enqueueUpdatePlayState() {
-        updatePlayStateHandler.postDelayed(updatePlayStateRunnable, 20 * 1000)
+        updatePlayStateHandler.removeCallbacks(updatePlayStateRunnable)
+        updatePlayStateHandler.postDelayed(updatePlayStateRunnable, 60 * 1000L)
     }
 
     private fun updatePlayState() {
@@ -404,30 +476,25 @@ class PlaybackService : MediaLibraryService() {
         val currentPosition = mediaSession?.player?.currentPosition ?: return
         val duration = mediaSession?.player?.duration ?: return
 
-        if(duration < 1000) return
+        if (duration < 1000) return
 
         val state = (currentPosition / 1000).toInt()
         val remainingSeconds = (duration / 1000) - (currentPosition / 1000)
-
         val isPlayed = remainingSeconds < 90
 
-        scope.launch {
-            if(isPlayed) {
-                db.podcastEpisodePlayStates()
-                    .savePlayed(
+        scope.launch(Dispatchers.IO) {
+            db.withTransaction {
+                if (isPlayed) {
+                    db.podcastEpisodePlayStates().savePlayed(
                         episodeId = episodeId,
                         played = true
                     )
-            }
-
-            db.podcastEpisodePlayStates()
-                .saveState(
+                }
+                db.podcastEpisodePlayStates().saveState(
                     episodeId = episodeId,
                     state = state.coerceAtLeast(1)
                 )
-
-            db.syncActions()
-                .addPlayState(
+                db.syncActions().addPlayState(
                     origin = origin,
                     episodeId = episodeId,
                     audioUrl = audioUrl,
@@ -435,153 +502,122 @@ class PlaybackService : MediaLibraryService() {
                     state = state,
                     played = isPlayed
                 )
+            }
         }
     }
 
-    private fun enqueueSkipEnding() {
-        skipEndingHandler.postDelayed(skipEndingRunnable, 1000)
-    }
-
-    private fun checkSkipEnding() {
-        val player = mediaSession?.player ?: return
-        if(currentSkipEndingValue == 0) return
-
-        val diff = (player.duration) - (currentSkipEndingValue * 1000L)
-
-        if(player.currentPosition < diff) return
-        mediaSession?.player?.seekTo(player.duration)
-    }
-
     private fun getOrigin() = mediaSession?.player?.currentMediaItem?.getOrigin()
-
     private fun getEpisodeId() = mediaSession?.player?.currentMediaItem?.getEpisodeId()
-
     private fun getAudioUrl() = mediaSession?.player?.currentMediaItem?.getAudioUrl()
+
+    private fun onEpisodeStarted(mediaItem: MediaItem?) {
+        val origin = mediaItem?.getOrigin() ?: return
+        val episodeId = mediaItem.getEpisodeId() ?: return
+
+        mediaItem.getResumeAt()?.let { resumeAt ->
+            mediaSession?.player?.seekTo(resumeAt)
+        }
+
+        NewPodcastEpisodeNotification.cancel(applicationContext, episodeId)
+        loadHushCastForEpisode(episodeId, origin)
+
+        if (lastStartedEpisodeId == episodeId) return
+        lastStartedEpisodeId = episodeId
+
+        val player = mediaSession?.player
+        scope.launch(Dispatchers.IO) {
+            val podcast = db.podcasts().getSync(origin)
+            currentSkipEndingValue = podcast?.skipEnding ?: 0
+
+            if (podcast != null && podcast.skipBeginning > 0) {
+                withContext(Dispatchers.Main) {
+                    if (player != null && player.currentPosition <= 3000L) {
+                        player.seekTo(podcast.skipBeginning * 1000L)
+                    }
+                    schedulePositionCallbacks()
+                }
+            }
+
+            val last = db.podcastHistory().getLast().first()
+            if (last?.episode?.id == episodeId) {
+                val timestamp = System.currentTimeMillis()
+                if ((timestamp - last.history.timestamp) < 1000L * 60 * 60 * 4) {
+                    db.podcastHistory().updateTimestamp(episodeId = episodeId, timestamp = timestamp)
+                    return@launch
+                }
+            }
+            db.podcastHistory().insert(origin = origin, episodeId = episodeId)
+        }
+    }
 
     private fun registerPlayStateListener() {
         mediaSession?.player?.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                mediaItem?.getResumeAt()?.let { resumeAt ->
-                    mediaSession?.player?.seekTo(resumeAt)
-                }
-                mediaItem?.getEpisodeId()?.let { episodeId ->
-                    mediaItem.getOrigin()?.let { origin ->
-                        loadHushCastForEpisode(episodeId, origin)
-                    }
-                }
+                updatePlayState()
+                onEpisodeStarted(mediaItem)
                 mediaSession?.let { session ->
                     onUpdateNotification(session, session.player.playWhenReady)
                 }
-
                 super.onMediaItemTransition(mediaItem, reason)
             }
 
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                    checkActiveSkipsNow()
+                }
+                super.onPositionDiscontinuity(oldPosition, newPosition, reason)
+            }
+
             override fun onPlaybackStateChanged(playbackState: Int) {
-                updatePlayState()
-                if(playbackState == Player.STATE_ENDED) {
-                    getEpisodeId()?.let { episodeId ->
-                        scope.launch {
-                            db.podcastEpisodePlayStates()
-                                .savePlayed(
-                                    episodeId = episodeId,
-                                    played = true
-                                )
+                if (playbackState == Player.STATE_READY) {
+                    val dur = exoPlayer.duration
+                    val epId = getEpisodeId()
+                    if (dur > 1000L && epId != null) {
+                        scope.launch(Dispatchers.IO) {
+                            db.podcastEpisodes().updateDuration(epId, (dur / 1000L).toInt())
                         }
-
-                        val duration =
-                            mediaSession?.player?.duration?.let { (it / 1000L).toInt() } ?: 1
-
-                        getOrigin()?.let { origin ->
-                            getAudioUrl()?.let { audioUrl ->
-                                scope.launch {
-                                    db.syncActions()
-                                        .addPlayState(
-                                            origin = origin,
-                                            episodeId = episodeId,
-                                            audioUrl = audioUrl,
-                                            duration = duration,
-                                            state = 0,
-                                            played = true
-                                        )
+                    }
+                    schedulePositionCallbacks()
+                } else if (playbackState == Player.STATE_ENDED) {
+                    getEpisodeId()?.let { episodeId ->
+                        val durationSec = exoPlayer.duration.let { if (it > 0) (it / 1000L).toInt() else 1 }
+                        val origin = getOrigin()
+                        val audioUrl = getAudioUrl()
+                        scope.launch(Dispatchers.IO) {
+                            db.withTransaction {
+                                db.podcastEpisodePlayStates().savePlayed(episodeId = episodeId, played = true)
+                                if (origin != null && audioUrl != null) {
+                                    db.syncActions().addPlayState(
+                                        origin = origin,
+                                        episodeId = episodeId,
+                                        audioUrl = audioUrl,
+                                        duration = durationSec,
+                                        state = 0,
+                                        played = true
+                                    )
                                 }
                             }
                         }
                     }
-
                     syncIfEnabled()
                 }
-
                 super.onPlaybackStateChanged(playbackState)
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                updatePlayState()
-
-                if(isPlaying) {
+                if (isPlaying) {
                     enqueueUpdatePlayState()
-                    enqueueSkipEnding()
-                    adSkipHandler.removeCallbacks(adSkipRunnable)
-                    adSkipHandler.post(adSkipRunnable)
+                    checkActiveSkipsNow()
                 } else {
+                    updatePlayState()
                     updatePlayStateHandler.removeCallbacks(updatePlayStateRunnable)
-                    skipEndingHandler.removeCallbacks(skipEndingRunnable)
-                    adSkipHandler.removeCallbacks(adSkipRunnable)
-
                     syncIfEnabled()
                 }
-
                 super.onIsPlayingChanged(isPlaying)
-            }
-
-            override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
-                val player = mediaSession?.player
-
-                getOrigin()?.let { origin ->
-                    getEpisodeId()?.let { episodeId ->
-                        NewPodcastEpisodeNotification
-                            .cancel(this@PlaybackService.applicationContext, episodeId)
-
-                        loadHushCastForEpisode(episodeId, origin)
-
-                        scope.launch {
-                            val podcast = db.podcasts().getSync(origin)
-                            currentSkipEndingValue = (podcast?.skipEnding) ?: 0
-
-                            podcast?.let { podcast ->
-                                withContext(Dispatchers.Main) {
-                                    // skip beginning if defined for podcast
-                                    if(podcast.skipBeginning == 0) return@withContext
-
-                                    if(player == null) return@withContext
-                                    if(player.currentPosition > 3000L) return@withContext
-                                    player.seekTo(podcast.skipBeginning * 1000L)
-                                }
-                            }
-
-                            val last = db.podcastHistory().getLast()
-                                .first()
-
-                            // don't save duplicate elements if playback happened in the 4 hours
-                            if((last?.episode?.id == episodeId)) {
-                                val timestamp = System.currentTimeMillis()
-                                if((timestamp - last.history.timestamp) < 1000 * 60 * 60 * 4) {
-                                    db.podcastHistory().updateTimestamp(
-                                        episodeId = episodeId,
-                                        timestamp = timestamp
-                                    )
-                                    return@launch
-                                }
-                            }
-
-                            db.podcastHistory().insert(
-                                origin = origin,
-                                episodeId = episodeId
-                            )
-                        }
-                    }
-                }
-
-                super.onMediaMetadataChanged(mediaMetadata)
             }
 
             override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
@@ -591,29 +627,35 @@ class PlaybackService : MediaLibraryService() {
         })
     }
 
+    private fun publishSleepTimerExtra() {
+        val extras = Bundle().apply {
+            putLong(EXTRA_SLEEP_TIMER_TRIGGER, sleepTimerTrigger ?: 0L)
+        }
+        mediaSession?.setSessionExtras(extras)
+    }
+
     fun stopSleepTimer() {
         sleepTimerTrigger = null
         sleepTimerHandler.removeCallbacks(sleepTimerRunnable)
         sleepTimerHandler.removeCallbacks(sleepTimerFadeRunnable)
         mediaSession?.player?.volume = 1.0f
+        publishSleepTimerExtra()
     }
 
     fun startSleepTimer(trigger: Long) {
         sleepTimerTrigger = trigger
-
         val delay = (trigger - System.currentTimeMillis()).coerceAtLeast(0L)
 
         sleepTimerHandler.removeCallbacks(sleepTimerRunnable)
         sleepTimerHandler.removeCallbacks(sleepTimerFadeRunnable)
         sleepTimerHandler.postDelayed(sleepTimerRunnable, delay)
         sleepTimerHandler.post(sleepTimerFadeRunnable)
+        publishSleepTimerExtra()
     }
 
     fun syncIfEnabled() {
         scope.launch {
-            if(!settingsRepository.sync.enable.first())
-                return@launch
-
+            if (!settingsRepository.sync.enable.first()) return@launch
             PartialSynchronizationWorker.enqueue(
                 context = this@PlaybackService,
                 debounceSeconds = 30L
@@ -623,11 +665,13 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         updatePlayStateHandler.removeCallbacks(updatePlayStateRunnable)
-        skipEndingHandler.removeCallbacks(skipEndingRunnable)
-        adSkipHandler.removeCallbacks(adSkipRunnable)
         sleepTimerHandler.removeCallbacksAndMessages(null)
+        scheduledMessages.forEach { runCatching { it.cancel() } }
+        scheduledMessages.clear()
 
         stopSleepTimer()
+        sessionCallback?.destroy()
+        job.cancel()
 
         mediaSession?.run {
             player.release()

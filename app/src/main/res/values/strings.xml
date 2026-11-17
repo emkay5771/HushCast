@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <resources>
-    <string name="app_name">HushCast</string>
+    <string name="app_name" translatable="false">HushCast</string>
     <string name="app_name_alternative">Podcasts</string>
 
     <string name="badge_powered_by_apple_podcasts">Powered by Apple Podcasts</string>
@@ -26,6 +26,7 @@
     <string name="common_action_play">Play</string>
     <string name="common_action_remove_from_favorites">Remove from favorites</string>
     <string name="common_action_remove_from_queue">Remove from queue</string>
+    <string name="common_action_retry">Retry</string>
     <string name="common_action_save">Save</string>
     <string name="common_action_scroll_to_top">Scroll to top</string>
     <string name="common_action_seek_back">Seek back</string>
@@ -235,6 +236,7 @@
     <string name="route_settings_synchronization_full_synchronize">Run full synchronization</string>
     <string name="route_settings_synchronization_last_synced">Last synced: %1$s</string>
     <string name="route_settings_synchronization_synchronize_now">Synchronize now</string>
+    <string name="route_up_next">Up Next</string>
     <string name="route_subscriptions">Subscriptions</string>
 
     <string name="snackbar_added_to_hear_later">Added to » Hear later «</string>
@@ -288,4 +290,5 @@
     <string name="view_podcast_settings_subscription_enable_automatic_downloads_description">New episodes will be downloaded automatically</string>
     <string name="view_podcast_settings_subscription_enable_notifications">Enable notifications</string>
     <string name="view_podcast_settings_subscription_enable_notifications_description">Receive notifications when new episodes get released</string>
+    <string name="common_error">Error</string>
 </resources>

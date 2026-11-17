@@ -37,9 +37,6 @@ interface ListDao {
     @Insert
     suspend fun create(list: ListModel): Long
 
-    @Query("INSERT OR IGNORE INTO list (id, name, description, itemCount, createdAt, isSystemList) VALUES (-1, 'HEAR_LATER', 'HEAR_LATER', 0, 0, 1)")
-    suspend fun createHearLater()
-
     @Query("INSERT OR IGNORE INTO list (id, name, description, itemCount, createdAt, isSystemList) VALUES (-2, 'FAVORITES', 'FAVORITES', 0, 0, 1)")
     suspend fun createFavorites()
 

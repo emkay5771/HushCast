@@ -1,3 +1,27 @@
+# HushCast v1.0.0-hushcast
+
+## What's New
+- **HushCast AI & Audio Engine (`F1–F10`, `E1–E19`, `W1–W12`)**:
+  - Added [`ModelDownloadWorker`](https://github.com/emkay5771/HushCast/blob/main/core/automute-engine/src/main/java/app/hushcast/automute/worker/ModelDownloadWorker.kt) and [`RuleReevaluationWorker`](https://github.com/emkay5771/HushCast/blob/main/core/automute-engine/src/main/java/app/hushcast/automute/worker/RuleReevaluationWorker.kt) for resilient background model downloads and instant mute-rule re-evaluation across already-processed episodes.
+  - Added [`AutoMuteAudioProcessor`](https://github.com/emkay5771/HushCast/blob/main/core/automute-engine/src/main/java/app/hushcast/automute/dsp/AutoMuteAudioProcessor.kt) improvements (soft-ducking envelopes, 16-bit & float PCM, `HARD_SILENCE` / `SOFT_DUCK` / `BEEP` / `SKIP` modes, and `AudioFocus` ducking).
+  - Hardened [`DesktopWorkerClient`](https://github.com/emkay5771/HushCast/blob/main/core/automute-engine/src/main/java/app/hushcast/automute/desktop/DesktopWorkerClient.kt) and [`desktop-worker`](https://github.com/emkay5771/HushCast/blob/main/desktop-worker/hushcast_worker/server.py) with SSRF validation, SHA-256 verification, job persistence & cancellation, pairing token auth, and ad-tagger / pitch feature parity.
+  - Removed the bundled `ad_tagger.onnx` asset from the APK in favor of on-demand [`ModelManager`](https://github.com/emkay5771/HushCast/blob/main/core/automute-engine/src/main/java/app/hushcast/automute/engine/ModelManager.kt) downloads (`minSdk` aligned to `34`).
+- **Player, Playback & Chapters (`P1–P23`, `UI5`)**:
+  - Unified the player experience in [`MediaPlayerBottomSheet`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/dialog/bottomsheet/media/MediaPlayerBottomSheet.kt) with a 4-state HushCast shield sheet, 3-step setup guide, streaming notice banner, one-tap word-mute scope dialog (`This episode` vs `All episodes`), and live chapter/transcript tracking (`500ms` / `100ms`).
+  - Added [`ChapterSkipDao`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/api/db/dao/ChapterSkipDao.kt) & [`ChapterSkipModel`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/api/db/model/ChapterSkipModel.kt) (AppDatabase v17) for persistent per-episode chapter skipping.
+  - Added configurable Headset Next/Previous button actions, `PLAY_NEXT` swipe action, and seekbar drag-hold (`2000ms` timeout / `0.02f` settle threshold).
+- **Downloads, Sync & Discovery (`D1–D17`, `V1–V13`)**:
+  - Added [`DownloadTracker`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/api/download/DownloadTracker.kt) and reliable download/re-analysis flows across episode rows and detail views.
+  - Added periodic sync interval scheduling in [`SettingsSynchronizationPane`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/route/settings/pane/SettingsSynchronizationPane.kt) and notification permission handling in [`SettingsBackgroundActivityPane`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/route/settings/pane/SettingsBackgroundActivityPane.kt).
+  - Kept PodcastIndex search and RSS URL entry available when Apple Podcasts API is disabled, with debounced search (`250ms`) and friendly error/retry states in [`AddPodcastView`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/view/model/AddPodcastView.kt).
+- **Settings, Navigation, Localization & Reliability (`U1–U11`, `L1–L8`, `R1–R6`)**:
+  - Converted `DetailPaneKey` and all 9 `Settings*Key` classes to `@Parcelize` for full process-death state restoration.
+  - Wired [`SettingsHushCastPane`](https://github.com/emkay5771/HushCast/blob/main/app/src/main/java/app/podiumpodcasts/podium/ui/route/settings/pane/SettingsHushCastPane.kt) directly to `SettingsRepository.hushCast`, masked worker tokens, saved credentials on focus loss, and gated `SettingsDebugKey` behind debug/7-tap unlock.
+  - Completed all missing string translations across `de`, `fr`, `it`, `es`, and `tr` and enforced `MissingTranslation` as a lint error.
+  - Added Room migration unit tests ([`AutoMuteMigrationTest`](https://github.com/emkay5771/HushCast/blob/main/core/automute-engine/src/test/java/app/hushcast/automute/storage/AutoMuteMigrationTest.kt), [`AppDatabaseMigrationTest`](https://github.com/emkay5771/HushCast/blob/main/app/src/test/java/app/podiumpodcasts/podium/api/db/AppDatabaseMigrationTest.kt)) and removed dead code.
+
+---
+
 # HushCast v0.1.31-hushcast
 
 ## What's New

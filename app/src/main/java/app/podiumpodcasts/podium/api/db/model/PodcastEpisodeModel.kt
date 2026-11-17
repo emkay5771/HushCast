@@ -67,6 +67,7 @@ data class PodcastEpisodeModel(
     @ColumnInfo("new")
     val new: Boolean = false
 ) {
+    @android.annotation.SuppressLint("RestrictedApi")
     fun createMediaItem(
         context: Context,
         playState: PodcastEpisodePlayStateModel? = null
@@ -110,7 +111,7 @@ data class PodcastEpisodeModel(
                     .build()
             )
             .setUri(
-                when(downloadFile.exists()) {
+                when(isDownload) {
                     true -> Uri.fromFile(downloadFile)
                     false -> Uri.parse(audioUrl)
                 }
@@ -118,11 +119,12 @@ data class PodcastEpisodeModel(
     }
 
     fun craftDownloadFile(
-        context: Context
+        context: Context,
+        createDir: Boolean = true
     ): File {
         val podcastDownloadsDir =
             File(DownloadManager.getDownloadsDirectory(context), origin.sha256())
-        podcastDownloadsDir.mkdirs()
+        if (createDir) podcastDownloadsDir.mkdirs()
         return File(podcastDownloadsDir, audioUrl.sha256())
     }
 }

@@ -12,7 +12,9 @@ import app.hushcast.automute.storage.EpisodeWordIndexEntity
 import app.hushcast.automute.storage.MuteSegmentEntity
 import app.hushcast.automute.storage.toDomain
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -20,9 +22,14 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.security.cert.X509Certificate
+import java.util.concurrent.CancellationException
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
 
 /**
- * LAN client for the HushCast Desktop Companion Worker.
+ * Client for the HushCast Desktop / Modal Companion Worker.
  * Downloads pre-analyzed audio + WordIndexBlob + AdSegments keyed by fileSha256.
  */
 object DesktopWorkerClient {
@@ -34,43 +41,75 @@ object DesktopWorkerClient {
     private fun defaultTimeoutMs(normalizedUrl: String): Int =
         if (normalizedUrl.startsWith("https://", ignoreCase = true)) 35_000 else 15_000
 
-    suspend fun healthCheck(baseUrl: String, token: String = ""): DesktopHealthResponse =
-        withContext(Dispatchers.IO) {
-            val normalized = normalizeUrl(baseUrl)
-            val timeout = if (normalized.startsWith("https://", ignoreCase = true)) 35_000 else 4_000
-            val body = getText("$normalized/v1/health", token, timeoutMs = timeout)
-            json.decodeFromString<DesktopHealthResponse>(body)
-        }
+    suspend fun healthCheck(
+        baseUrl: String,
+        token: String = "",
+        certFingerprint: String = ""
+    ): DesktopHealthResponse = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl)
+        val timeout = if (normalized.startsWith("https://", ignoreCase = true)) 35_000 else 4_000
+        val body = getText("$normalized/v1/health", token, certFingerprint, timeoutMs = timeout)
+        json.decodeFromString<DesktopHealthResponse>(body)
+    }
 
     suspend fun submitJob(
         baseUrl: String,
         token: String,
-        request: DesktopJobRequest
+        request: DesktopJobRequest,
+        certFingerprint: String = ""
     ): DesktopJobResponse = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl)
         val payload = json.encodeToString(request)
-        val body = postJson("$normalized/v1/jobs", token, payload, timeoutMs = defaultTimeoutMs(normalized))
+        val body = postJson("$normalized/v1/jobs", token, payload, certFingerprint, timeoutMs = defaultTimeoutMs(normalized))
         json.decodeFromString<DesktopJobResponse>(body)
     }
 
-    suspend fun getJob(baseUrl: String, token: String, jobId: String): DesktopJobResponse =
-        withContext(Dispatchers.IO) {
-            val normalized = normalizeUrl(baseUrl)
-            val body = getText("$normalized/v1/jobs/$jobId", token, timeoutMs = defaultTimeoutMs(normalized))
-            json.decodeFromString<DesktopJobResponse>(body)
-        }
+    suspend fun getJob(
+        baseUrl: String,
+        token: String,
+        jobId: String,
+        certFingerprint: String = ""
+    ): DesktopJobResponse = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl)
+        val body = getText("$normalized/v1/jobs/$jobId", token, certFingerprint, timeoutMs = defaultTimeoutMs(normalized))
+        json.decodeFromString<DesktopJobResponse>(body)
+    }
 
+    /**
+     * Polls job status with exponential backoff on transient network errors (E18).
+     */
     suspend fun pollJobUntilReady(
         baseUrl: String,
         token: String,
         jobId: String,
-        pollIntervalMs: Long = 1000L,
+        pollIntervalMs: Long = 2000L,
         maxWaitMs: Long = 30 * 60 * 1000L,
+        certFingerprint: String = "",
         onProgress: (DesktopJobResponse) -> Unit = {}
     ): DesktopJobResponse {
         val deadline = System.currentTimeMillis() + maxWaitMs
+        var consecutiveErrors = 0
+        var currentDelayMs = pollIntervalMs
+
         while (true) {
-            val status = getJob(baseUrl, token, jobId)
+            currentCoroutineContext().ensureActive()
+            val status = try {
+                val res = getJob(baseUrl, token, jobId, certFingerprint)
+                consecutiveErrors = 0
+                currentDelayMs = pollIntervalMs
+                res
+            } catch (c: CancellationException) {
+                throw c
+            } catch (t: Throwable) {
+                consecutiveErrors++
+                if (consecutiveErrors >= 6 || System.currentTimeMillis() >= deadline) {
+                    throw t
+                }
+                val backoffMs = (pollIntervalMs * (1L shl (consecutiveErrors - 1))).coerceAtMost(15_000L)
+                delay(backoffMs)
+                continue
+            }
+
             onProgress(status)
             when (status.state) {
                 "READY" -> return status
@@ -81,26 +120,28 @@ object DesktopWorkerClient {
             if (System.currentTimeMillis() >= deadline) {
                 throw IllegalStateException("Timed out waiting for desktop worker job $jobId")
             }
-            delay(pollIntervalMs)
+            delay(currentDelayMs)
         }
     }
 
     suspend fun fetchBundle(
         baseUrl: String,
         token: String,
-        sha256: String
+        sha256: String,
+        certFingerprint: String = ""
     ): DesktopAnalysisBundle = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl)
-        val body = getText("$normalized/v1/episodes/$sha256/bundle", token, timeoutMs = defaultTimeoutMs(normalized))
+        val body = getText("$normalized/v1/episodes/$sha256/bundle", token, certFingerprint, timeoutMs = defaultTimeoutMs(normalized))
         json.decodeFromString<DesktopAnalysisBundle>(body)
     }
 
     suspend fun listReadyEpisodes(
         baseUrl: String,
-        token: String
+        token: String,
+        certFingerprint: String = ""
     ): List<DesktopReadyEpisode> = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl)
-        val body = getText("$normalized/v1/episodes", token, timeoutMs = defaultTimeoutMs(normalized))
+        val body = getText("$normalized/v1/episodes", token, certFingerprint, timeoutMs = defaultTimeoutMs(normalized))
         json.decodeFromString<List<DesktopReadyEpisode>>(body)
     }
 
@@ -108,28 +149,30 @@ object DesktopWorkerClient {
         baseUrl: String,
         token: String,
         query: String,
-        topK: Int = 15
+        topK: Int = 15,
+        certFingerprint: String = ""
     ): DesktopSearchResponse = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl)
         val payload = json.encodeToString(DesktopSearchRequest(query = query, topK = topK))
-        val body = postJson("$normalized/v1/search", token, payload, timeoutMs = defaultTimeoutMs(normalized))
+        val body = postJson("$normalized/v1/search", token, payload, certFingerprint, timeoutMs = defaultTimeoutMs(normalized))
         json.decodeFromString<DesktopSearchResponse>(body)
     }
 
     /**
      * Streams the exact audio file from the desktop worker to [destFile] and verifies
-     * that its SHA-256 matches [expectedSha256].
+     * that its SHA-256 matches [expectedSha256]. Checks cancellation per chunk and cleans up .part on error (E18).
      */
     suspend fun downloadAudioAndVerifySha256(
         baseUrl: String,
         token: String,
         expectedSha256: String,
         destFile: File,
+        certFingerprint: String = "",
         onProgress: (receivedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> }
     ): Unit = withContext(Dispatchers.IO) {
         destFile.parentFile?.mkdirs()
         val tmpFile = File(destFile.parentFile, "${destFile.name}.part")
-        val conn = openConnection("${normalizeUrl(baseUrl)}/v1/episodes/$expectedSha256/audio", token, 30_000)
+        val conn = openConnection("${normalizeUrl(baseUrl)}/v1/episodes/$expectedSha256/audio", token, 30_000, certFingerprint)
         try {
             val code = conn.responseCode
             if (code !in 200..299) {
@@ -142,6 +185,7 @@ object DesktopWorkerClient {
                 tmpFile.outputStream().use { output ->
                     val buf = ByteArray(65536)
                     while (true) {
+                        currentCoroutineContext().ensureActive()
                         val read = input.read(buf)
                         if (read < 0) break
                         output.write(buf, 0, read)
@@ -153,7 +197,6 @@ object DesktopWorkerClient {
             }
             val actualSha = digest.digest().joinToString("") { "%02x".format(it) }
             if (!actualSha.equals(expectedSha256, ignoreCase = true)) {
-                tmpFile.delete()
                 throw IllegalStateException(
                     "SHA-256 mismatch from desktop worker: expected=$expectedSha256 actual=$actualSha"
                 )
@@ -163,6 +206,9 @@ object DesktopWorkerClient {
                 tmpFile.copyTo(destFile, overwrite = true)
                 tmpFile.delete()
             }
+        } catch (t: Throwable) {
+            tmpFile.delete()
+            throw t
         } finally {
             conn.disconnect()
         }
@@ -193,7 +239,7 @@ object DesktopWorkerClient {
             )
         )
 
-        val rules = dao.getAllRules().map { it.toDomain() }
+        val rules = dao.getEnabledRules().map { it.toDomain() }
         val windows = WordMatcher.matchWords(
             words = bundle.wordIndexBlob.words,
             rules = rules,
@@ -201,40 +247,37 @@ object DesktopWorkerClient {
             postPadMs = postPadMs,
             defaultActionMode = defaultActionMode
         )
-        dao.deleteMuteSegments(sha)
-        if (windows.isNotEmpty()) {
-            dao.insertMuteSegments(
-                windows.map { w ->
-                    MuteSegmentEntity(
-                        fileSha256 = sha,
-                        episodeId = episodeId,
-                        startMs = w.startMs,
-                        endMs = w.endMs,
-                        word = w.word,
-                        ruleId = w.ruleId,
-                        actionMode = w.actionMode.name,
-                        enabled = w.enabled
-                    )
-                }
-            )
-        }
+        dao.replaceMuteSegments(
+            sha,
+            windows.map { w ->
+                MuteSegmentEntity(
+                    fileSha256 = sha,
+                    episodeId = episodeId,
+                    startMs = w.startMs,
+                    endMs = w.endMs,
+                    word = w.word,
+                    ruleId = w.ruleId,
+                    actionMode = w.actionMode.name,
+                    enabled = w.enabled
+                )
+            }
+        )
 
-        dao.deleteAdSegments(sha)
-        if (bundle.adSegments.isNotEmpty()) {
-            dao.insertAdSegments(
-                bundle.adSegments.map { ad ->
-                    AdSegmentEntity(
-                        fileSha256 = sha,
-                        episodeId = episodeId,
-                        startMs = ad.startMs,
-                        endMs = ad.endMs,
-                        confidence = ad.confidence,
-                        isHighConfidence = ad.isHighConfidence,
-                        label = ad.label
-                    )
-                }
-            )
-        }
+        dao.replaceAdSegments(
+            sha,
+            bundle.adSegments.map { ad ->
+                AdSegmentEntity(
+                    fileSha256 = sha,
+                    episodeId = episodeId,
+                    startMs = ad.startMs,
+                    endMs = ad.endMs,
+                    confidence = ad.confidence,
+                    isHighConfidence = ad.isHighConfidence && ad.adClass == "sponsor_ad",
+                    label = ad.label,
+                    adClass = ad.adClass
+                )
+            }
+        )
 
         if (!bundle.summary.isNullOrBlank() || bundle.chapters.isNotEmpty()) {
             dao.upsertInsights(
@@ -262,8 +305,34 @@ object DesktopWorkerClient {
 
     private fun normalizeUrl(baseUrl: String): String = baseUrl.trim().trimEnd('/')
 
-    private fun openConnection(url: String, token: String, timeoutMs: Int): HttpURLConnection {
+    private fun openConnection(
+        url: String,
+        token: String,
+        timeoutMs: Int,
+        certFingerprint: String = ""
+    ): HttpURLConnection {
         val conn = URL(url).openConnection() as HttpURLConnection
+        if (conn is HttpsURLConnection && certFingerprint.isNotBlank()) {
+            val expected = certFingerprint.replace(":", "").lowercase()
+            val trustManager = object : X509TrustManager {
+                override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
+                override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+                    val leaf = chain.firstOrNull()
+                        ?: throw java.security.cert.CertificateException("Empty certificate chain")
+                    val digest = MessageDigest.getInstance("SHA-256").digest(leaf.encoded)
+                    val got = digest.joinToString("") { "%02x".format(it) }
+                    if (got != expected) {
+                        throw java.security.cert.CertificateException("Pinned certificate fingerprint mismatch")
+                    }
+                }
+                override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
+            }
+            val sslCtx = SSLContext.getInstance("TLS").apply {
+                init(null, arrayOf(trustManager), null)
+            }
+            conn.sslSocketFactory = sslCtx.socketFactory
+            conn.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true }
+        }
         conn.connectTimeout = timeoutMs
         conn.readTimeout = timeoutMs
         if (token.isNotBlank()) {
@@ -272,8 +341,13 @@ object DesktopWorkerClient {
         return conn
     }
 
-    private fun getText(url: String, token: String, timeoutMs: Int = 15_000): String {
-        val conn = openConnection(url, token, timeoutMs)
+    private fun getText(
+        url: String,
+        token: String,
+        certFingerprint: String = "",
+        timeoutMs: Int = 15_000
+    ): String {
+        val conn = openConnection(url, token, timeoutMs, certFingerprint)
         try {
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
@@ -287,8 +361,14 @@ object DesktopWorkerClient {
         }
     }
 
-    private fun postJson(url: String, token: String, jsonBody: String, timeoutMs: Int = 15_000): String {
-        val conn = openConnection(url, token, timeoutMs)
+    private fun postJson(
+        url: String,
+        token: String,
+        jsonBody: String,
+        certFingerprint: String = "",
+        timeoutMs: Int = 15_000
+    ): String {
+        val conn = openConnection(url, token, timeoutMs, certFingerprint)
         try {
             conn.requestMethod = "POST"
             conn.doOutput = true

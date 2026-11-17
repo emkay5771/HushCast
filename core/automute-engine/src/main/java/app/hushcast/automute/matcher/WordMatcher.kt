@@ -13,7 +13,8 @@ data class MuteRule(
     val matchPlurals: Boolean = true,
     val actionMode: MuteActionMode = MuteActionMode.HARD_SILENCE,
     val enabled: Boolean = true,
-    val category: String = "Custom"
+    val category: String = "Custom",
+    val useDefaultMode: Boolean = false
 )
 
 object PresetDictionaries {
@@ -34,7 +35,10 @@ object PresetDictionaries {
         "nsfw", "blowjob", "handjob"
     )
 
-    fun profanityRules(actionMode: MuteActionMode = MuteActionMode.HARD_SILENCE): List<MuteRule> =
+    fun profanityRules(
+        actionMode: MuteActionMode = MuteActionMode.HARD_SILENCE,
+        useDefaultMode: Boolean = true
+    ): List<MuteRule> =
         PROFANITY_PRESET.mapIndexed { idx, w ->
             MuteRule(
                 id = 1000L + idx,
@@ -42,11 +46,15 @@ object PresetDictionaries {
                 isRegex = false,
                 matchPlurals = true,
                 actionMode = actionMode,
-                category = "Profanity"
+                category = "Profanity",
+                useDefaultMode = useDefaultMode
             )
         }
 
-    fun explicitRules(actionMode: MuteActionMode = MuteActionMode.HARD_SILENCE): List<MuteRule> =
+    fun explicitRules(
+        actionMode: MuteActionMode = MuteActionMode.HARD_SILENCE,
+        useDefaultMode: Boolean = true
+    ): List<MuteRule> =
         EXPLICIT_CONTENT_PRESET.mapIndexed { idx, w ->
             MuteRule(
                 id = 2000L + idx,
@@ -54,7 +62,8 @@ object PresetDictionaries {
                 isRegex = false,
                 matchPlurals = true,
                 actionMode = actionMode,
-                category = "Explicit Content"
+                category = "Explicit Content",
+                useDefaultMode = useDefaultMode
             )
         }
 }
@@ -85,8 +94,16 @@ object WordMatcher {
             .trimStart { !it.isLetterOrDigit() && it != '*' }
             .trimEnd { !it.isLetterOrDigit() && it != '*' }
         MASKED_PROFANITY_MAP[trimmed]?.let { return it }
-        // Handle partial asterisk masking like f*ck -> fuck? Keep stripped alphanumeric for normal words
         return trimmed.replace("'", "").replace("\u2019", "")
+    }
+
+    private fun effectiveMode(rule: MuteRule, defaultActionMode: MuteActionMode): MuteActionMode =
+        if (rule.useDefaultMode) defaultActionMode else rule.actionMode
+
+    private fun modeStrength(mode: MuteActionMode): Int = when (mode) {
+        MuteActionMode.VOLUME_DUCK -> 1
+        MuteActionMode.HARD_SILENCE -> 2
+        MuteActionMode.SAMPLE_DROP_MICRO_SKIP -> 3
     }
 
     fun matchWords(
@@ -115,9 +132,15 @@ object WordMatcher {
                 if (tokens.size == 1) {
                     val base = tokens[0]
                     exactSet.putIfAbsent(base, rule)
-                    if (rule.matchPlurals && !base.endsWith("s")) {
-                        exactSet.putIfAbsent("${base}s", rule)
-                        exactSet.putIfAbsent("${base}es", rule)
+                    if (rule.matchPlurals) {
+                        if (base.endsWith("s") || base.endsWith("x") || base.endsWith("z") ||
+                            base.endsWith("ch") || base.endsWith("sh")
+                        ) {
+                            exactSet.putIfAbsent("${base}es", rule)
+                        } else {
+                            exactSet.putIfAbsent("${base}s", rule)
+                            exactSet.putIfAbsent("${base}es", rule)
+                        }
                     }
                 } else if (tokens.size > 1) {
                     compoundPhrases.add(tokens to rule)
@@ -133,7 +156,6 @@ object WordMatcher {
             val norm = normalizedWords[i]
             if (norm.isEmpty()) continue
 
-            // 1. Exact / plural / masked profanity match
             val exactRule = exactSet[norm]
             if (exactRule != null) {
                 rawWindows.add(
@@ -142,13 +164,12 @@ object WordMatcher {
                         endMs = (w.end * 1000.0).toLong() + postPadMs,
                         word = w.text.trim(),
                         ruleId = exactRule.id,
-                        actionMode = exactRule.actionMode
+                        actionMode = effectiveMode(exactRule, defaultActionMode)
                     )
                 )
                 continue
             }
 
-            // 2. Regex match against normalized or raw trimmed word
             val trimmedRaw = w.text.trim()
             val matchedRegex = regexRules.firstOrNull { (regex, _) ->
                 regex.containsMatchIn(trimmedRaw) || regex.containsMatchIn(norm)
@@ -160,13 +181,12 @@ object WordMatcher {
                         endMs = (w.end * 1000.0).toLong() + postPadMs,
                         word = trimmedRaw,
                         ruleId = matchedRegex.second.id,
-                        actionMode = matchedRegex.second.actionMode
+                        actionMode = effectiveMode(matchedRegex.second, defaultActionMode)
                     )
                 )
             }
         }
 
-        // 3. Compound multi-word phrase match
         for ((phraseTokens, rule) in compoundPhrases) {
             val len = phraseTokens.size
             if (words.size < len) continue
@@ -188,30 +208,33 @@ object WordMatcher {
                             endMs = (last.end * 1000.0).toLong() + postPadMs,
                             word = phraseText,
                             ruleId = rule.id,
-                            actionMode = rule.actionMode
+                            actionMode = effectiveMode(rule, defaultActionMode)
                         )
                     )
                 }
             }
         }
 
-        return mergeOverlappingWindows(rawWindows, defaultActionMode)
+        return mergeOverlappingWindows(rawWindows)
     }
 
-    private fun mergeOverlappingWindows(
-        windows: List<MuteWindow>,
-        defaultActionMode: MuteActionMode
-    ): List<MuteWindow> {
+    private fun mergeOverlappingWindows(windows: List<MuteWindow>): List<MuteWindow> {
         if (windows.isEmpty()) return emptyList()
         val sorted = windows.sortedBy { it.startMs }
         val merged = ArrayList<MuteWindow>(sorted.size)
         var current = sorted[0]
         for (i in 1 until sorted.size) {
             val next = sorted[i]
-            if (next.startMs <= current.endMs + 40L && next.actionMode == current.actionMode) {
+            if (next.startMs <= current.endMs + 40L) {
+                val strongestMode = if (modeStrength(next.actionMode) > modeStrength(current.actionMode)) {
+                    next.actionMode
+                } else {
+                    current.actionMode
+                }
                 current = current.copy(
                     endMs = maxOf(current.endMs, next.endMs),
-                    word = "${current.word} ${next.word}"
+                    word = "${current.word} ${next.word}",
+                    actionMode = strongestMode
                 )
             } else {
                 merged.add(current)

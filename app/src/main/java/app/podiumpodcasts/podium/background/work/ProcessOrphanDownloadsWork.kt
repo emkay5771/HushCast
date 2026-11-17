@@ -20,11 +20,21 @@ class ProcessOrphanDownloadsWork(
         val all = db.podcastEpisodeDownloads().allRandomSync()
         for(bundle in all) {
             val download = bundle.download
+            val episode = bundle.episode
+            if (episode == null) {
+                db.podcastEpisodeDownloads().delete(download.episodeId)
+                continue
+            }
 
-            val file = bundle.episode.craftDownloadFile(context)
+            val file = episode.craftDownloadFile(context)
 
             if(file.exists()) {
                 existingFilePaths.add(file.canonicalPath)
+            } else if(download.state == PodcastEpisodeDownloadState.DOWNLOADING.value) {
+                val partFile = File(file.parentFile, "${file.name}.part")
+                val metaFile = File(file.parentFile, "${partFile.name}.meta")
+                existingFilePaths.add(partFile.canonicalPath)
+                existingFilePaths.add(metaFile.canonicalPath)
             } else if(download.state == PodcastEpisodeDownloadState.DOWNLOADED.value) {
                 Log.d(
                     "ProcessOrphanDownloadsWork",
@@ -40,6 +50,7 @@ class ProcessOrphanDownloadsWork(
         val downloadsDir = DownloadManager.getDownloadsDirectory(context)
         downloadsDir.walkTopDown()
             .filter { it.isFile && !it.name.startsWith(".") }
+            .filter { !it.name.endsWith(".part") && !it.name.endsWith(".part.meta") }
             .filter { it.canonicalPath !in existingFilePaths }
             .forEach { file ->
                 try {

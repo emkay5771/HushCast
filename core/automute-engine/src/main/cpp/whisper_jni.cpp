@@ -77,6 +77,22 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_pcmFree(JNIEnv *, jclass, jlo
     delete reinterpret_cast<std::vector<float> *>(pcm);
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_pcmKeepTail(JNIEnv *, jclass, jlong pcm, jint keepSamples) {
+    auto * v = reinterpret_cast<std::vector<float> *>(pcm);
+    if (!v) return;
+    if (keepSamples <= 0) {
+        v->clear();
+        return;
+    }
+    const size_t k = (size_t) keepSamples;
+    if (k < v->size()) {
+        const size_t drop = v->size() - k;
+        std::memmove(v->data(), v->data() + drop, k * sizeof(float));
+        v->resize(k);
+    }
+}
+
 struct WhisperProgressCtx {
     JNIEnv * env;
     jobject cb;

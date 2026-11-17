@@ -94,82 +94,6 @@ interface SwipeableItemActions {
         }
     )
 
-    class HearLaterAction(
-        episodeId: String
-    ) : SwipeableItemAction(
-        style = {
-            val db = LocalDatabase.current
-
-            val isOnHearLater = remember {
-                db.listItems().isOnHearLaterFlow(episodeId)
-            }.collectAsState(false)
-
-            SwipeableItemActionStyle(
-                icon = when(isOnHearLater.value) {
-                    true -> Icons.Rounded.WatchLater
-                    false -> Icons.Outlined.WatchLater
-                },
-                backgroundColor = MaterialTheme.colorScheme.tertiaryContainer,
-                iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                activeBackgroundColor = MaterialTheme.colorScheme.tertiary,
-                activeIconTint = MaterialTheme.colorScheme.onTertiary,
-            )
-        },
-        onActionHandler = actionHandler@{
-            val db = LocalDatabase.current
-
-            val removedFromHearLater = stringResource(R.string.snackbar_removed_from_hear_later)
-            val addedToHearLater = stringResource(R.string.snackbar_added_to_hear_later)
-
-            return@actionHandler {
-                if(db.listItems().isOnHearLater(episodeId)) {
-                    val item = db.listItems().get(SystemLists.HEAR_LATER.id, episodeId)
-                    db.listItems().deleteAndReindex(
-                        listId = SystemLists.HEAR_LATER.id,
-                        itemId = item.id,
-                        deletedPosition = item.position
-                    )
-
-                    SwipeableItemActionResult(
-                        isDismissed = false,
-                        message = removedFromHearLater,
-                        onUndo = {
-                            val nextPosition =
-                                db.listItems().getNextPosition(SystemLists.HEAR_LATER.id)
-                            db.listItems().addListItemAndRefreshItemCount(
-                                listId = SystemLists.HEAR_LATER.id,
-                                contentId = episodeId,
-                                isPodcast = false,
-                                position = nextPosition ?: 0
-                            )
-                        }
-                    )
-                } else {
-                    val nextPosition = db.listItems().getNextPosition(SystemLists.HEAR_LATER.id)
-                    db.listItems().addListItemAndRefreshItemCount(
-                        listId = SystemLists.HEAR_LATER.id,
-                        contentId = episodeId,
-                        isPodcast = false,
-                        position = nextPosition ?: 0
-                    )
-
-                    SwipeableItemActionResult(
-                        isDismissed = false,
-                        message = addedToHearLater,
-                        onUndo = {
-                            val item = db.listItems().get(SystemLists.HEAR_LATER.id, episodeId)
-                            db.listItems().deleteAndReindex(
-                                listId = SystemLists.HEAR_LATER.id,
-                                itemId = item.id,
-                                deletedPosition = item.position
-                            )
-                        }
-                    )
-                }
-            }
-        }
-    )
-
     class QueueAction(
         bundle: app.podiumpodcasts.podium.api.db.model.PodcastEpisodeBundle,
         playNext: Boolean,
@@ -314,9 +238,6 @@ fun buildEpisodeSwipeAction(
             bundle = bundle,
             playNext = false,
             playerVm = playerVm
-        )
-        app.podiumpodcasts.podium.EpisodeSwipeAction.HEAR_LATER -> SwipeableItemActions.HearLaterAction(
-            episodeId = bundle.episode.id
         )
         app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED -> SwipeableItemActions.CheckAction(
             isChecked = isCurrentlyPlayed,

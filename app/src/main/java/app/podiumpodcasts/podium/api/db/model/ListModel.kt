@@ -2,7 +2,6 @@ package app.podiumpodcasts.podium.api.db.model
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Star
-import androidx.compose.material.icons.rounded.WatchLater
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.room.ColumnInfo
 import androidx.room.Entity
@@ -16,7 +15,6 @@ enum class SystemLists(
     val onlyEpisodes: Boolean,
     val hideFromSaveToList: Boolean = false
 ) {
-    HEAR_LATER(-1, R.string.system_lists_hear_later_label, Icons.Rounded.WatchLater, true),
     FAVORITES(-2, R.string.system_lists_favorites_label, Icons.Rounded.Star, true, true);
 }
 

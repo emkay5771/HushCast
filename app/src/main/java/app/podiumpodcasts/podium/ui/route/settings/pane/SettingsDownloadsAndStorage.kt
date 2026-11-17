@@ -44,7 +44,7 @@ import app.podiumpodcasts.podium.ui.vm.SettingsViewModel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
-@SuppressLint("ParcelCreator")
+@kotlinx.parcelize.Parcelize
 @Serializable
 class SettingsDownloadsAndStorageKey : SettingsPaneKey()
 
@@ -281,11 +281,13 @@ fun SettingsDownloadsAndStoragePane(
                                     showConfirm.value = false
                                     scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                                         db.podcastEpisodeDownloads().allRandomSync().forEach { bundle ->
-                                            app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
-                                                context = context,
-                                                db = db,
-                                                episode = bundle.episode
-                                            )
+                                            bundle.episode?.let { ep ->
+                                                app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
+                                                    context = context,
+                                                    db = db,
+                                                    episode = ep
+                                                )
+                                            }
                                         }
                                     }
                                 }

@@ -33,6 +33,7 @@ import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DataUsage
@@ -46,6 +47,7 @@ import androidx.compose.material.icons.rounded.Inbox
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsNone
 import androidx.compose.material.icons.rounded.RssFeed
@@ -81,12 +83,17 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
@@ -172,13 +179,22 @@ fun PodcastDetailView(
     val selectedEpisodeIds = remember(podcast.origin) { androidx.compose.runtime.mutableStateListOf<String>() }
 
     val isSubscribed = subscription.value != null
-    val enableNotifications = subscription.value?.enableNotifications == true
-    val enableAutoDownload = subscription.value?.enableAutoDownload == true
+    var showOverflowMenu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(vm.refreshError) {
+        val err = vm.refreshError ?: return@LaunchedEffect
+        vm.snackbarHostState.showSnackbar(err)
+        vm.refreshError = null
+    }
 
     val BACKDROP_SIZE = 200.dp
 
     val isAtTop by remember {
         derivedStateOf { vm.lazyListState.firstVisibleItemIndex == 0 }
+    }
+
+    val isCollapsed by remember {
+        derivedStateOf { vm.lazyListState.firstVisibleItemIndex > 0 }
     }
 
     val showScrollUpButton by remember {
@@ -197,6 +213,12 @@ fun PodcastDetailView(
                 topBar = {
                     if(selectedEpisodeIds.isNotEmpty()) {
                         TopAppBar(
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                titleContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                navigationIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                actionIconContentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                            ),
                             navigationIcon = {
                                 IconButton(onClick = { selectedEpisodeIds.clear() }) {
                                     Icon(Icons.Rounded.Close, "Clear selection")
@@ -206,41 +228,6 @@ fun PodcastDetailView(
                                 Text("${selectedEpisodeIds.size} selected")
                             },
                             actions = {
-                                IconButton(
-                                    onClick = {
-                                        val selectedBundles = (0 until episodePager.itemCount)
-                                            .mapNotNull { episodePager.peek(it) }
-                                            .filter { it.episode.id in selectedEpisodeIds }
-                                        selectedBundles.asReversed().forEach { playerVm.playNext(context, it) }
-                                        selectedEpisodeIds.clear()
-                                    }
-                                ) {
-                                    Icon(Icons.Rounded.VerticalAlignTop, "Play Next")
-                                }
-                                IconButton(
-                                    onClick = {
-                                        val selectedBundles = (0 until episodePager.itemCount)
-                                            .mapNotNull { episodePager.peek(it) }
-                                            .filter { it.episode.id in selectedEpisodeIds }
-                                        selectedBundles.forEach { playerVm.enqueue(context, it) }
-                                        selectedEpisodeIds.clear()
-                                    }
-                                ) {
-                                    Icon(Icons.Rounded.VerticalAlignBottom, "Play Last")
-                                }
-                                IconButton(
-                                    onClick = {
-                                        val ids = selectedEpisodeIds.toList()
-                                        scope.launch {
-                                            ids.forEach { id ->
-                                                db.podcastEpisodePlayStates().savePlayed(id, true)
-                                            }
-                                        }
-                                        selectedEpisodeIds.clear()
-                                    }
-                                ) {
-                                    Icon(Icons.Rounded.Done, "Mark Played")
-                                }
                                 IconButton(
                                     onClick = {
                                         val allIds = (0 until episodePager.itemCount)
@@ -265,10 +252,18 @@ fun PodcastDetailView(
                                 }
                             },
                             colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = Color.Transparent,
-                                scrolledContainerColor = Color.Transparent
+                                containerColor = if (isCollapsed) MaterialTheme.colorScheme.surfaceContainer else Color.Transparent,
+                                scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
                             ),
-                            title = { },
+                            title = {
+                                if (isCollapsed) {
+                                    Text(
+                                        text = podcast.fetchTitle(),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            },
                             actions = {
                                 BubbleButton(
                                     icon = Icons.Rounded.Settings,
@@ -277,8 +272,118 @@ fun PodcastDetailView(
                                         vm.showSettingsBottomSheet.value = true
                                     }
                                 )
+                                Box {
+                                    BubbleButton(
+                                        icon = androidx.compose.material.icons.Icons.Rounded.MoreVert,
+                                        contentDescription = "More options",
+                                        onClick = { showOverflowMenu = true }
+                                    )
+                                    androidx.compose.material3.DropdownMenu(
+                                        expanded = showOverflowMenu,
+                                        onDismissRequest = { showOverflowMenu = false }
+                                    ) {
+                                        if (isSubscribed) {
+                                            androidx.compose.material3.DropdownMenuItem(
+                                                text = { Text(stringResource(R.string.common_action_unsubscribe)) },
+                                                leadingIcon = {
+                                                    Icon(Icons.Rounded.FavoriteBorder, contentDescription = null)
+                                                },
+                                                onClick = {
+                                                    showOverflowMenu = false
+                                                    vm.showUnsubscribeDialog.value = true
+                                                }
+                                            )
+                                        }
+                                        androidx.compose.material3.DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.common_action_delete)) },
+                                            leadingIcon = {
+                                                Icon(Icons.Rounded.Delete, contentDescription = null)
+                                            },
+                                            onClick = {
+                                                showOverflowMenu = false
+                                                vm.showDeleteDialog.value = true
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         )
+                    }
+                },
+                bottomBar = {
+                    if (selectedEpisodeIds.isNotEmpty()) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            tonalElevation = 3.dp
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val selectedBundles = (0 until episodePager.itemCount)
+                                    .mapNotNull { episodePager.peek(it) }
+                                    .filter { it.episode.id in selectedEpisodeIds }
+
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        selectedBundles.asReversed().forEach { playerVm.playNext(context, it) }
+                                        selectedEpisodeIds.clear()
+                                    }
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(Icons.Rounded.VerticalAlignTop, contentDescription = null)
+                                        Text("Play next", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        selectedBundles.forEach { playerVm.enqueue(context, it) }
+                                        selectedEpisodeIds.clear()
+                                    }
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(androidx.compose.material.icons.Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null)
+                                        Text("Play last", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                val actionScope = rememberCoroutineScope()
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        val toDownload = selectedBundles.toList()
+                                        selectedEpisodeIds.clear()
+                                        actionScope.launch {
+                                            toDownload.forEach {
+                                                app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(context, db, it.episode.id)
+                                            }
+                                        }
+                                    }
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(Icons.Rounded.FileDownload, contentDescription = null)
+                                        Text("Download", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        val ids = selectedEpisodeIds.toList()
+                                        scope.launch {
+                                            ids.forEach { id ->
+                                                db.podcastEpisodePlayStates().savePlayed(id, true)
+                                            }
+                                        }
+                                        selectedEpisodeIds.clear()
+                                    }
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(Icons.Rounded.Done, contentDescription = null)
+                                        Text("Mark played", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                        }
                     }
                 },
                 floatingActionButton = {
@@ -434,7 +539,7 @@ fun PodcastDetailView(
                                             if(!isSubscribed) {
                                                 vm.subscribe()
                                             } else {
-                                                vm.unsubscribe()
+                                                vm.showUnsubscribeDialog.value = true
                                             }
                                         },
 
@@ -442,85 +547,17 @@ fun PodcastDetailView(
                                             containerColor = MaterialTheme.colorScheme.surface
                                         )
                                     ) {
-                                        AnimatedContent(isSubscribed) { isSubscribed ->
+                                        AnimatedContent(isSubscribed) { subscribed ->
                                             ButtonLabelWithIconInset(
-                                                icon = when(isSubscribed) {
-                                                    true -> Icons.Rounded.Favorite
+                                                icon = when(subscribed) {
+                                                    true -> Icons.Rounded.Done
                                                     false -> Icons.Rounded.FavoriteBorder
                                                 },
-                                                label = when(isSubscribed) {
-                                                    true -> stringResource(R.string.common_action_unsubscribe)
+                                                label = when(subscribed) {
+                                                    true -> "Subscribed"
                                                     false -> stringResource(R.string.common_action_subscribe)
                                                 }
                                             )
-                                        }
-                                    }
-
-                                    Spacer(Modifier.width(8.dp))
-
-                                    AnimatedVisibility(
-                                        visible = isSubscribed,
-                                        enter = fadeIn() + expandHorizontally(),
-                                        exit = fadeOut() + shrinkHorizontally()
-                                    ) {
-                                        Row {
-                                            FilledIconToggleButton(
-                                                checked = enableNotifications,
-                                                onCheckedChange = {
-                                                    when(enableNotifications) {
-                                                        true -> vm.disableNotifications()
-                                                        false -> vm.enableNotifications()
-                                                    }
-                                                },
-
-                                                colors = IconButtonDefaults.filledIconToggleButtonColors(
-                                                    containerColor = MaterialTheme.colorScheme.surface,
-                                                    checkedContainerColor = MaterialTheme.colorScheme.primary,
-                                                    checkedContentColor = MaterialTheme.colorScheme.onPrimary
-                                                )
-                                            ) {
-                                                AnimatedContent(enableNotifications) { isEnabled ->
-                                                    Icon(
-                                                        imageVector = when(isEnabled) {
-                                                            true -> Icons.Rounded.NotificationsActive
-                                                            false -> Icons.Rounded.NotificationsNone
-                                                        },
-                                                        contentDescription = when(isEnabled) {
-                                                            true -> stringResource(R.string.common_downloading)
-                                                            false -> stringResource(R.string.common_action_download)
-                                                        }
-                                                    )
-                                                }
-                                            }
-
-                                            FilledIconToggleButton(
-                                                checked = enableAutoDownload,
-                                                onCheckedChange = {
-                                                    when(enableAutoDownload) {
-                                                        true -> vm.disableAutoDownload()
-                                                        false -> vm.enableAutoDownload()
-                                                    }
-                                                },
-
-                                                colors = IconButtonDefaults.filledIconToggleButtonColors(
-                                                    containerColor = MaterialTheme.colorScheme.surface,
-                                                    checkedContainerColor = MaterialTheme.colorScheme.primary,
-                                                    checkedContentColor = MaterialTheme.colorScheme.onPrimary
-                                                )
-                                            ) {
-                                                AnimatedContent(enableAutoDownload) { isEnabled ->
-                                                    Icon(
-                                                        imageVector = when(isEnabled) {
-                                                            true -> Icons.Rounded.FileDownloadOff
-                                                            false -> Icons.Rounded.FileDownload
-                                                        },
-                                                        contentDescription = when(isEnabled) {
-                                                            true -> stringResource(R.string.common_action_disable_auto_download)
-                                                            false -> stringResource(R.string.common_action_enable_auto_download)
-                                                        }
-                                                    )
-                                                }
-                                            }
                                         }
                                     }
 
@@ -530,7 +567,7 @@ fun PodcastDetailView(
                                         Modifier.height(24.dp)
                                     )
 
-                                    Spacer(Modifier.width(16.dp))
+                                    Spacer(Modifier.width(8.dp))
 
                                     ContentSaveToListButton(
                                         contentId = podcast.origin,
@@ -543,27 +580,6 @@ fun PodcastDetailView(
                                         contentId = podcast.origin,
                                         isPodcast = true
                                     )
-
-                                    Spacer(Modifier.width(8.dp))
-
-                                    FilledIconButton(
-                                        onClick = {
-                                            vm.showDeleteDialog.value = true
-                                        },
-                                        colors = IconButtonDefaults.filledIconButtonColors(
-                                            containerColor = MaterialTheme.colorScheme.harmonizeWithPrimary(
-                                                MaterialTheme.colorScheme.errorContainer
-                                            ),
-                                            contentColor = MaterialTheme.colorScheme.harmonizeWithPrimary(
-                                                MaterialTheme.colorScheme.onErrorContainer
-                                            )
-                                        )
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Delete,
-                                            contentDescription = stringResource(R.string.common_action_delete)
-                                        )
-                                    }
 
                                     Spacer(Modifier.width(16.dp))
                                 }
@@ -690,6 +706,21 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
 
             Row(
                 modifier = Modifier
+                    .graphicsLayer(
+                        compositingStrategy = CompositingStrategy.Offscreen
+                    )
+                    .drawWithContent {
+                        drawContent()
+                        val fadePx = 24.dp.toPx()
+                        drawRect(
+                            brush = Brush.horizontalGradient(
+                                colors = listOf(Color.Black, Color.Transparent),
+                                startX = size.width - fadePx,
+                                endX = size.width
+                            ),
+                            blendMode = BlendMode.DstIn
+                        )
+                    }
                     .horizontalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -794,7 +825,7 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                     val itemPlayerVm = viewModel<MediaPlayerViewModel>()
                     val itemSettings = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
                     val itemSwipeRightAction = itemSettings.behavior.episodeSwipeRightAction.collectAsState(
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.HEAR_LATER
+                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
                     ).value
                     val itemSwipeLeftAction = itemSettings.behavior.episodeSwipeLeftAction.collectAsState(
                         app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED

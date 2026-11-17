@@ -85,7 +85,7 @@ fun String.normalizeOrigin(): String {
 fun String.sha256(): String {
     val digest = MessageDigest.getInstance("SHA-256")
     val hashBytes = digest.digest(toByteArray(Charsets.UTF_8))
-    return hashBytes.fold("") { str, byte -> str + "%02x".format(byte) }
+    return java.util.HexFormat.of().formatHex(hashBytes)
 }
 
 fun shareFile(

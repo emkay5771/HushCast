@@ -50,10 +50,30 @@ enum class AutoAddUpNextMode {
 enum class EpisodeSwipeAction(val label: String) {
     PLAY_NEXT("Add to Up Next (Play Next)"),
     PLAY_LAST("Add to Up Next (Play Last)"),
-    HEAR_LATER("Add / Remove Hear Later"),
     MARK_PLAYED("Mark Played / Unplayed"),
     DOWNLOAD("Download / Delete Download"),
     NONE("None")
+}
+
+enum class HeadsetNextAction(val label: String) {
+    SKIP_FORWARD("Skip forward"),
+    NEXT_EPISODE("Next episode in queue")
+}
+
+enum class HeadsetPrevAction(val label: String) {
+    SKIP_BACK("Skip back"),
+    PREV_EPISODE("Previous episode / restart")
+}
+
+enum class PlayerToolbarAction(val label: String) {
+    SPEED("Speed"),
+    HUSHCAST("HushCast"),
+    SLEEP("Sleep timer"),
+    CHAPTERS("Chapters"),
+    SHARE("Share"),
+    DOWNLOAD("Download"),
+    FAVORITE("Favorite"),
+    MARK_PLAYED("Mark played")
 }
 
 object SettingsKeys {
@@ -68,6 +88,7 @@ object SettingsKeys {
     val APPEARANCE_SHOW_GRID_TITLES = booleanPreferencesKey("appearance_show_grid_titles")
     val APPEARANCE_BOTTOM_BAR_ITEMS = stringPreferencesKey("appearance_bottom_bar_items")
     val APPEARANCE_STARTUP_DESTINATION = stringPreferencesKey("appearance_startup_destination")
+    val APPEARANCE_PODCAST_GRID_STATE = stringPreferencesKey("appearance_podcast_grid_state")
 
     val BEHAVIOR_PLAYER_PLAYBACK_SPEED =
         floatPreferencesKey("behavior_player_playback_speed")
@@ -83,10 +104,20 @@ object SettingsKeys {
         longPreferencesKey("behavior_player_seek_back_increment")
     val BEHAVIOR_PLAYER_SEEK_FORWARD_INCREMENT =
         longPreferencesKey("behavior_player_seek_forward_increment")
+    val BEHAVIOR_HEADSET_NEXT_ACTION =
+        stringPreferencesKey("behavior_headset_next_action")
+    val BEHAVIOR_HEADSET_PREV_ACTION =
+        stringPreferencesKey("behavior_headset_prev_action")
+    val BEHAVIOR_SPEED_PRESETS =
+        stringPreferencesKey("behavior_speed_presets")
+    val BEHAVIOR_PLAYER_TOOLBAR_ACTIONS =
+        stringPreferencesKey("behavior_player_toolbar_actions")
     val BEHAVIOR_UPDATE_PODCASTS_IN_ROAMING =
         booleanPreferencesKey("behavior_update_podcasts_in_roaming")
     val BEHAVIOR_UPDATE_PODCASTS_INTERVAL_MINUTES =
         intPreferencesKey("behavior_update_podcasts_interval_minutes")
+    val BEHAVIOR_ENABLE_NEW_EPISODE_NOTIFICATIONS =
+        booleanPreferencesKey("behavior_enable_new_episode_notifications")
     val BEHAVIOR_DOWNLOAD_METERED = booleanPreferencesKey("behavior_download_metered")
     val BEHAVIOR_DOWNLOAD_IN_ROAMING = booleanPreferencesKey("behavior_download_in_roaming")
     val BEHAVIOR_AUTO_DOWNLOADS_APPLY_SETTINGS =
@@ -97,7 +128,18 @@ object SettingsKeys {
     val BEHAVIOR_DELETE_DOWNLOADS_AFTER_SECONDS =
         intPreferencesKey("behavior_delete_downloads_after_seconds")
 
+    val HUSHCAST_WORD_MUTING_ENABLED = booleanPreferencesKey("hushcast_word_muting_enabled")
+    val HUSHCAST_MUTE_ACTION_MODE = stringPreferencesKey("hushcast_mute_action_mode")
+    val HUSHCAST_AD_POLICY_MODE = stringPreferencesKey("hushcast_ad_policy_mode")
+    val HUSHCAST_SETUP_COMPLETED = booleanPreferencesKey("hushcast_setup_completed")
+    val HUSHCAST_SHIELD_HINT_SEEN = booleanPreferencesKey("hushcast_shield_hint_seen")
+    val HUSHCAST_AUTO_DOWNLOAD_UP_NEXT = booleanPreferencesKey("hushcast_auto_download_up_next")
+    val HUSHCAST_FAST_MODEL = booleanPreferencesKey("hushcast_fast_model")
+    val HUSHCAST_FAST_ATTENTION = booleanPreferencesKey("hushcast_fast_attention")
+    val HUSHCAST_ANALYZE_CHARGING_ONLY = booleanPreferencesKey("hushcast_analyze_charging_only")
+
     val SYNC_ENABLE = booleanPreferencesKey("sync_enable")
+    val SYNC_INTERVAL_MINUTES = intPreferencesKey("sync_interval_minutes")
     val SYNC_TYPE = stringPreferencesKey("sync_type")
     val SYNC_BASE_URL = stringPreferencesKey("sync_base_url")
     val SYNC_DEVICE_CAPTION = stringPreferencesKey("sync_device_caption")
@@ -122,6 +164,7 @@ class SettingsRepository(val context: Context) {
 
     val appearance = Appearance()
     val behavior = Behavior()
+    val hushCast = HushCast()
     val sync = Sync()
     val privacy = Privacy()
     val debug = Debug()
@@ -242,6 +285,15 @@ class SettingsRepository(val context: Context) {
         suspend fun setStartupDestination(destination: String) = dataStore.edit { preferences ->
             preferences[SettingsKeys.APPEARANCE_STARTUP_DESTINATION] = destination
         }
+
+        val podcastGridStateRaw: Flow<String?> = dataStore.data
+            .map { preferences ->
+                preferences[SettingsKeys.APPEARANCE_PODCAST_GRID_STATE]
+            }
+
+        suspend fun setPodcastGridStateRaw(raw: String) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_PODCAST_GRID_STATE] = raw
+        }
     }
 
     inner class Behavior {
@@ -267,7 +319,7 @@ class SettingsRepository(val context: Context) {
             .map { preferences ->
                 val raw = preferences[SettingsKeys.BEHAVIOR_EPISODE_SWIPE_RIGHT_ACTION]
                 runCatching { raw?.let { EpisodeSwipeAction.valueOf(it) } }.getOrNull()
-                    ?: EpisodeSwipeAction.HEAR_LATER
+                    ?: EpisodeSwipeAction.PLAY_NEXT
             }
 
         suspend fun setEpisodeSwipeRightAction(action: EpisodeSwipeAction) = dataStore.edit { preferences ->
@@ -413,6 +465,140 @@ class SettingsRepository(val context: Context) {
         suspend fun setDeleteDownloadsAfterSeconds(seconds: Int) = dataStore.edit { preferences ->
             preferences[SettingsKeys.BEHAVIOR_DELETE_DOWNLOADS_AFTER_SECONDS] = seconds
         }
+
+        val enableNewEpisodeNotifications: Flow<Boolean> = dataStore.data
+            .map { preferences ->
+                preferences[SettingsKeys.BEHAVIOR_ENABLE_NEW_EPISODE_NOTIFICATIONS] ?: false
+            }
+
+        suspend fun setEnableNewEpisodeNotifications(enable: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_ENABLE_NEW_EPISODE_NOTIFICATIONS] = enable
+        }
+
+        val headsetNextAction: Flow<HeadsetNextAction> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.BEHAVIOR_HEADSET_NEXT_ACTION]
+                runCatching { raw?.let { HeadsetNextAction.valueOf(it) } }.getOrNull()
+                    ?: HeadsetNextAction.SKIP_FORWARD
+            }
+
+        suspend fun setHeadsetNextAction(action: HeadsetNextAction) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_HEADSET_NEXT_ACTION] = action.name
+        }
+
+        val headsetPrevAction: Flow<HeadsetPrevAction> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.BEHAVIOR_HEADSET_PREV_ACTION]
+                runCatching { raw?.let { HeadsetPrevAction.valueOf(it) } }.getOrNull()
+                    ?: HeadsetPrevAction.SKIP_BACK
+            }
+
+        suspend fun setHeadsetPrevAction(action: HeadsetPrevAction) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_HEADSET_PREV_ACTION] = action.name
+        }
+
+        val speedPresets: Flow<List<Float>> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.BEHAVIOR_SPEED_PRESETS]
+                    ?: "0.8,1.0,1.2,1.5,1.8,2.0"
+                raw.split(",").mapNotNull { it.trim().toFloatOrNull() }.ifEmpty {
+                    listOf(0.8f, 1.0f, 1.2f, 1.5f, 1.8f, 2.0f)
+                }
+            }
+
+        suspend fun setSpeedPresets(presets: List<Float>) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_SPEED_PRESETS] = presets.distinct().sorted().joinToString(",")
+        }
+
+        val playerToolbarActions: Flow<List<PlayerToolbarAction>> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.BEHAVIOR_PLAYER_TOOLBAR_ACTIONS]
+                    ?: "SPEED,HUSHCAST,SLEEP,CHAPTERS,SHARE"
+                raw.split(",").mapNotNull { token ->
+                    runCatching { PlayerToolbarAction.valueOf(token.trim()) }.getOrNull()
+                }.ifEmpty {
+                    listOf(
+                        PlayerToolbarAction.SPEED,
+                        PlayerToolbarAction.HUSHCAST,
+                        PlayerToolbarAction.SLEEP,
+                        PlayerToolbarAction.CHAPTERS,
+                        PlayerToolbarAction.SHARE
+                    )
+                }
+            }
+
+        suspend fun setPlayerToolbarActions(actions: List<PlayerToolbarAction>) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_PLAYER_TOOLBAR_ACTIONS] = actions.distinct().joinToString(",") { it.name }
+        }
+    }
+
+    inner class HushCast {
+        val wordMutingEnabled: Flow<Boolean> = dataStore.data.map { preferences ->
+            preferences[SettingsKeys.HUSHCAST_WORD_MUTING_ENABLED] ?: true
+        }
+
+        suspend fun setWordMutingEnabled(enabled: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.HUSHCAST_WORD_MUTING_ENABLED] = enabled
+        }
+
+        val muteActionMode: Flow<app.hushcast.automute.dsp.MuteActionMode> = dataStore.data.map { preferences ->
+            val raw = preferences[SettingsKeys.HUSHCAST_MUTE_ACTION_MODE]
+            runCatching { raw?.let { app.hushcast.automute.dsp.MuteActionMode.valueOf(it) } }.getOrNull()
+                ?: app.hushcast.automute.dsp.MuteActionMode.HARD_SILENCE
+        }
+
+        suspend fun setMuteActionMode(mode: app.hushcast.automute.dsp.MuteActionMode) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.HUSHCAST_MUTE_ACTION_MODE] = mode.name
+        }
+
+        val adPolicyMode: Flow<app.hushcast.automute.dsp.AdPolicyMode> = dataStore.data.map { preferences ->
+            val raw = preferences[SettingsKeys.HUSHCAST_AD_POLICY_MODE]
+            runCatching { raw?.let { app.hushcast.automute.dsp.AdPolicyMode.valueOf(it) } }.getOrNull()
+                ?: app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP
+        }
+
+        suspend fun setAdPolicyMode(mode: app.hushcast.automute.dsp.AdPolicyMode) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.HUSHCAST_AD_POLICY_MODE] = mode.name
+        }
+
+        val setupCompleted: Flow<Boolean> = dataStore.data.map { preferences ->
+            preferences[SettingsKeys.HUSHCAST_SETUP_COMPLETED] ?: false
+        }
+
+        suspend fun setSetupCompleted(completed: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.HUSHCAST_SETUP_COMPLETED] = completed
+        }
+
+        val shieldHintSeen: Flow<Boolean> = dataStore.data.map { preferences ->
+            preferences[SettingsKeys.HUSHCAST_SHIELD_HINT_SEEN] ?: false
+        }
+
+        suspend fun setShieldHintSeen(seen: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.HUSHCAST_SHIELD_HINT_SEEN] = seen
+        }
+
+        val autoDownloadUpNext: Flow<Boolean> = dataStore.data.map { preferences ->
+            preferences[SettingsKeys.HUSHCAST_AUTO_DOWNLOAD_UP_NEXT] ?: true
+        }
+
+        suspend fun setAutoDownloadUpNext(enabled: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.HUSHCAST_AUTO_DOWNLOAD_UP_NEXT] = enabled
+        }
+
+        fun podcastWordMuting(origin: String): Flow<Boolean?> {
+            val key = booleanPreferencesKey("podcast_word_muting_${origin.hashCode()}")
+            return dataStore.data.map { preferences ->
+                preferences[key]
+            }
+        }
+
+        suspend fun setPodcastWordMuting(origin: String, enabled: Boolean?) {
+            val key = booleanPreferencesKey("podcast_word_muting_${origin.hashCode()}")
+            dataStore.edit { preferences ->
+                if (enabled == null) preferences.remove(key)
+                else preferences[key] = enabled
+            }
+        }
     }
 
     inner class Sync {
@@ -422,6 +608,14 @@ class SettingsRepository(val context: Context) {
 
         suspend fun setEnable(enable: Boolean) = dataStore.edit { preferences ->
             preferences[SettingsKeys.SYNC_ENABLE] = enable
+        }
+
+        val intervalMinutes: Flow<Int> = dataStore.data.map { preferences ->
+            preferences[SettingsKeys.SYNC_INTERVAL_MINUTES] ?: 60
+        }
+
+        suspend fun setIntervalMinutes(minutes: Int) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.SYNC_INTERVAL_MINUTES] = minutes
         }
 
         val type: Flow<String> = dataStore.data.map { preferences ->

@@ -19,9 +19,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Label
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Restore
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Speed
@@ -401,6 +403,121 @@ fun PodcastSettingsView(
                     },
                     index = 2,
                     count = 3,
+                    onClick = { }
+                )
+            }
+
+            item {
+                Spacer(Modifier.height(32.dp))
+            }
+
+            item {
+                SettingsHeader(label = "HushCast")
+            }
+
+            item {
+                val podcastWordMuting by remember(podcast.origin) {
+                    settingsRepository.hushCast.podcastWordMuting(podcast.origin)
+                }.collectAsState(initial = null)
+
+                SettingsListItem(
+                    icon = {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Rounded.Shield,
+                            "Mute words"
+                        )
+                    },
+                    label = "Mute words",
+                    supportingContent = {
+                        Column {
+                            Text("Override global word muting for this podcast")
+                            Spacer(Modifier.height(12.dp))
+                            val options = listOf(
+                                null to "Default",
+                                true to "On",
+                                false to "Off"
+                            )
+                            SingleChoiceSegmentedButtonRow(
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                options.forEachIndexed { idx, (value, label) ->
+                                    SegmentedButton(
+                                        selected = podcastWordMuting == value,
+                                        onClick = {
+                                            scope.launch {
+                                                settingsRepository.hushCast.setPodcastWordMuting(podcast.origin, value)
+                                            }
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(idx, options.size)
+                                    ) {
+                                        Text(label, maxLines = 1)
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    index = 0,
+                    count = 2,
+                    onClick = { }
+                )
+            }
+
+            item {
+                val context = androidx.compose.ui.platform.LocalContext.current
+                val autoMuteDb = remember { app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context) }
+                val policyEntity by remember(podcast.origin) {
+                    autoMuteDb.dao().observePodcastAdPolicy(podcast.origin)
+                }.collectAsState(initial = null)
+                val globalPolicy by settingsRepository.hushCast.adPolicyMode.collectAsState(
+                    initial = app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP
+                )
+                val effectivePolicy = policyEntity?.policyMode?.let {
+                    runCatching { app.hushcast.automute.dsp.AdPolicyMode.valueOf(it) }.getOrNull()
+                } ?: globalPolicy
+
+                SettingsListItem(
+                    icon = {
+                        Icon(
+                            androidx.compose.material.icons.Icons.Rounded.FastForward,
+                            "Sponsor skipping"
+                        )
+                    },
+                    label = "Sponsor skipping",
+                    supportingContent = {
+                        Column {
+                            Text("Choose how HushCast handles sponsor segments in this podcast")
+                            Spacer(Modifier.height(12.dp))
+                            val options = listOf(
+                                app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP to "Auto-Skip",
+                                app.hushcast.automute.dsp.AdPolicyMode.MARK_ONLY to "Mark Only",
+                                app.hushcast.automute.dsp.AdPolicyMode.OFF to "Off"
+                            )
+                            SingleChoiceSegmentedButtonRow(
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                options.forEachIndexed { idx, (mode, label) ->
+                                    SegmentedButton(
+                                        selected = effectivePolicy == mode,
+                                        onClick = {
+                                            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                                autoMuteDb.dao().upsertPodcastAdPolicy(
+                                                    app.hushcast.automute.storage.PodcastAdPolicyEntity(
+                                                        podcastOrigin = podcast.origin,
+                                                        policyMode = mode.name
+                                                    )
+                                                )
+                                            }
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(idx, options.size)
+                                    ) {
+                                        Text(label, maxLines = 1)
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    index = 1,
+                    count = 2,
                     onClick = { }
                 )
             }

@@ -4,6 +4,7 @@ import androidx.media3.common.Player
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import java.util.concurrent.ConcurrentHashMap
 
 data class AdSkipEvent(
     val adWindow: AdWindow,
@@ -13,8 +14,11 @@ data class AdSkipEvent(
 
 /**
  * Playback boundary observer for Feature B (On-Device Sponsor / Ad Blocker).
- * Auto-skips high-confidence ad spans (p >= 0.80) when AdPolicyMode == AUTO_SKIP
+ * Auto-skips high-confidence sponsor_ad spans (p >= 0.80) when AdPolicyMode == AUTO_SKIP
  * and emits an AdSkipEvent for the 6-second One-Tap Undo snackbar.
+ *
+ * Tracks auto-skipped and user-bypassed ads separately (P6) so seeking back
+ * into an auto-skipped ad still skips it unless the user explicitly chose Undo.
  */
 class AdSkipPlaybackObserver {
 
@@ -24,7 +28,8 @@ class AdSkipPlaybackObserver {
     @Volatile
     private var adWindows: List<AdWindow> = emptyList()
 
-    private val bypassedStartMs = HashSet<Long>()
+    private val autoSkippedStartMs = ConcurrentHashMap.newKeySet<Long>()
+    private val userBypassedStartMs = ConcurrentHashMap.newKeySet<Long>()
 
     private val _skipEvents = MutableSharedFlow<AdSkipEvent>(extraBufferCapacity = 4)
     val skipEvents: SharedFlow<AdSkipEvent> = _skipEvents.asSharedFlow()
@@ -32,17 +37,21 @@ class AdSkipPlaybackObserver {
     fun setEpisodeAds(windows: List<AdWindow>, policy: AdPolicyMode) {
         policyMode = policy
         adWindows = windows.sortedBy { it.startMs }
-        bypassedStartMs.clear()
+        autoSkippedStartMs.clear()
+        userBypassedStartMs.clear()
     }
 
     fun clear() {
         adWindows = emptyList()
-        bypassedStartMs.clear()
+        autoSkippedStartMs.clear()
+        userBypassedStartMs.clear()
     }
 
+    fun getAdWindows(): List<AdWindow> = adWindows
+
     /**
-     * Call periodically (e.g., every 250-500ms) while playing.
-     * Returns true if an auto-skip seek was triggered.
+     * Checks whether [pos] is inside an active high-confidence sponsor ad and triggers an auto-skip.
+     * Used both by PlayerMessage callbacks (P5) and on position discontinuities.
      */
     fun checkPosition(player: Player): Boolean {
         if (policyMode != AdPolicyMode.AUTO_SKIP) return false
@@ -51,9 +60,9 @@ class AdSkipPlaybackObserver {
         val pos = player.currentPosition
         for (ad in adWindows) {
             if (!ad.isHighConfidence) continue
-            if (ad.startMs in bypassedStartMs) continue
+            if (ad.startMs in userBypassedStartMs) continue
             if (pos in ad.startMs until (ad.endMs - 500L)) {
-                bypassedStartMs.add(ad.startMs)
+                autoSkippedStartMs.add(ad.startMs)
                 player.seekTo(ad.endMs)
                 _skipEvents.tryEmit(
                     AdSkipEvent(
@@ -69,7 +78,7 @@ class AdSkipPlaybackObserver {
     }
 
     fun bypassAd(adStartMs: Long) {
-        bypassedStartMs.add(adStartMs)
+        userBypassedStartMs.add(adStartMs)
     }
 
     /**
@@ -77,14 +86,14 @@ class AdSkipPlaybackObserver {
      * Seeks back to the ad start and suppresses re-skipping that span for this playback.
      */
     fun undoSkip(player: Player, event: AdSkipEvent) {
-        bypassedStartMs.add(event.adWindow.startMs)
+        userBypassedStartMs.add(event.adWindow.startMs)
         player.seekTo(event.jumpedFromMs)
     }
 
     fun getActiveAutoSkipRanges(): List<SkipAwareSeekCalculator.SkipRange> {
         if (policyMode != AdPolicyMode.AUTO_SKIP) return emptyList()
         return adWindows
-            .filter { it.isHighConfidence && it.startMs !in bypassedStartMs }
+            .filter { it.isHighConfidence && it.startMs !in userBypassedStartMs }
             .map { SkipAwareSeekCalculator.SkipRange(it.startMs, it.endMs) }
     }
 }

@@ -55,9 +55,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusTarget
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import app.hushcast.automute.dsp.AdPolicyMode
 import app.hushcast.automute.dsp.MuteActionMode
@@ -75,7 +77,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 
-@SuppressLint("ParcelCreator")
+@kotlinx.parcelize.Parcelize
 @Serializable
 class SettingsHushCastKey : SettingsPaneKey()
 
@@ -86,6 +88,7 @@ fun SettingsHushCastPane(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val settingsRepository = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
     val autoMuteDb = remember(context) { AutoMuteDatabase.getInstance(context) }
     val modelManager = remember(context) { ModelManager(context) }
 
@@ -95,9 +98,9 @@ fun SettingsHushCastPane(
     var downloadProgress by remember { mutableStateOf<ModelDownloadProgress?>(null) }
     var downloadError by remember { mutableStateOf<String?>(null) }
 
-    var wordMutingEnabled by remember { mutableStateOf(HushCastEngineBridge.wordMutingEnabled) }
-    var selectedActionMode by remember { mutableStateOf(HushCastEngineBridge.defaultActionMode) }
-    var selectedAdPolicy by remember { mutableStateOf(HushCastEngineBridge.defaultAdPolicy) }
+    val wordMutingEnabled by settingsRepository.hushCast.wordMutingEnabled.collectAsState(initial = HushCastEngineBridge.wordMutingEnabled)
+    val selectedActionMode by settingsRepository.hushCast.muteActionMode.collectAsState(initial = HushCastEngineBridge.defaultActionMode)
+    val selectedAdPolicy by settingsRepository.hushCast.adPolicyMode.collectAsState(initial = HushCastEngineBridge.defaultAdPolicy)
 
     var newPattern by remember { mutableStateOf("") }
     var isRegex by remember { mutableStateOf(false) }
@@ -406,24 +409,31 @@ fun SettingsHushCastPane(
                             Spacer(Modifier.height(10.dp))
                             OutlinedTextField(
                                 value = desktopUrl,
-                                onValueChange = {
-                                    desktopUrl = it
-                                    app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerUrl(context, it)
-                                },
+                                onValueChange = { desktopUrl = it },
                                 label = { Text("Worker URL (e.g. http://192.168.1.50:8765)") },
                                 singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onFocusChanged { state ->
+                                        if (!state.isFocused) {
+                                            app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerUrl(context, desktopUrl)
+                                        }
+                                    }
                             )
                             Spacer(Modifier.height(8.dp))
                             OutlinedTextField(
                                 value = desktopToken,
-                                onValueChange = {
-                                    desktopToken = it
-                                    app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerToken(context, it)
-                                },
+                                onValueChange = { desktopToken = it },
                                 label = { Text("Pairing Token") },
                                 singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
+                                visualTransformation = PasswordVisualTransformation(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onFocusChanged { state ->
+                                        if (!state.isFocused) {
+                                            app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerToken(context, desktopToken)
+                                        }
+                                    }
                             )
                             Spacer(Modifier.height(10.dp))
                             Row(
@@ -710,8 +720,8 @@ fun SettingsHushCastPane(
                             Switch(
                                 checked = wordMutingEnabled,
                                 onCheckedChange = {
-                                    wordMutingEnabled = it
                                     HushCastEngineBridge.wordMutingEnabled = it
+                                    scope.launch { settingsRepository.hushCast.setWordMutingEnabled(it) }
                                 }
                             )
                         }
@@ -728,8 +738,8 @@ fun SettingsHushCastPane(
                                 SegmentedButton(
                                     selected = selectedActionMode == mode,
                                     onClick = {
-                                        selectedActionMode = mode
                                         HushCastEngineBridge.defaultActionMode = mode
+                                        scope.launch { settingsRepository.hushCast.setMuteActionMode(mode) }
                                     },
                                     shape = SegmentedButtonDefaults.itemShape(idx, modes.size)
                                 ) {
@@ -761,9 +771,9 @@ fun SettingsHushCastPane(
                                 SegmentedButton(
                                     selected = selectedAdPolicy == policy,
                                     onClick = {
-                                        selectedAdPolicy = policy
                                         HushCastEngineBridge.defaultAdPolicy = policy
                                         HushCastEngineBridge.adSkipObserver.policyMode = policy
+                                        scope.launch { settingsRepository.hushCast.setAdPolicyMode(policy) }
                                     },
                                     shape = SegmentedButtonDefaults.itemShape(idx, policies.size)
                                 ) {
@@ -825,7 +835,14 @@ fun SettingsHushCastPane(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Switch(checked = isRegex, onCheckedChange = { isRegex = it })
                             Spacer(Modifier.width(6.dp))
-                            Text("Treat as Regex", style = MaterialTheme.typography.bodySmall)
+                            Column {
+                                Text("Treat as Regex", style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    "Tip: Use \\bword\\b for exact whole-word matching",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                         Spacer(Modifier.height(6.dp))
                         val existingKeys = remember(rules) {

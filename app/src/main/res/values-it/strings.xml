@@ -273,4 +273,22 @@
     <string name="view_podcast_settings_subscription_enable_automatic_downloads_description">I nuovi episodi saranno scaricati automaticamente</string>
     <string name="view_podcast_settings_subscription_enable_notifications">Abilita notifiche</string>
     <string name="view_podcast_settings_subscription_enable_notifications_description">Ricevi notifiche quando vengono pubblicati nuovi episodi</string>
+    <string name="common_action_login">Accedi</string>
+    <string name="common_action_logout">Esci</string>
+    <string name="common_action_retry">Riprova</string>
+    <string name="common_experimental">Sperimentale</string>
+    <string name="common_invalid_credentials">Credenziali non valide</string>
+    <string name="common_password">Password</string>
+    <string name="common_username">Nome utente</string>
+    <string name="route_settings_database_and_backup">Database e backup</string>
+    <string name="route_settings_playback">Riproduzione</string>
+    <string name="route_settings_synchronization">Sincronizzazione</string>
+    <string name="route_settings_synchronization_base_url">URL di base</string>
+    <string name="route_settings_synchronization_enable">Abilita sincronizzazione</string>
+    <string name="route_settings_synchronization_full_synchronize">Esegui sincronizzazione completa</string>
+    <string name="route_settings_synchronization_last_synced">Ultima sincronizzazione: %1$s</string>
+    <string name="route_settings_synchronization_synchronize_now">Sincronizza ora</string>
+    <string name="route_up_next">In coda</string>
+    <string name="snackbar_marked_as_unplayed">Segnato come non riprodotto</string>
+    <string name="common_error">Errore</string>
 </resources>

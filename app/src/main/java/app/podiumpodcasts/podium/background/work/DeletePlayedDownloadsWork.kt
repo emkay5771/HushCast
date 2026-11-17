@@ -24,12 +24,17 @@ class DeletePlayedDownloadsWork(
             val bundles = db.podcastEpisodeDownloads().allPlayedOlderThan(cutoffSec)
 
             for(bundle in bundles) {
-                if(!bundle.playState.played) continue
+                val episode = bundle.episode
+                if (episode == null) {
+                    db.podcastEpisodeDownloads().delete(bundle.download.episodeId)
+                    continue
+                }
+                if (bundle.playState?.played != true) continue
 
                 DownloadManager.deleteEpisodeDownload(
                     context = context,
                     db = db,
-                    episode = bundle.episode
+                    episode = episode
                 )
             }
         }

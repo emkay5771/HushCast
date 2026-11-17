@@ -23,10 +23,10 @@ android {
 
     defaultConfig {
         applicationId = "app.podiumpodcasts.podium"
-        minSdk = 26
+        minSdk = 34
         targetSdk = 36
-        versionCode = 1000033
-        versionName = "0.1.31-hushcast"
+        versionCode = 1000034
+        versionName = "1.0.0-hushcast"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
@@ -86,6 +86,9 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+    lint {
+        error += "MissingTranslation"
     }
 }
 
@@ -148,7 +151,6 @@ dependencies {
 
     // Networking & Content Loading
     implementation(libs.ktor.client.core)
-    implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.client.serialization)
     implementation(libs.ktor.client.serialization.json)

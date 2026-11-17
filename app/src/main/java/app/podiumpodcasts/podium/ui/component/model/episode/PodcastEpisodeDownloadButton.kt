@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadForOffline
 import androidx.compose.material.icons.rounded.Downloading
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
@@ -15,14 +16,17 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeBundle
 import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeDownloadState
+import app.podiumpodcasts.podium.api.download.DownloadTracker
 import app.podiumpodcasts.podium.manager.DownloadManager
 import app.podiumpodcasts.podium.ui.component.button.StateDisplayingIconToggleButton
 import app.podiumpodcasts.podium.ui.component.button.StateDisplayingToggleButton
@@ -42,7 +46,10 @@ private val stateMap = mapOf(
             to (Pair(Icons.Rounded.Downloading, R.string.common_downloading)),
 
     PodcastEpisodeDownloadState.DOWNLOADED.value
-            to (Pair(Icons.Rounded.DownloadForOffline, R.string.common_downloaded))
+            to (Pair(Icons.Rounded.DownloadForOffline, R.string.common_downloaded)),
+
+    PodcastEpisodeDownloadState.FAILED.value
+            to (Pair(Icons.Rounded.Refresh, R.string.common_action_retry))
 )
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -58,13 +65,17 @@ fun PodcastEpisodeDownloadButton(
 
     val showDownloadManagementBottomSheet = remember { mutableStateOf(false) }
 
+    val liveProgress by remember(bundle.episode.id) {
+        DownloadTracker.observe(bundle.episode.id)
+    }.collectAsStateWithLifecycle(initialValue = null)
+
     val animateState = remember { Animatable(0f) }
     val firstAnim = remember { mutableStateOf(true) }
 
-    LaunchedEffect(bundle) {
+    LaunchedEffect(bundle.download?.state, liveProgress) {
         val targetValue = when(bundle.download?.state) {
-            null -> 0f
-            PodcastEpisodeDownloadState.DOWNLOADING.value -> (
+            null, PodcastEpisodeDownloadState.FAILED.value -> 0f
+            PodcastEpisodeDownloadState.DOWNLOADING.value -> liveProgress?.fraction ?: (
                     bundle.download.progress.toFloat() /
                             bundle.download.size.coerceAtLeast(1)
                     )
@@ -85,7 +96,7 @@ fun PodcastEpisodeDownloadButton(
 
     fun onCheckedChange() {
         scope.launch {
-            if(bundle.download == null) {
+            if(bundle.download == null || bundle.download.state == PodcastEpisodeDownloadState.FAILED.value) {
                 DownloadManager.downloadEpisode(context, db, bundle.episode.id)
             } else {
                 showDownloadManagementBottomSheet.value = true
@@ -96,11 +107,11 @@ fun PodcastEpisodeDownloadButton(
     @Composable
     fun inner() {
         AnimatedContent(bundle.download?.state) { state ->
-            val values = stateMap[state ?: -1]
+            val values = stateMap[state ?: -1] ?: stateMap[-1]!!
 
             if(icon) {
                 Icon(
-                    imageVector = values!!.first,
+                    imageVector = values.first,
                     contentDescription = stringResource(values.second)
                 )
             } else {
