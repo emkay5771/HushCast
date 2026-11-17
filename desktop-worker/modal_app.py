@@ -73,7 +73,7 @@ _base_image = (
         "av==14.2.0",
     )
     .pip_install(
-        "pywhispercpp==1.3.0",
+        "pywhispercpp==1.5.1",
         extra_options="--no-binary pywhispercpp",
     )
     .pip_install(
