@@ -69,7 +69,7 @@ _base_image = (
         "zeroconf==0.146.5",
         "numpy==2.2.5",
         "onnxruntime-gpu==1.20.1",
-        "av==14.4.0",
+        "av==14.2.0",
     )
     .pip_install(
         "pywhispercpp==1.3.0",
