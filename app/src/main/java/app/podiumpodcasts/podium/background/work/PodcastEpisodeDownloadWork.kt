@@ -250,8 +250,9 @@ class PodcastEpisodeDownloadWork(
                     )
                 )
             }
-            onProgressUpdate?.invoke(title, "Starting analysis…", 2)
-            reportDesktopStatus(5, "Starting analysis…")
+            var highestPct = 5
+            onProgressUpdate?.invoke(title, "Starting analysis…", highestPct)
+            reportDesktopStatus(highestPct, "Starting analysis…")
             val job = app.hushcast.automute.desktop.DesktopWorkerClient.submitJob(
                 baseUrl = workerUrl,
                 token = token,
@@ -270,30 +271,32 @@ class PodcastEpisodeDownloadWork(
                 token = token,
                 jobId = job.jobId
             ) { status ->
-                val pct = 10 + ((status.progressPercent * 60) / 100)
+                val rawPct = (5 + ((status.progressPercent * 65) / 100)).coerceIn(5, 70)
+                val unifiedPct = maxOf(highestPct, rawPct)
+                highestPct = unifiedPct
                 val friendlyStage = friendlyWorkerStage(status.stageLabel.ifBlank { status.state })
-                val fgPct = (status.progressPercent / 2).coerceIn(1, 50)
                 val now = System.currentTimeMillis()
-                if ((fgPct != lastPollNotifyPct || friendlyStage != lastFriendlyStage) &&
-                    (now - lastPollNotifyMs >= 450L || fgPct >= 50 || friendlyStage != lastFriendlyStage)
+                if ((unifiedPct != lastPollNotifyPct || friendlyStage != lastFriendlyStage) &&
+                    (now - lastPollNotifyMs >= 450L || unifiedPct >= 70 || friendlyStage != lastFriendlyStage)
                 ) {
                     lastPollNotifyMs = now
-                    lastPollNotifyPct = fgPct
+                    lastPollNotifyPct = unifiedPct
                     lastFriendlyStage = friendlyStage
-                    onProgressUpdate?.invoke(title, friendlyStage, fgPct)
-                    DownloadTracker.update(episodeId, fgPct.toLong(), 100L, friendlyStage)
+                    onProgressUpdate?.invoke(title, friendlyStage, unifiedPct)
+                    DownloadTracker.update(episodeId, unifiedPct.toLong(), 100L, friendlyStage)
                     launch {
-                        runCatching { reportDesktopStatus(pct, friendlyStage) }
+                        runCatching { reportDesktopStatus(unifiedPct, friendlyStage) }
                     }
                 }
             }
             val sha256 = ready.fileSha256 ?: return@coroutineScope false
 
-            reportDesktopStatus(72, "Saving to phone…")
-            onProgressUpdate?.invoke(title, "Saving to phone…", 50)
+            highestPct = maxOf(highestPct, 72)
+            reportDesktopStatus(highestPct, "Saving to phone…")
+            onProgressUpdate?.invoke(title, "Saving to phone…", highestPct)
             var lastStatusUpdateMs = 0L
             var lastTransferNotifyMs = 0L
-            var lastTransferNotifyPct = 50
+            var lastTransferNotifyPct = highestPct
             app.hushcast.automute.desktop.DesktopWorkerClient.downloadAudioAndVerifySha256(
                 baseUrl = workerUrl,
                 token = token,
@@ -302,20 +305,21 @@ class PodcastEpisodeDownloadWork(
             ) { received, total ->
                 if (total > 0L) {
                     val now = System.currentTimeMillis()
-                    val pct = (50 + ((received * 50L) / total).toInt()).coerceIn(50, 100)
-                    if (pct != lastTransferNotifyPct && (now - lastTransferNotifyMs >= 250L || pct >= 100)) {
+                    val rawPct = (72 + ((received * 26L) / total).toInt()).coerceIn(72, 98)
+                    val unifiedPct = maxOf(highestPct, rawPct)
+                    highestPct = unifiedPct
+                    if (unifiedPct != lastTransferNotifyPct && (now - lastTransferNotifyMs >= 250L || unifiedPct >= 98)) {
                         lastTransferNotifyMs = now
-                        lastTransferNotifyPct = pct
-                        DownloadTracker.update(episodeId, received, total, "Saving to phone…")
-                        onProgressUpdate?.invoke(title, "Saving to phone…", pct)
+                        lastTransferNotifyPct = unifiedPct
+                        DownloadTracker.update(episodeId, unifiedPct.toLong(), 100L, "Saving to phone…")
+                        onProgressUpdate?.invoke(title, "Saving to phone…", unifiedPct)
                     }
                     if (now - lastStatusUpdateMs >= 450L) {
                         lastStatusUpdateMs = now
-                        val statusPct = (72 + ((received * 25L) / total).toInt()).coerceIn(72, 97)
                         launch {
                             runCatching {
                                 reportDesktopStatus(
-                                    statusPct,
+                                    unifiedPct,
                                     "Saving to phone (${(received * 100L / total).toInt()}%)"
                                 )
                             }

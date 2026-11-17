@@ -6,12 +6,21 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
+import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.DoneAll
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -445,8 +454,9 @@ private fun PocketCastsSwipeActionsSheet(
         androidx.compose.foundation.layout.Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
                 text = "Row Swipe Actions",
@@ -458,62 +468,46 @@ private fun PocketCastsSwipeActionsSheet(
                 color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            // Live Pocket Casts-style Row Preview
-            androidx.compose.material3.Surface(
+            // Live Pocket Casts-style Two-Row Preview (Swipe Right & Swipe Left)
+            androidx.compose.foundation.layout.Column(
                 modifier = Modifier.fillMaxWidth(),
-                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
-                color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                androidx.compose.foundation.layout.Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(10.dp),
-                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    androidx.compose.foundation.layout.Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-                    ) {
-                        SwipeActionPreviewBadge(rightPrimary, primary = true)
-                        if (rightSecondary != app.podiumpodcasts.podium.EpisodeSwipeAction.NONE) {
-                            SwipeActionPreviewBadge(rightSecondary, primary = false)
-                        }
-                    }
-                    Text(
-                        text = "Episode Row",
-                        style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
-                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
-                    )
-                    androidx.compose.foundation.layout.Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-                    ) {
-                        if (leftSecondary != app.podiumpodcasts.podium.EpisodeSwipeAction.NONE) {
-                            SwipeActionPreviewBadge(leftSecondary, primary = false)
-                        }
-                        SwipeActionPreviewBadge(leftPrimary, primary = true)
-                    }
-                }
+                SwipeDirectionPreviewRow(
+                    directionLabel = "Swipe Right →",
+                    isSwipeRight = true,
+                    primary = rightPrimary,
+                    secondary = rightSecondary
+                )
+                SwipeDirectionPreviewRow(
+                    directionLabel = "← Swipe Left",
+                    isSwipeRight = false,
+                    primary = leftPrimary,
+                    secondary = leftSecondary
+                )
             }
 
             SwipeConfigSlotRow(
-                title = "Swipe Right (Primary / Full Swipe)",
+                title = "Swipe Right (Primary)",
+                subtitle = "Full swipe or outer button",
                 action = rightPrimary,
                 onClick = { editingSlot = "RIGHT_PRIMARY" }
             )
             SwipeConfigSlotRow(
                 title = "Swipe Right (Secondary)",
+                subtitle = "Half swipe inner button",
                 action = rightSecondary,
                 onClick = { editingSlot = "RIGHT_SECONDARY" }
             )
             SwipeConfigSlotRow(
-                title = "Swipe Left (Primary / Full Swipe)",
+                title = "Swipe Left (Primary)",
+                subtitle = "Full swipe or outer button",
                 action = leftPrimary,
                 onClick = { editingSlot = "LEFT_PRIMARY" }
             )
             SwipeConfigSlotRow(
                 title = "Swipe Left (Secondary)",
+                subtitle = "Half swipe inner button",
                 action = leftSecondary,
                 onClick = { editingSlot = "LEFT_SECONDARY" }
             )
@@ -553,6 +547,13 @@ private fun PocketCastsSwipeActionsSheet(
                                 }
                             )
                             androidx.compose.foundation.layout.Spacer(Modifier.padding(horizontal = 4.dp))
+                            Icon(
+                                imageVector = swipeActionIcon(action),
+                                contentDescription = null,
+                                tint = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            androidx.compose.foundation.layout.Spacer(Modifier.padding(horizontal = 6.dp))
                             Text(
                                 text = action.label,
                                 style = androidx.compose.material3.MaterialTheme.typography.bodyMedium
@@ -572,38 +573,158 @@ private fun PocketCastsSwipeActionsSheet(
 }
 
 @Composable
-private fun SwipeActionPreviewBadge(
+private fun SwipeDirectionPreviewRow(
+    directionLabel: String,
+    isSwipeRight: Boolean,
+    primary: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    secondary: app.podiumpodcasts.podium.EpisodeSwipeAction
+) {
+    androidx.compose.material3.Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(56.dp),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+        color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh
+    ) {
+        androidx.compose.foundation.layout.Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            if (isSwipeRight) {
+                androidx.compose.foundation.layout.Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                ) {
+                    SwipeActionPreviewChip(primary, primary = true)
+                    if (secondary != app.podiumpodcasts.podium.EpisodeSwipeAction.NONE) {
+                        SwipeActionPreviewChip(secondary, primary = false)
+                    }
+                }
+                SwipeMockEpisodeTile(
+                    label = directionLabel,
+                    modifier = Modifier.weight(1f)
+                )
+            } else {
+                SwipeMockEpisodeTile(
+                    label = directionLabel,
+                    modifier = Modifier.weight(1f)
+                )
+                androidx.compose.foundation.layout.Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                ) {
+                    if (secondary != app.podiumpodcasts.podium.EpisodeSwipeAction.NONE) {
+                        SwipeActionPreviewChip(secondary, primary = false)
+                    }
+                    SwipeActionPreviewChip(primary, primary = true)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SwipeMockEpisodeTile(
+    label: String,
+    modifier: Modifier = Modifier
+) {
+    androidx.compose.material3.Surface(
+        modifier = modifier.fillMaxSize(),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+        color = androidx.compose.material3.MaterialTheme.colorScheme.surface
+    ) {
+        androidx.compose.foundation.layout.Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp),
+            contentAlignment = androidx.compose.ui.Alignment.CenterStart
+        ) {
+            Text(
+                text = label,
+                style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun SwipeActionPreviewChip(
     action: app.podiumpodcasts.podium.EpisodeSwipeAction,
     primary: Boolean
 ) {
-    val (bg, fg) = when (action) {
-        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT ->
-            androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer to androidx.compose.material3.MaterialTheme.colorScheme.onPrimaryContainer
-        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST ->
-            androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer to androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer
-        app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD ->
-            androidx.compose.material3.MaterialTheme.colorScheme.tertiaryContainer to androidx.compose.material3.MaterialTheme.colorScheme.onTertiaryContainer
-        app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED ->
-            androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant to androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
-        app.podiumpodcasts.podium.EpisodeSwipeAction.NONE ->
-            androidx.compose.material3.MaterialTheme.colorScheme.surface to androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val (bg, fg) = swipeActionColors(action)
     androidx.compose.material3.Surface(
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp),
-        color = if (primary) bg else bg.copy(alpha = 0.75f),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+        color = if (primary) bg else bg.copy(alpha = 0.78f),
         contentColor = fg
     ) {
-        Text(
-            text = action.label,
-            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-        )
+        androidx.compose.foundation.layout.Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = swipeActionIcon(action),
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = swipeActionShortLabel(action),
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                softWrap = false
+            )
+        }
     }
+}
+
+@Composable
+private fun swipeActionColors(
+    action: app.podiumpodcasts.podium.EpisodeSwipeAction
+): Pair<androidx.compose.ui.graphics.Color, androidx.compose.ui.graphics.Color> = when (action) {
+    app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT ->
+        androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer to androidx.compose.material3.MaterialTheme.colorScheme.onPrimaryContainer
+    app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST ->
+        androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer to androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer
+    app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD ->
+        androidx.compose.material3.MaterialTheme.colorScheme.tertiaryContainer to androidx.compose.material3.MaterialTheme.colorScheme.onTertiaryContainer
+    app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED ->
+        androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant to androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+    app.podiumpodcasts.podium.EpisodeSwipeAction.NONE ->
+        androidx.compose.material3.MaterialTheme.colorScheme.surface to androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+private fun swipeActionIcon(
+    action: app.podiumpodcasts.podium.EpisodeSwipeAction
+): androidx.compose.ui.graphics.vector.ImageVector = when (action) {
+    app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT -> androidx.compose.material.icons.Icons.AutoMirrored.Rounded.PlaylistPlay
+    app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST -> androidx.compose.material.icons.Icons.AutoMirrored.Rounded.PlaylistAdd
+    app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD -> androidx.compose.material.icons.Icons.Rounded.Download
+    app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED -> androidx.compose.material.icons.Icons.Rounded.DoneAll
+    app.podiumpodcasts.podium.EpisodeSwipeAction.NONE -> androidx.compose.material.icons.Icons.Rounded.Block
+}
+
+private fun swipeActionShortLabel(
+    action: app.podiumpodcasts.podium.EpisodeSwipeAction
+): String = when (action) {
+    app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT -> "Play Next"
+    app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST -> "Play Last"
+    app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD -> "Download"
+    app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED -> "Played"
+    app.podiumpodcasts.podium.EpisodeSwipeAction.NONE -> "None"
 }
 
 @Composable
 private fun SwipeConfigSlotRow(
     title: String,
+    subtitle: String,
     action: app.podiumpodcasts.podium.EpisodeSwipeAction,
     onClick: () -> Unit
 ) {
@@ -616,15 +737,29 @@ private fun SwipeConfigSlotRow(
         androidx.compose.foundation.layout.Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
         ) {
-            Text(
-                text = title,
-                style = androidx.compose.material3.MaterialTheme.typography.bodyMedium
-            )
-            SwipeActionPreviewBadge(action, primary = true)
+            androidx.compose.foundation.layout.Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+            SwipeActionPreviewChip(action, primary = true)
         }
     }
 }

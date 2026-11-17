@@ -327,51 +327,6 @@ fun HomeRoute(
                 }
             }
 
-            if (allSubscriptions.isNotEmpty() && playerVm.queue.isNotEmpty()) {
-                var showQueueSheet by remember { mutableStateOf(false) }
-                ElevatedCard(
-                    onClick = { showQueueSheet = true },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Icon(
-                            Icons.AutoMirrored.Rounded.PlaylistPlay,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Text(
-                            text = "Up Next • ${playerVm.queue.size} queued",
-                            style = Typography.titleSmall,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Text(
-                            text = "View",
-                            style = Typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-                if (showQueueSheet) {
-                    app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.MediaPlayerQueueBottomSheet(
-                        onOpenEpisode = { _, epId ->
-                            showQueueSheet = false
-                            scope.launch {
-                                db.podcastEpisodes().getSyncNullable(epId)?.episode?.let { onClickEpisode(it) }
-                            }
-                        },
-                        onDismiss = { showQueueSheet = false }
-                    )
-                }
-            }
-
             if (rawSubscriptions != null && allSubscriptions.isEmpty()) {
                 InfoLayout(
                     icon = Icons.Rounded.Podcasts,

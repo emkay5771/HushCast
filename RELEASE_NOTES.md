@@ -1,3 +1,15 @@
+# HushCast v1.0.11-hushcast
+
+## What's New
+- **Unified Monotonic Analysis Progress**:
+  - Fixed mismatched and backwards-dropping progress percentages between the Live Activity notification (`DownloadTracker`) and episode/Up Next badges (`AutoMuteDatabase`) in `PodcastEpisodeDownloadWork` by reporting a single monotonic `unifiedPct` across desktop analysis (5–70%) and phone transfer (72–98%).
+- **Home Page Cleanup**:
+  - Removed the redundant "Up Next" card from the top of `HomeRoute` (the queue remains accessible from the miniplayer).
+- **Row Swipe Actions Sheet Layout Fix**:
+  - Redesigned `PocketCastsSwipeActionsSheet` in `SettingsPlaybackPane` with separate fixed-height **Swipe Right →** and **← Swipe Left** preview rows, compact icon+label action chips, and clean slot rows so badges never squish or wrap vertically.
+
+---
+
 # HushCast v1.0.10-hushcast
 
 ## What's New
