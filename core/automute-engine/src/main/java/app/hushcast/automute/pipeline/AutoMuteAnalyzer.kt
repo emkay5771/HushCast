@@ -257,6 +257,7 @@ class AutoMuteAnalyzer(
                 val allWords = ArrayList<Word>()
                 val allSegments = ArrayList<Segment>()
                 var chunkIdx = 0
+                var lastTranscribePct = 5
                 try {
                     setStage("Transcribing speech (Whisper)")
                     val info = AudioDecoder.decode(
@@ -275,8 +276,11 @@ class AutoMuteAnalyzer(
                             mergeChunkOutput(chunkStartSec, out.words, out.segments, allWords, allSegments)
                         },
                         onProgress = { fraction ->
-                            val pct = (5 + (fraction * 54f).toInt()).coerceIn(5, 59)
-                            onProgress(AnalysisProgress(pct, "Transcribing speech ($pct%)", ReadinessBadge.ANALYZING))
+                            val pct = maxOf(lastTranscribePct, (5 + (fraction * 54f).toInt()).coerceIn(5, 59))
+                            if (pct > lastTranscribePct) {
+                                lastTranscribePct = pct
+                                onProgress(AnalysisProgress(pct, "Transcribing speech ($pct%)", ReadinessBadge.ANALYZING))
+                            }
                         }
                     )
                     encoderDelayMs = info.encoderDelayMs
@@ -504,6 +508,7 @@ class AutoMuteAnalyzer(
         val allWords = ArrayList<Word>()
         val allSegments = ArrayList<Segment>()
         var start = 0.0
+        var lastOverall = 0
         while (start < dur - 0.1) {
             yield()
             val end = (start + CHUNK_SEC).coerceAtMost(dur)
@@ -516,12 +521,19 @@ class AutoMuteAnalyzer(
                 vadModelPath = vadModelStr,
                 shouldAbort = shouldAbort,
                 onProgress = { subPct ->
-                    val overall = (basePct + (subPct * spanPct) / 100.0).toInt().coerceIn(0, 100)
-                    onWhisperProgress?.invoke(overall)
+                    val overall = maxOf(lastOverall, (basePct + (subPct * spanPct) / 100.0).toInt().coerceIn(0, 100))
+                    if (overall > lastOverall) {
+                        lastOverall = overall
+                        onWhisperProgress?.invoke(overall)
+                    }
                 }
             )
             mergeChunkOutput(0.0, out.words, out.segments, allWords, allSegments)
-            onWhisperProgress?.invoke(((end / dur) * 100.0).toInt().coerceIn(0, 100))
+            val endOverall = maxOf(lastOverall, ((end / dur) * 100.0).toInt().coerceIn(0, 100))
+            if (endOverall > lastOverall) {
+                lastOverall = endOverall
+                onWhisperProgress?.invoke(endOverall)
+            }
             if (end >= dur - 0.1) break
             start = (end - OVERLAP_SEC).coerceAtLeast(start + 1.0)
         }

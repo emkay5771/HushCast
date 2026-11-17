@@ -59,6 +59,7 @@ class PodcastEpisodeDownloadWorker(
             }
 
             var lastTitle = ""
+            var lastNotifPct = 0
             val worker = PodcastEpisodeDownloadWork(applicationContext, db)
             val isFinalAttempt = runAttemptCount >= 4
             val outcome = worker.doWork(
@@ -66,16 +67,20 @@ class PodcastEpisodeDownloadWorker(
                 downloadMethod = method,
                 isAuto = isAuto,
                 forceReprocess = forceReprocess,
-                isFinalAttempt = isFinalAttempt
+                isFinalAttempt = isFinalAttempt,
+                isRetry = runAttemptCount > 0
             ) { title, sourceLabel, pct ->
                 if (title.isNotBlank()) lastTitle = title
+                val clampedPct = maxOf(lastNotifPct, pct.coerceIn(0, 100))
+                lastNotifPct = clampedPct
                 runCatching {
                     setForegroundAsync(
                         createDownloadForegroundInfo(
                             episodeId = episodeId,
                             title = title,
                             sourceLabel = sourceLabel,
-                            percent = pct
+                            percent = clampedPct,
+                            isAnalysis = method != app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS
                         )
                     )
                 }
@@ -106,6 +111,37 @@ class PodcastEpisodeDownloadWorker(
                 }
             }
         } catch (c: CancellationException) {
+            val reason = if (android.os.Build.VERSION.SDK_INT >= 31) stopReason else androidx.work.WorkInfo.STOP_REASON_NOT_STOPPED
+            val isPausedBySystem = reason == androidx.work.WorkInfo.STOP_REASON_TIMEOUT ||
+                reason == androidx.work.WorkInfo.STOP_REASON_FOREGROUND_SERVICE_TIMEOUT ||
+                reason == androidx.work.WorkInfo.STOP_REASON_QUOTA ||
+                reason == androidx.work.WorkInfo.STOP_REASON_CONSTRAINT_CONNECTIVITY ||
+                reason == androidx.work.WorkInfo.STOP_REASON_CONSTRAINT_CHARGING ||
+                reason == androidx.work.WorkInfo.STOP_REASON_CONSTRAINT_BATTERY_NOT_LOW ||
+                reason == androidx.work.WorkInfo.STOP_REASON_DEVICE_STATE
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                runCatching {
+                    val autoMuteDao = app.hushcast.automute.storage.AutoMuteDatabase.getInstance(applicationContext).dao()
+                    val existing = autoMuteDao.getStatus(episodeId)
+                    if (existing != null && existing.badge == app.hushcast.automute.dsp.ReadinessBadge.ANALYZING.name) {
+                        if (isPausedBySystem) {
+                            autoMuteDao.upsertStatus(
+                                existing.copy(
+                                    stageLabel = "Paused (waiting to resume)"
+                                )
+                            )
+                        } else {
+                            autoMuteDao.upsertStatus(
+                                existing.copy(
+                                    badge = app.hushcast.automute.dsp.ReadinessBadge.NOT_PROCESSED.name,
+                                    progressPercent = 0,
+                                    stageLabel = "Cancelled"
+                                )
+                            )
+                        }
+                    }
+                }
+            }
             throw c
         } catch (e: Exception) {
             e.printStackTrace()
@@ -136,7 +172,8 @@ class PodcastEpisodeDownloadWorker(
         episodeId: String,
         title: String,
         sourceLabel: String = "Downloading",
-        percent: Int
+        percent: Int,
+        isAnalysis: Boolean = true
     ): ForegroundInfo {
         val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channel = NotificationChannel(
@@ -171,10 +208,15 @@ class PodcastEpisodeDownloadWorker(
 
         val notification = builder.build()
         val notificationId = 41000 + (episodeId.hashCode() and 0x3FFF)
+        val serviceType = if (isAnalysis && android.os.Build.VERSION.SDK_INT >= 35) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING
+        } else {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        }
         return ForegroundInfo(
             notificationId,
             notification,
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            serviceType
         )
     }
 

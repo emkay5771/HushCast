@@ -1484,12 +1484,31 @@ fun MediaPlayerBottomSheet(
                 onAnalyzeOnDevice = {
                     if (episodeId.isNotBlank()) {
                         scope.launch {
-                            app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
-                                context = context,
-                                db = appDb,
-                                episodeId = episodeId,
-                                downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
-                            )
+                            val localFile = currentEpisodeBundle?.episode?.craftDownloadFile(context)
+                            if (isAlreadyDownloaded && localFile != null && localFile.exists()) {
+                                autoMuteDb.dao().upsertStatus(
+                                    app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
+                                        episodeId = episodeId,
+                                        badge = ReadinessBadge.ANALYZING.name,
+                                        progressPercent = 0,
+                                        stageLabel = "Queued for AI analysis…"
+                                    )
+                                )
+                                EpisodeAnalysisWorker.enqueueAnalyzeNow(
+                                    context = context,
+                                    episodeId = episodeId,
+                                    audioPath = localFile.absolutePath,
+                                    actionMode = HushCastEngineBridge.defaultActionMode,
+                                    episodeTitle = currentEpisodeBundle?.episode?.title
+                                )
+                            } else {
+                                app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                    context = context,
+                                    db = appDb,
+                                    episodeId = episodeId,
+                                    downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
+                                )
+                            }
                         }
                     }
                 },

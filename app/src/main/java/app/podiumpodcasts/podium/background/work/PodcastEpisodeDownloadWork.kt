@@ -11,7 +11,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -41,6 +43,7 @@ class PodcastEpisodeDownloadWork(
         isAuto: Boolean = false,
         forceReprocess: Boolean = false,
         isFinalAttempt: Boolean = true,
+        isRetry: Boolean = false,
         onProgressUpdate: ((title: String, sourceLabel: String, percent: Int) -> Unit)? = null
     ): DownloadWorkOutcome {
         val bundle = db.podcastEpisodes().getSyncNullable(episodeId)
@@ -102,7 +105,7 @@ class PodcastEpisodeDownloadWork(
                         destFile = file,
                         workerUrl = workerUrl,
                         token = app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerToken(context),
-                        forceReprocess = forceReprocess,
+                        forceReprocess = forceReprocess && !isRetry,
                         resetStatusOnError = downloadMethod != app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP || isFinalAttempt,
                         onProgressUpdate = onProgressUpdate
                     )
@@ -178,7 +181,7 @@ class PodcastEpisodeDownloadWork(
                                 app.hushcast.automute.hash.StreamingSha256.hashFile(file)
                             }
                             val chargingOnly = app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context)
-                            if (chargingOnly) {
+                            if (isAuto && chargingOnly) {
                                 app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueBackgroundCharging(
                                     context = context,
                                     episodeId = episodeId,

@@ -135,10 +135,10 @@ object DesktopWorkerClient {
         pollIntervalMs: Long = 2000L,
         maxWaitMs: Long = 30 * 60 * 1000L,
         certFingerprint: String = "",
-        onProgress: (DesktopJobResponse) -> Unit = {}
+        onProgress: suspend (DesktopJobResponse) -> Unit = {}
     ): DesktopJobResponse {
         val deadline = System.currentTimeMillis() + maxWaitMs
-        val maxQueuedWaitMs = 20 * 60 * 1000L
+        val maxQueuedWaitMs = 25 * 60 * 1000L
         var queuedSinceMs: Long? = null
         var consecutiveErrors = 0
         var currentDelayMs = pollIntervalMs
@@ -197,6 +197,22 @@ object DesktopWorkerClient {
         }
     }
 
+    suspend fun cancelJob(
+        baseUrl: String,
+        token: String,
+        jobId: String,
+        certFingerprint: String = ""
+    ) = withContext(Dispatchers.IO) {
+        val normalized = normalizeUrl(baseUrl)
+        val conn = openConnection("$normalized/v1/jobs/$jobId", token, timeoutMs = 8_000, certFingerprint = certFingerprint)
+        try {
+            conn.requestMethod = "DELETE"
+            conn.responseCode
+        } finally {
+            conn.disconnect()
+        }
+    }
+
     suspend fun fetchBundle(
         baseUrl: String,
         token: String,
@@ -204,7 +220,12 @@ object DesktopWorkerClient {
         certFingerprint: String = ""
     ): DesktopAnalysisBundle = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl)
-        val body = getText("$normalized/v1/episodes/$sha256/bundle", token, certFingerprint, timeoutMs = defaultTimeoutMs(normalized))
+        val body = getText(
+            "$normalized/v1/episodes/$sha256/bundle",
+            token,
+            certFingerprint,
+            timeoutMs = maxOf(defaultTimeoutMs(normalized), 30_000)
+        )
         json.decodeFromString<DesktopAnalysisBundle>(body)
     }
 

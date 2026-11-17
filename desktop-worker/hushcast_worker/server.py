@@ -292,7 +292,6 @@ def create_app(
             _cancel_in_flight(url_to_job_id.get(req.audioUrl))
             if req.episodeId:
                 _cancel_in_flight(episode_to_job_id.get(req.episodeId))
-
         job_id = str(uuid.uuid4())
         job = DesktopJobResponse(
             jobId=job_id,

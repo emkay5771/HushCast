@@ -377,3 +377,53 @@ def test_ad_tagger_decoder_and_pitch_parity() -> None:
     assert 145.0 <= f0 <= 155.0
 
 
+def test_submit_job_inflight_dedup_and_force_cancel(tmp_path: Path) -> None:
+    import asyncio
+    import threading
+
+    gate = threading.Event()
+    payload = b"FAKE_MP3_INFLIGHT_DEDUP"
+    expected_sha = hashlib.sha256(payload).hexdigest()
+
+    async def slow_downloader(url: str, dest: Path, on_bytes):
+        await asyncio.to_thread(gate.wait, 5.0)
+        dest.write_bytes(payload)
+        return expected_sha, "audio/mpeg"
+
+    cache = WorkerCache(tmp_path / "cache")
+    app = create_app(
+        cache=cache,
+        backend=FakeBackend(),
+        token="secret-token",
+        downloader=slow_downloader,
+    )
+    headers = {"Authorization": "Bearer secret-token"}
+
+    with TestClient(app) as client:
+        r1 = client.post(
+            "/v1/jobs",
+            headers=headers,
+            json={"episodeId": "ep-1", "audioUrl": "https://example.com/a.mp3", "force": True},
+        )
+        assert r1.status_code == 200
+        jid1 = r1.json()["jobId"]
+
+        # Retry (force=False) reuses the in-flight job
+        r2 = client.post(
+            "/v1/jobs",
+            headers=headers,
+            json={"episodeId": "ep-1", "audioUrl": "https://example.com/a.mp3", "force": False},
+        )
+        assert r2.status_code == 200
+        assert r2.json()["jobId"] == jid1
+
+        gate.set()
+        for _ in range(40):
+            s = client.get(f"/v1/jobs/{jid1}", headers=headers).json()
+            if s["state"] == "READY":
+                break
+            time.sleep(0.05)
+        assert s["state"] == "READY"
+
+
+

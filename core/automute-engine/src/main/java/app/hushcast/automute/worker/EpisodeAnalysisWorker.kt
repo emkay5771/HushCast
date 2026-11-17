@@ -79,6 +79,7 @@ class EpisodeAnalysisWorker(
             val analyzer = AutoMuteAnalyzer(applicationContext, db)
             android.util.Log.i("HushCastPerf", "Worker start: ep=$episodeId quick=$quickMode bytes=${audioFile.length()}")
 
+            var lastNotifPct = 0
             try {
                 analyzer.analyzeEpisode(
                     episodeId = episodeId,
@@ -89,8 +90,10 @@ class EpisodeAnalysisWorker(
                     feedTranscriptMime = feedTranscriptMime,
                     defaultActionMode = actionMode,
                     onProgress = { p ->
+                        val clampedPct = maxOf(lastNotifPct, p.percent.coerceIn(0, 100))
+                        lastNotifPct = clampedPct
                         runCatching {
-                            setForegroundAsync(createForegroundInfo(notificationId, displayTitle, p.stage, p.percent))
+                            setForegroundAsync(createForegroundInfo(notificationId, displayTitle, p.stage, clampedPct))
                         }
                     }
                 )
