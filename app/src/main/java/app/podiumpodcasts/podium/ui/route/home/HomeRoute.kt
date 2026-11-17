@@ -322,8 +322,9 @@ fun HomeRoute(
             }
 
             if (allSubscriptions.isNotEmpty() && playerVm.queue.isNotEmpty()) {
+                var showQueueSheet by remember { mutableStateOf(false) }
                 ElevatedCard(
-                    onClick = onClickContinuePlaying,
+                    onClick = { showQueueSheet = true },
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 6.dp)
@@ -346,11 +347,22 @@ fun HomeRoute(
                             modifier = Modifier.weight(1f)
                         )
                         Text(
-                            text = "Continue",
+                            text = "View",
                             style = Typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary
                         )
                     }
+                }
+                if (showQueueSheet) {
+                    app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.MediaPlayerQueueBottomSheet(
+                        onOpenEpisode = { _, epId ->
+                            showQueueSheet = false
+                            scope.launch {
+                                db.podcastEpisodes().getSyncNullable(epId)?.episode?.let { onClickEpisode(it) }
+                            }
+                        },
+                        onDismiss = { showQueueSheet = false }
+                    )
                 }
             }
 

@@ -103,15 +103,17 @@ sealed class DetailPaneKey : Parcelable {
     ) : DetailPaneKey()
 }
 
-val enterSpec = fadeIn(animationSpec = tween(180)) +
-        scaleIn(initialScale = 0.96f, animationSpec = tween(180))
+val enterSpec = androidx.compose.animation.slideInHorizontally(animationSpec = tween(240)) { it / 10 } +
+        fadeIn(animationSpec = tween(200))
 
-val listEnterSpec = fadeIn(initialAlpha = 0.85f, animationSpec = tween(180))
+val listEnterSpec = androidx.compose.animation.slideInHorizontally(animationSpec = tween(240)) { -it / 16 } +
+        fadeIn(initialAlpha = 0.85f, animationSpec = tween(200))
 
-val exitSpec = fadeOut(animationSpec = tween(150))
+val exitSpec = fadeOut(targetAlpha = 0.85f, animationSpec = tween(200))
 
-val detailExitSpec = fadeOut(animationSpec = tween(180)) +
-        androidx.compose.animation.scaleOut(targetScale = 0.92f, animationSpec = tween(180))
+val detailExitSpec = androidx.compose.animation.slideOutHorizontally(animationSpec = tween(240)) { it / 10 } +
+        androidx.compose.animation.scaleOut(targetScale = 0.90f, animationSpec = tween(240)) +
+        fadeOut(targetAlpha = 0.35f, animationSpec = tween(240))
 
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
@@ -442,25 +444,6 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
         .collectAsState(true)
 
     val scope = rememberCoroutineScope()
-    val handleDetailBack = scaffoldNavigator.canNavigateBack(BackNavigationBehavior.PopLatest) &&
-        backStack.size > 1
-
-    androidx.activity.compose.PredictiveBackHandler(enabled = handleDetailBack) { progress ->
-        val contentKey = scaffoldNavigator.currentDestination?.contentKey
-        val behavior = if (contentKey is DetailPaneKey.SettingsKey) {
-            BackNavigationBehavior.PopUntilScaffoldValueChange
-        } else {
-            BackNavigationBehavior.PopLatest
-        }
-        try {
-            progress.collect { event ->
-                scaffoldNavigator.seekBack(behavior, fraction = event.progress)
-            }
-            scaffoldNavigator.navigateBack(behavior)
-        } catch (_: kotlinx.coroutines.CancellationException) {
-            scaffoldNavigator.seekBack(behavior, fraction = 0f)
-        }
-    }
 
     scaffoldNavigator.currentDestination?.contentKey?.let { contentKey ->
         when(contentKey) {

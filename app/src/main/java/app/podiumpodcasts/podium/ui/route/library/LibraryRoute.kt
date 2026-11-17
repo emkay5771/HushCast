@@ -188,9 +188,10 @@ fun LibraryRoute(
 
                 items(systemLists.itemCount) { idx ->
                     systemLists[idx]?.let { list ->
+                        val systemList = list.systemList()
                         PlaylistRow(
-                            title = list.name,
-                            icon = Icons.AutoMirrored.Rounded.PlaylistPlay,
+                            title = systemList?.label?.let { stringResource(it) } ?: list.name,
+                            icon = systemList?.icon ?: Icons.AutoMirrored.Rounded.PlaylistPlay,
                             count = null,
                             index = idx,
                             total = allListsCount,

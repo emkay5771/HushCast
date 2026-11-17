@@ -53,7 +53,7 @@ class AdSkipPlaybackObserver {
      * Checks whether [pos] is inside an active high-confidence sponsor ad and triggers an auto-skip.
      * Used both by PlayerMessage callbacks (P5) and on position discontinuities.
      */
-    fun checkPosition(player: Player): Boolean {
+    fun checkPosition(player: Player, leadToleranceMs: Long = 0L): Boolean {
         if (policyMode != AdPolicyMode.AUTO_SKIP) return false
         if (!player.isPlaying) return false
 
@@ -61,7 +61,8 @@ class AdSkipPlaybackObserver {
         for (ad in adWindows) {
             if (!ad.isHighConfidence) continue
             if (ad.startMs in userBypassedStartMs) continue
-            if (pos in ad.startMs until (ad.endMs - 500L)) {
+            val effectiveStart = (ad.startMs - leadToleranceMs).coerceAtLeast(0L)
+            if (pos in effectiveStart until (ad.endMs - 500L)) {
                 autoSkippedStartMs.add(ad.startMs)
                 player.seekTo(ad.endMs)
                 _skipEvents.tryEmit(

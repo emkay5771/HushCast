@@ -145,10 +145,11 @@ class AutoMuteAnalyzer(
             }
         }
 
-        // E3: Fail fast if required models have not been downloaded by ModelDownloadWorker
-        if (!modelManager.areWordMuteModelsReady() || (!quickWordMuteOnly && !modelManager.areAdModelsReady())) {
+        // E3: Fail fast if word-mute models are missing; fall back to word-mute-only if only ad models are missing
+        if (!modelManager.areWordMuteModelsReady()) {
             error("AI models missing. Download models on Wi-Fi in HushCast setup.")
         }
+        val effectiveQuickWordMuteOnly = quickWordMuteOnly || !modelManager.areAdModelsReady()
 
         writeStatus(2, "Verifying audio file", ReadinessBadge.ANALYZING)
         val sha256 = knownSha256?.takeIf { it.isNotBlank() } ?: StreamingSha256.hashFile(audioFile)
@@ -164,9 +165,9 @@ class AutoMuteAnalyzer(
             words = blob.words
             segments = blob.segments
             encoderDelayMs = existingIndex.encoderDelayMs
-            android.util.Log.i("HushCastPerf", "Reusing cached transcript (words=${words.size}, segs=${segments.size}) quick=$quickWordMuteOnly")
+            android.util.Log.i("HushCastPerf", "Reusing cached transcript (words=${words.size}, segs=${segments.size}) quick=$effectiveQuickWordMuteOnly")
 
-            if (!quickWordMuteOnly && segments.isNotEmpty()) {
+            if (!effectiveQuickWordMuteOnly && segments.isNotEmpty()) {
                 writeStatus(5, "Extracting acoustic features", ReadinessBadge.WORD_MUTE_READY)
                 val extractor = FrameExtractor()
                 var lastPct = 5
@@ -313,7 +314,7 @@ class AutoMuteAnalyzer(
         )
 
         val finalFrames = frames
-        if (quickWordMuteOnly || segments.isEmpty() || finalFrames == null) {
+        if (effectiveQuickWordMuteOnly || segments.isEmpty() || finalFrames == null) {
             val elapsed = System.currentTimeMillis() - startTime
             writeStatus(100, "Word-Mute Ready", ReadinessBadge.WORD_MUTE_READY, force = true, durationMs = elapsed)
             return AnalysisResult(sha256, ReadinessBadge.WORD_MUTE_READY, words.size, muteCount, 0, peakRssMb, elapsed)
@@ -413,17 +414,32 @@ class AutoMuteAnalyzer(
         allWords: MutableList<Word>,
         allSegments: MutableList<Segment>
     ) {
-        val wordCutoff = (allWords.lastOrNull()?.end ?: -1.0) - OVERLAP_DEDUP_TOLERANCE_SEC
+        if (chunkStartSec <= 0.0) {
+            for (w in chunkWords) {
+                allWords.add(w.copy(start = chunkStartSec + w.start, end = chunkStartSec + w.end))
+            }
+            for (s in chunkSegments) {
+                allSegments.add(s.copy(start = chunkStartSec + s.start, end = chunkStartSec + s.end))
+            }
+            return
+        }
+
+        val overlapMidSec = chunkStartSec + (OVERLAP_DEDUP_TOLERANCE_SEC * 0.5)
+        while (allWords.isNotEmpty() && allWords.last().start >= overlapMidSec) {
+            allWords.removeAt(allWords.lastIndex)
+        }
         for (w in chunkWords) {
             val shifted = w.copy(start = chunkStartSec + w.start, end = chunkStartSec + w.end)
-            if (shifted.start >= wordCutoff) {
+            if (shifted.start >= overlapMidSec) {
                 allWords.add(shifted)
             }
         }
-        val segCutoff = (allSegments.lastOrNull()?.end ?: -1.0) - OVERLAP_DEDUP_TOLERANCE_SEC
+        while (allSegments.isNotEmpty() && allSegments.last().start >= overlapMidSec) {
+            allSegments.removeAt(allSegments.lastIndex)
+        }
         for (s in chunkSegments) {
             val shifted = s.copy(start = chunkStartSec + s.start, end = chunkStartSec + s.end)
-            if (shifted.start >= segCutoff) {
+            if (shifted.start >= overlapMidSec) {
                 allSegments.add(shifted)
             }
         }

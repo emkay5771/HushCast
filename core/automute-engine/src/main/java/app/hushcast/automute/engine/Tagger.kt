@@ -38,8 +38,8 @@ class Tagger(modelBytes: ByteArray) : AutoCloseable {
 
     companion object {
         const val EMB_DIM = 1024
-        const val TAGGER_URL = "https://raw.githubusercontent.com/emkay5771/HushCast/main/model/ad_tagger.onnx"
+        const val TAGGER_URL = "https://raw.githubusercontent.com/emkay5771/HushCast/5f3b525c2f69763ab9bec3f0c4f9b3e6f68eb0be/model/ad_tagger.onnx"
         const val TAGGER_SHA256 = "c58f1db750e9148b337311642af0bdcf5a352dc9984c1cd2c8f197cdbc4bd351"
-        const val TAGGER_SIZE = 12_479_613L
+        const val TAGGER_SIZE = 11_867_080L
     }
 }

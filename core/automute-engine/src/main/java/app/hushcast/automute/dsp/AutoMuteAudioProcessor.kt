@@ -68,13 +68,21 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
     private var bytesPerFrame: Int = 4
     private var isFloatPcm: Boolean = false
 
+    private val pendingWindows = java.util.concurrent.atomic.AtomicReference<List<MuteWindow>?>(null)
+
     fun setCustomSoundPcm(samples: FloatArray?, sampleRateHz: Int = 44100) {
         customSoundPcm = samples?.takeIf { it.isNotEmpty() }
         customSoundSampleRateHz = sampleRateHz.coerceAtLeast(8000)
     }
 
     fun updateWindows(newWindows: List<MuteWindow>) {
-        windows = newWindows.filter { it.enabled && it.endMs > it.startMs }.sortedBy { it.startMs }
+        val cleaned = newWindows.filter { it.enabled && it.endMs > it.startMs }.sortedBy { it.startMs }
+        pendingWindows.set(cleaned)
+    }
+
+    private fun consumePendingWindowsIfAny() {
+        val next = pendingWindows.getAndSet(null) ?: return
+        windows = next
         resetCursorForFrame(currentInputFrameIndex)
     }
 
@@ -82,6 +90,7 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
         val posMs = positionMs.coerceAtLeast(0L)
         currentInputFrameIndex = (posMs * sampleRateHz) / 1000L
         skippedFramesCounter.set(0L)
+        consumePendingWindowsIfAny()
         resetCursorForFrame(currentInputFrameIndex)
     }
 
@@ -108,6 +117,7 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
             0L
         }
         skippedFramesCounter.set(0L)
+        consumePendingWindowsIfAny()
         resetCursorForFrame(currentInputFrameIndex)
     }
 
@@ -137,6 +147,8 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
+        consumePendingWindowsIfAny()
+
         val remaining = inputBuffer.remaining()
         if (remaining == 0) return
 

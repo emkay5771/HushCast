@@ -7,6 +7,7 @@ import re
 import shutil
 import socket
 import sys
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -166,11 +167,18 @@ def create_app(
             cache.save_job(jobs[_jid])
     url_to_job_id: dict[str, str] = {}
     job_tasks: dict[str, asyncio.Task] = {}
+    job_cancel_events: dict[str, threading.Event] = {}
+    jobs_in_thread: set[str] = set()
     background_tasks: set[asyncio.Task] = set()
     job_semaphore = asyncio.Semaphore(1)
 
+    class _JobCancelledError(Exception):
+        pass
+
     def _update_job(job_id: str, **updates) -> None:
         if job_id not in jobs:
+            return
+        if jobs[job_id].state == JobState.CANCELLED and updates.get("state") != JobState.CANCELLED:
             return
         jobs[job_id] = jobs[job_id].model_copy(update=updates)
         cache.save_job(jobs[job_id])
@@ -185,7 +193,7 @@ def create_app(
         if authorization and authorization.lower().startswith("bearer "):
             bearer = authorization[7:].strip()
         provided = x_hushcast_token or bearer or ""
-        if not hmac.compare_digest(provided, token):
+        if not hmac.compare_digest(provided.encode("utf-8"), token.encode("utf-8")):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or missing HushCast pairing token",
@@ -262,23 +270,28 @@ def create_app(
         cache.save_job(job)
         url_to_job_id[req.audioUrl] = job_id
 
-        task = asyncio.create_task(_run_job(job_id, req))
+        cancel_event = threading.Event()
+        job_cancel_events[job_id] = cancel_event
+
+        task = asyncio.create_task(_run_job(job_id, req, cancel_event))
         job_tasks[job_id] = task
         background_tasks.add(task)
 
         def _cleanup(t: asyncio.Task) -> None:
             background_tasks.discard(t)
             job_tasks.pop(job_id, None)
+            job_cancel_events.pop(job_id, None)
+            jobs_in_thread.discard(job_id)
 
         task.add_done_callback(_cleanup)
         return job
 
-    async def _run_job(job_id: str, req: DesktopJobRequest) -> None:
+    async def _run_job(job_id: str, req: DesktopJobRequest, cancel_event: threading.Event) -> None:
         tmp_audio = cache.tmp_dir / f"{job_id}.part"
         cli_log = _JobConsoleLogger(job_id, req.title or req.episodeId)
         try:
             async with job_semaphore:
-                if jobs.get(job_id) and jobs[job_id].state == JobState.CANCELLED:
+                if cancel_event.is_set() or (jobs.get(job_id) and jobs[job_id].state == JobState.CANCELLED):
                     return
                 cli_log.update(JobState.DOWNLOADING, 5, "Downloading episode audio…")
                 _update_job(
@@ -289,6 +302,8 @@ def create_app(
                 )
 
                 def on_dl_bytes(received: int, total: int) -> None:
+                    if cancel_event.is_set():
+                        raise _JobCancelledError()
                     if total > 0:
                         pct = min(24, 5 + int((received * 19) / total))
                         dl_pct = int(received * 100 / total)
@@ -319,6 +334,8 @@ def create_app(
                     return
 
                 def on_ml_progress(state: JobState, pct: int, stage: str) -> None:
+                    if cancel_event.is_set():
+                        raise _JobCancelledError()
                     cli_log.update(state, pct, stage)
                     _update_job(
                         job_id,
@@ -328,15 +345,23 @@ def create_app(
                         fileSha256=sha256,
                     )
 
-                bundle, embeddings = await asyncio.to_thread(
-                    backend.analyze_with_embeddings,
-                    audio_path=tmp_audio,
-                    file_sha256=sha256,
-                    episode_id=req.episodeId,
-                    feed_transcript_raw=req.feedTranscriptRaw,
-                    feed_transcript_mime=req.feedTranscriptMime,
-                    on_progress=on_ml_progress,
-                )
+                jobs_in_thread.add(job_id)
+                try:
+                    bundle, embeddings = await asyncio.to_thread(
+                        backend.analyze_with_embeddings,
+                        audio_path=tmp_audio,
+                        file_sha256=sha256,
+                        episode_id=req.episodeId,
+                        feed_transcript_raw=req.feedTranscriptRaw,
+                        feed_transcript_mime=req.feedTranscriptMime,
+                        on_progress=on_ml_progress,
+                    )
+                finally:
+                    jobs_in_thread.discard(job_id)
+
+                if cancel_event.is_set():
+                    tmp_audio.unlink(missing_ok=True)
+                    return
 
                 cache.save_episode(
                     sha256=sha256,
@@ -363,6 +388,9 @@ def create_app(
                 )
                 if on_state_change:
                     on_state_change()
+        except _JobCancelledError:
+            tmp_audio.unlink(missing_ok=True)
+            _update_job(job_id, state=JobState.CANCELLED, stageLabel="Cancelled")
         except asyncio.CancelledError:
             tmp_audio.unlink(missing_ok=True)
             _update_job(job_id, state=JobState.CANCELLED, stageLabel="Cancelled")
@@ -411,9 +439,11 @@ def create_app(
             raise HTTPException(status_code=404, detail="Job not found")
         if job.state in (JobState.READY, JobState.FAILED, JobState.CANCELLED):
             return job
+        if job_id in job_cancel_events:
+            job_cancel_events[job_id].set()
         _update_job(job_id, state=JobState.CANCELLED, stageLabel="Cancelled")
         task = job_tasks.get(job_id)
-        if task and not task.done():
+        if task and not task.done() and job_id not in jobs_in_thread:
             task.cancel()
         return jobs[job_id]
 

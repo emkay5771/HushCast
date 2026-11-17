@@ -377,7 +377,8 @@ object AudioDecoder {
                 }
             }
             resamplers.flush(feeder, ::handleWhisperSamples)
-            if (chunkBuf != null && onPcmChunk != null && chunkBuf.size > 0) {
+            val minTrailingSamples = if (chunkStartSec > 0.0) OVERLAP_SAMPLES else 0
+            if (chunkBuf != null && onPcmChunk != null && chunkBuf.size > minTrailingSamples) {
                 if (shouldAbort()) throw CancellationException("Audio decode cancelled")
                 onPcmChunk(chunkStartSec, chunkBuf)
             }

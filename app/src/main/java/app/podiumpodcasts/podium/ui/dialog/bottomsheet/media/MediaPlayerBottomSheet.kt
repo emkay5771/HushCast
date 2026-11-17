@@ -5,7 +5,10 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -432,6 +435,12 @@ fun MediaPlayerBottomSheet(
             pagerState.scrollToPage(visibleTabs.lastIndex)
         }
     }
+    LaunchedEffect(selectedTab, visibleTabs) {
+        val targetIdx = visibleTabs.indexOf(selectedTab)
+        if (targetIdx >= 0 && pagerState.currentPage != targetIdx && !pagerState.isScrollInProgress) {
+            pagerState.animateScrollToPage(targetIdx)
+        }
+    }
 
     SwitchableDynamicMaterialExpressiveTheme(
         enable = enableArtworkColors.value,
@@ -452,21 +461,33 @@ fun MediaPlayerBottomSheet(
                         .fillMaxWidth()
                         .pointerInput(isFullScreen) {
                             val thresholdPx = 60.dp.toPx()
-                            var totalDrag = 0f
-                            detectVerticalDragGestures(
-                                onDragStart = { totalDrag = 0f },
-                                onVerticalDrag = { _, dragAmount ->
-                                    totalDrag += dragAmount
-                                    if (totalDrag < -thresholdPx) {
-                                        totalDrag = 0f
-                                        if (!isFullScreen) isFullScreen = true
-                                        else showQueueBottomSheet = true
-                                    } else if (totalDrag > thresholdPx && isFullScreen) {
-                                        totalDrag = 0f
-                                        isFullScreen = false
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                var totalDrag = 0f
+                                var triggered = false
+                                var pointerId = down.id
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+                                    if (!change.pressed) break
+                                    val dy = change.position.y - change.previousPosition.y
+                                    totalDrag += dy
+                                    if (!triggered) {
+                                        if (totalDrag < -thresholdPx) {
+                                            triggered = true
+                                            change.consume()
+                                            if (!isFullScreen) isFullScreen = true
+                                            else showQueueBottomSheet = true
+                                        } else if (totalDrag > thresholdPx && isFullScreen) {
+                                            triggered = true
+                                            change.consume()
+                                            isFullScreen = false
+                                        } else if (dy < 0f || isFullScreen) {
+                                            change.consume()
+                                        }
                                     }
                                 }
-                            )
+                            }
                         },
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -716,17 +737,24 @@ fun MediaPlayerBottomSheet(
                                 .fillMaxHeight()
                                 .pointerInput(Unit) {
                                     val thresholdPx = 72.dp.toPx()
-                                    var totalDrag = 0f
-                                    detectVerticalDragGestures(
-                                        onDragStart = { totalDrag = 0f },
-                                        onVerticalDrag = { _, dragAmount ->
-                                            totalDrag += dragAmount
-                                            if (totalDrag < -thresholdPx) {
-                                                totalDrag = 0f
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(requireUnconsumed = false)
+                                        var totalDrag = 0f
+                                        var triggered = false
+                                        val pointerId = down.id
+                                        while (true) {
+                                            val event = awaitPointerEvent()
+                                            val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+                                            if (!change.pressed) break
+                                            val dy = change.position.y - change.previousPosition.y
+                                            totalDrag += dy
+                                            if (!triggered && totalDrag < -thresholdPx) {
+                                                triggered = true
+                                                change.consume()
                                                 showQueueBottomSheet = true
                                             }
                                         }
-                                    )
+                                    }
                                 }
                         ) {
                             Column(
@@ -992,6 +1020,7 @@ fun MediaPlayerBottomSheet(
                                     OneTapUndoAdSkipBanner(
                                         event = undoEvent,
                                         onUndo = {
+                                            HushCastEngineBridge.adSkipObserver.bypassAd(undoEvent.adWindow.startMs)
                                             vm.seek(undoEvent.jumpedFromMs)
                                             HushCastEngineBridge.clearPendingUndo()
                                         },
@@ -1019,7 +1048,8 @@ fun MediaPlayerBottomSheet(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            val remainingMs = (vm.currentDuration - vm.currentPosition).coerceAtLeast(0L)
+                            val livePos = vm.rememberLivePositionMs()
+                            val remainingMs = (vm.currentDuration - livePos).coerceAtLeast(0L)
                             Text(
                                 text = "-${formatPlayerTime(remainingMs)}",
                                 style = Typography.labelMediumEmphasized,
@@ -1506,7 +1536,7 @@ fun MediaPlayerBottomSheet(
                                             endMs = (w.end * 1000.0).toLong(),
                                             word = targetWord,
                                             ruleId = -1L,
-                                            actionMode = "SILENCE",
+                                            actionMode = HushCastEngineBridge.defaultActionMode.name,
                                             enabled = true
                                         )
                                     }
@@ -1521,6 +1551,8 @@ fun MediaPlayerBottomSheet(
                                         .filter { it.word.equals(targetWord, ignoreCase = true) }
                                         .forEach { autoMuteDb.dao().setMuteSegmentEnabled(it.id, false) }
                                 }
+                                val updatedMutes = autoMuteDb.dao().observeMuteSegmentsByEpisode(episodeId).first().map { it.toDomain() }
+                                HushCastEngineBridge.autoMuteProcessor.updateWindows(updatedMutes)
                             }
                         }
                     ) {
@@ -1546,7 +1578,7 @@ fun MediaPlayerBottomSheet(
                                             endMs = (w.end * 1000.0).toLong(),
                                             word = targetWord,
                                             ruleId = -1L,
-                                            actionMode = "SILENCE",
+                                            actionMode = HushCastEngineBridge.defaultActionMode.name,
                                             enabled = true
                                         )
                                     }
@@ -1558,6 +1590,8 @@ fun MediaPlayerBottomSheet(
                                         .filter { it.word.equals(targetWord, ignoreCase = true) }
                                         .forEach { autoMuteDb.dao().setMuteSegmentEnabled(it.id, false) }
                                 }
+                                val updatedMutes = autoMuteDb.dao().observeMuteSegmentsByEpisode(episodeId).first().map { it.toDomain() }
+                                HushCastEngineBridge.autoMuteProcessor.updateWindows(updatedMutes)
                             }
                         }
                     ) {
@@ -1688,6 +1722,13 @@ fun MediaPlayerBottomSheet(
             val wordMutingEnabled by settingsRepository.hushCast.wordMutingEnabled.collectAsState(initial = true)
             val adPolicyMode by settingsRepository.hushCast.adPolicyMode.collectAsState(initial = app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP)
             val autoDownloadUpNext by settingsRepository.hushCast.autoDownloadUpNext.collectAsState(initial = true)
+            val context = androidx.compose.ui.platform.LocalContext.current
+            var processTarget by remember {
+                mutableStateOf(
+                    if (app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context)) "computer"
+                    else "phone"
+                )
+            }
 
             ModalBottomSheet(onDismissRequest = { showSetupSheet = false }) {
                 Column(
@@ -1754,9 +1795,57 @@ fun MediaPlayerBottomSheet(
                             onCheckedChange = { scope.launch { settingsRepository.hushCast.setAutoDownloadUpNext(it) } }
                         )
                     }
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("4. Where to process", style = MaterialTheme.typography.bodyLarge)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf(
+                                "phone" to "This phone",
+                                "computer" to "My computer",
+                                "off" to "Off"
+                            ).forEach { (key, label) ->
+                                androidx.compose.material3.FilterChip(
+                                    selected = processTarget == key,
+                                    onClick = { processTarget = key },
+                                    label = { Text(label) }
+                                )
+                            }
+                        }
+                        Text(
+                            text = when (processTarget) {
+                                "phone" -> "Downloads on-device AI models (~455 MB) over Wi-Fi."
+                                "computer" -> "Pair your desktop worker in Settings → HushCast."
+                                else -> "AI processing disabled; you can turn it on anytime."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                     Button(
                         onClick = {
                             scope.launch {
+                                when (processTarget) {
+                                    "phone" -> {
+                                        app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerEnabled(context, false)
+                                        val mm = app.hushcast.automute.engine.ModelManager(context)
+                                        if (!mm.areWordMuteModelsReady() || !mm.areAdModelsReady()) {
+                                            app.hushcast.automute.worker.ModelDownloadWorker.enqueue(
+                                                context = context,
+                                                includeAdModels = true,
+                                                allowMetered = false
+                                            )
+                                        }
+                                    }
+                                    "computer" -> {
+                                        app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerEnabled(context, true)
+                                    }
+                                    "off" -> {
+                                        settingsRepository.hushCast.setWordMutingEnabled(false)
+                                        settingsRepository.hushCast.setAdPolicyMode(app.hushcast.automute.dsp.AdPolicyMode.OFF)
+                                    }
+                                }
                                 settingsRepository.hushCast.setSetupCompleted(true)
                                 showSetupSheet = false
                                 showHushCastSheet = true
@@ -1764,7 +1853,7 @@ fun MediaPlayerBottomSheet(
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Get started")
+                        Text(if (processTarget == "phone") "Download AI & Get started" else "Get started")
                     }
                     Spacer(Modifier.height(12.dp))
                 }

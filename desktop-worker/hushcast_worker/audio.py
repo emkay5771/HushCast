@@ -19,6 +19,7 @@ logger = logging.getLogger("hushcast_worker.audio")
 
 MAX_DOWNLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB
 MAX_DOWNLOAD_SECONDS = 600.0
+MAX_DECODED_SECONDS = 6 * 3600  # 6 hours
 MAX_REDIRECTS = 10
 
 _BLOCKED_HOSTNAMES = {
@@ -139,10 +140,15 @@ async def download_audio_streaming_sha256(
         raise ValueError(f"Too many redirects (>{MAX_REDIRECTS})")
 
 
-def decode_audio_16k_mono(audio_path: Path) -> tuple[np.ndarray, float]:
+def decode_audio_16k_mono(
+    audio_path: Path,
+    *,
+    max_seconds: float = MAX_DECODED_SECONDS,
+) -> tuple[np.ndarray, float]:
     """Decodes audio_path to 16 kHz mono float32 PCM using a preallocated buffer when duration is known."""
     import av
 
+    max_samples = int(max_seconds * 16000)
     container = av.open(str(audio_path))
     try:
         audio_stream = container.streams.audio[0] if container.streams.audio else None
@@ -154,6 +160,9 @@ def decode_audio_16k_mono(audio_path: Path) -> tuple[np.ndarray, float]:
             if dur_s > 0:
                 est_samples = int(dur_s * 16000) + 16000
 
+        if est_samples > max_samples + 16000:
+            raise ValueError(f"Audio duration exceeds {int(max_seconds // 3600)}-hour limit")
+
         resampler = av.AudioResampler(format="flt", layout="mono", rate=16000)
         if est_samples > 0:
             buf = np.empty(est_samples, dtype=np.float32)
@@ -164,6 +173,8 @@ def decode_audio_16k_mono(audio_path: Path) -> tuple[np.ndarray, float]:
                 n = len(arr)
                 if n == 0:
                     return
+                if pos + n > max_samples:
+                    raise ValueError(f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit")
                 if pos + n > len(buf):
                     new_cap = max(len(buf) * 2, pos + n + 16000)
                     new_buf = np.empty(new_cap, dtype=np.float32)
@@ -180,11 +191,20 @@ def decode_audio_16k_mono(audio_path: Path) -> tuple[np.ndarray, float]:
             pcm = buf[:pos].copy() if pos < len(buf) * 0.8 else buf[:pos]
         else:
             chunks = []
+            total_samples = 0
             for frame in container.decode(audio=0):
                 for resampled in resampler.resample(frame):
-                    chunks.append(resampled.to_ndarray().reshape(-1))
+                    arr = resampled.to_ndarray().reshape(-1)
+                    total_samples += len(arr)
+                    if total_samples > max_samples:
+                        raise ValueError(f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit")
+                    chunks.append(arr)
             for resampled in resampler.resample(None):
-                chunks.append(resampled.to_ndarray().reshape(-1))
+                arr = resampled.to_ndarray().reshape(-1)
+                total_samples += len(arr)
+                if total_samples > max_samples:
+                    raise ValueError(f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit")
+                chunks.append(arr)
             pcm = np.concatenate(chunks).astype(np.float32) if chunks else np.zeros(0, dtype=np.float32)
     finally:
         container.close()

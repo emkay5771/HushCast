@@ -196,6 +196,9 @@ fun DownloadsRoute(
 
                         trailingContent = {
                             if(bundle.download.state != PodcastEpisodeDownloadState.NOT_DOWNLOADED.value) {
+                                val liveProgress = remember(episode.id) {
+                                    app.podiumpodcasts.podium.api.download.DownloadTracker.observe(episode.id)
+                                }.collectAsState(initial = null).value
                                 Surface(
                                     shape = CircleShape,
                                     color = MaterialTheme.colorScheme.secondary,
@@ -205,7 +208,7 @@ fun DownloadsRoute(
                                         modifier = Modifier.padding(8.dp),
                                         text = when(bundle.download.state) {
                                             PodcastEpisodeDownloadState.DOWNLOADING.value ->
-                                                formatFileSize(bundle.download.progress)
+                                                formatFileSize(liveProgress?.progressBytes ?: bundle.download.progress)
                                             PodcastEpisodeDownloadState.FAILED.value ->
                                                 "Failed"
                                             else ->

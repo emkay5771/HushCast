@@ -1342,16 +1342,22 @@ fun HushCastAnalyzeDialog(
         }
         else -> {
             title = "HushCast AI Not Set Up"
-            body = "No on-device AI models (~455 MB) are downloaded and no Desktop/Cloud Worker is connected. Open Settings → HushCast to download models or scan a worker QR code."
-            if (!isDownloaded) {
-                primaryLabel = "Download Audio Only"
-                primaryAction = onDownloadAudioOnly
-            } else {
-                primaryLabel = "OK"
-                primaryAction = onDismiss
+            body = "No on-device AI models (~455 MB) are downloaded and no Desktop/Cloud Worker is connected. Download on-device models over Wi-Fi now, or pair a worker in Settings → HushCast."
+            primaryLabel = "Set up (Wi-Fi)"
+            primaryAction = {
+                app.hushcast.automute.worker.ModelDownloadWorker.enqueue(
+                    context = context,
+                    includeAdModels = true,
+                    allowMetered = false
+                )
             }
-            secondaryLabel = null
-            secondaryAction = null
+            if (!isDownloaded) {
+                secondaryLabel = "Audio Only"
+                secondaryAction = onDownloadAudioOnly
+            } else {
+                secondaryLabel = null
+                secondaryAction = null
+            }
         }
     }
 

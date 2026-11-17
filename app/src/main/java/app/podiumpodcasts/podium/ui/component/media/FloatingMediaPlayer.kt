@@ -102,8 +102,12 @@ fun FloatingMediaPlayer(
     val context = androidx.compose.ui.platform.LocalContext.current
     val autoMuteDb = remember(context) { app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context) }
     val episodeId = vm.metadataEpisodeId ?: ""
-    val muteEntities = autoMuteDb.dao().observeMuteSegmentsByEpisode(episodeId).collectAsState(initial = emptyList())
-    val adEntities = autoMuteDb.dao().observeAdSegmentsByEpisode(episodeId).collectAsState(initial = emptyList())
+    val muteEntities = remember(episodeId) {
+        autoMuteDb.dao().observeMuteSegmentsByEpisode(episodeId)
+    }.collectAsState(initial = emptyList())
+    val adEntities = remember(episodeId) {
+        autoMuteDb.dao().observeAdSegmentsByEpisode(episodeId)
+    }.collectAsState(initial = emptyList())
 
     val enableArtworkColors = settingsRepository.appearance.enableArtworkColors.collectAsState(true)
 

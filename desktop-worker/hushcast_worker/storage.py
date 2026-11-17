@@ -81,9 +81,9 @@ class WorkerCache:
             return False
         return True
 
-    def lookup_by_url(self, audio_url: str) -> Optional[str]:
+    def lookup_by_url(self, audio_url: str, *, require_audio: bool = True) -> Optional[str]:
         sha = self._index["by_url"].get(audio_url)
-        if sha and self.has_bundle(sha, require_current_pipeline=True):
+        if sha and self.has_complete(sha, require_current_pipeline=True, require_audio=require_audio):
             return sha
         return None
 

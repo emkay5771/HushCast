@@ -306,17 +306,38 @@ fun PodcastEpisodeDetailView(
                                 onClick = {
                                     showMoreMenu = false
                                     downloadScope.launch {
-                                        app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
-                                            context = downloadContext,
-                                            db = downloadDb,
-                                            episodeId = episode.id,
-                                            downloadMethod = if (hasDesktopUrl) {
-                                                app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
-                                            } else {
-                                                app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
-                                            },
-                                            forceReprocess = isAlreadyDownloaded
-                                        )
+                                        val localFile = episode.craftDownloadFile(downloadContext)
+                                        if (isAlreadyDownloaded && !hasDesktopUrl && localFile.exists()) {
+                                            app.hushcast.automute.storage.AutoMuteDatabase.getInstance(downloadContext)
+                                                .dao()
+                                                .upsertStatus(
+                                                    app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
+                                                        episodeId = episode.id,
+                                                        badge = app.hushcast.automute.dsp.ReadinessBadge.ANALYZING.name,
+                                                        progressPercent = 0,
+                                                        stageLabel = "Queued for AI analysis…"
+                                                    )
+                                                )
+                                            app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueAnalyzeNow(
+                                                context = downloadContext,
+                                                episodeId = episode.id,
+                                                audioPath = localFile.absolutePath,
+                                                actionMode = app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode,
+                                                episodeTitle = episode.title
+                                            )
+                                        } else {
+                                            app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                                context = downloadContext,
+                                                db = downloadDb,
+                                                episodeId = episode.id,
+                                                downloadMethod = if (hasDesktopUrl) {
+                                                    app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
+                                                } else {
+                                                    app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
+                                                },
+                                                forceReprocess = isAlreadyDownloaded
+                                            )
+                                        }
                                     }
                                 }
                             )

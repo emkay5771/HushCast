@@ -94,15 +94,7 @@ def _run_setup(data_dir: Path, ad_tagger_onnx: Optional[Path]) -> int:
         os.replace(tmp, dest)
         print(f"  [OK] Saved {filename} (sha256={actual_sha[:12]}...)")
 
-    repo_onnx = (
-        Path(__file__).resolve().parents[2]
-        / "core"
-        / "automute-engine"
-        / "src"
-        / "main"
-        / "assets"
-        / "ad_tagger.onnx"
-    )
+    repo_onnx = Path(__file__).resolve().parents[2] / "model" / "ad_tagger.onnx"
     onnx_src = ad_tagger_onnx or (repo_onnx if repo_onnx.exists() else None)
     onnx_dest = models_dir / "ad_tagger.onnx"
     if onnx_src and onnx_src.exists() and not onnx_dest.exists():

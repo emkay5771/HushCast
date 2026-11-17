@@ -2,6 +2,7 @@ package app.podiumpodcasts.podium.manager
 
 import android.content.Context
 import android.content.Intent
+import android.database.sqlite.SQLiteDatabase
 import android.net.Uri
 import android.text.format.DateFormat
 import androidx.core.content.FileProvider
@@ -28,6 +29,9 @@ const val AUTOMUTE_DATABASE_NAME = "hushcast_automute.db"
 const val SETTINGS_BACKUP_NAME = "settings.preferences_pb"
 const val HUSHCAST_CONFIG_BACKUP_NAME = "hushcast_config.json"
 const val DATABASE_EXTENSION = "podiumdb"
+
+private const val MAX_APP_DB_VERSION = 18
+private const val MAX_AUTOMUTE_DB_VERSION = 3
 
 val DATABASE_BACKUP_FILES = arrayOf(
     DATABASE_NAME,
@@ -125,7 +129,7 @@ class DatabaseManager {
                     analyzeOnlyWhileCharging = HushCastPrefs.isAnalyzeOnlyWhileCharging(appCtx),
                     desktopWorkerEnabled = HushCastPrefs.isDesktopWorkerEnabled(appCtx),
                     desktopWorkerUrl = HushCastPrefs.getDesktopWorkerUrl(appCtx),
-                    desktopWorkerToken = HushCastPrefs.getDesktopWorkerToken(appCtx),
+                    desktopWorkerToken = "",
                     desktopWorkerFingerprint = HushCastPrefs.getDesktopWorkerFingerprint(appCtx),
                     autoDownloadMethod = HushCastPrefs.getAutoDownloadMethod(appCtx).name,
                     lastPlayingEpisodeId = playbackPrefs.getString("last_playing_episode_id", null)
@@ -206,83 +210,141 @@ class DatabaseManager {
             return isRawSqliteBackup(context, uri)
         }
 
+        private fun validateSqliteFile(file: File, minVersion: Int, maxVersion: Int) {
+            require(file.exists() && file.length() > 16) {
+                "Backup database ${file.name} is missing or empty"
+            }
+            SQLiteDatabase.openDatabase(
+                file.absolutePath,
+                null,
+                SQLiteDatabase.OPEN_READONLY
+            ).use { db ->
+                db.rawQuery("PRAGMA quick_check", null).use { cursor ->
+                    check(cursor.moveToFirst() && cursor.getString(0) == "ok") {
+                        "Backup database ${file.name} failed integrity check"
+                    }
+                }
+                db.rawQuery("PRAGMA user_version", null).use { cursor ->
+                    check(cursor.moveToFirst()) {
+                        "Could not read schema version of ${file.name}"
+                    }
+                    val version = cursor.getInt(0)
+                    check(version in minVersion..maxVersion) {
+                        "Unsupported ${file.name} schema version $version (expected $minVersion..$maxVersion)"
+                    }
+                }
+            }
+        }
+
         fun restoreFromBackup(context: Context, uri: Uri) {
             val appCtx = context.applicationContext
-            // Cancel background workers before closing Room instances so they don't touch closed DBs
-            runCatching { WorkManager.getInstance(appCtx).cancelAllWork() }
-            closeInstance()
-            AutoMuteDatabase.closeInstance()
-
-            val dbDir = getDatabaseFile(appCtx)!!.parentFile!!
-            listOf(
-                DATABASE_NAME,
-                "$DATABASE_NAME-shm",
-                "$DATABASE_NAME-wal",
-                AUTOMUTE_DATABASE_NAME,
-                "$AUTOMUTE_DATABASE_NAME-shm",
-                "$AUTOMUTE_DATABASE_NAME-wal"
-            ).forEach { name ->
-                File(dbDir, name).delete()
+            val stagingDir = File(appCtx.cacheDir, "restore_staging").apply {
+                deleteRecursively()
+                mkdirs()
             }
-
-            val dsDir = File(appCtx.filesDir, "datastore").apply { mkdirs() }
+            val stagedDbDir = File(stagingDir, "db").apply { mkdirs() }
+            var stagedSettingsFile: File? = null
+            var stagedHushCastConfigRaw: String? = null
             var restoredAnyZipEntry = false
 
-            appCtx.contentResolver.openInputStream(uri)?.use { inputStream ->
-                ZipInputStream(inputStream).use { zipInputStream ->
-                    var entry = zipInputStream.nextEntry
-                    while (entry != null) {
-                        restoredAnyZipEntry = true
-                        when (entry.name) {
-                            in DATABASE_BACKUP_FILES -> {
-                                val destination = File(dbDir, entry.name)
-                                destination.outputStream().use { outputStream ->
-                                    zipInputStream.copyTo(outputStream)
-                                }
-                            }
-                            SETTINGS_BACKUP_NAME -> {
-                                val destination = File(dsDir, SETTINGS_BACKUP_NAME)
-                                destination.outputStream().use { outputStream ->
-                                    zipInputStream.copyTo(outputStream)
-                                }
-                            }
-                            HUSHCAST_CONFIG_BACKUP_NAME -> {
-                                val raw = zipInputStream.readBytes().toString(Charsets.UTF_8)
-                                runCatching {
-                                    val cfg = backupJson.decodeFromString<HushCastBackupConfig>(raw)
-                                    HushCastPrefs.setFastModelEnabled(appCtx, cfg.fastModelEnabled)
-                                    HushCastPrefs.setFastAttentionEnabled(appCtx, cfg.fastAttentionEnabled)
-                                    HushCastPrefs.setAnalyzeOnlyWhileCharging(appCtx, cfg.analyzeOnlyWhileCharging)
-                                    HushCastPrefs.setDesktopWorkerEnabled(appCtx, cfg.desktopWorkerEnabled)
-                                    HushCastPrefs.setDesktopWorkerUrl(appCtx, cfg.desktopWorkerUrl)
-                                    HushCastPrefs.setDesktopWorkerToken(appCtx, cfg.desktopWorkerToken)
-                                    HushCastPrefs.setDesktopWorkerFingerprint(appCtx, cfg.desktopWorkerFingerprint)
-                                    runCatching {
-                                        DownloadAnalysisMethod.valueOf(cfg.autoDownloadMethod)
-                                    }.getOrNull()?.let { method ->
-                                        HushCastPrefs.setAutoDownloadMethod(appCtx, method)
-                                    }
-                                    val playbackPrefs = appCtx.getSharedPreferences("hushcast_playback_state", Context.MODE_PRIVATE)
-                                    if (cfg.lastPlayingEpisodeId != null) {
-                                        playbackPrefs.edit().putString("last_playing_episode_id", cfg.lastPlayingEpisodeId).apply()
-                                    } else {
-                                        playbackPrefs.edit().remove("last_playing_episode_id").apply()
+            try {
+                appCtx.contentResolver.openInputStream(uri)?.use { inputStream ->
+                    ZipInputStream(inputStream).use { zipInputStream ->
+                        var entry = zipInputStream.nextEntry
+                        while (entry != null) {
+                            restoredAnyZipEntry = true
+                            when (entry.name) {
+                                in DATABASE_BACKUP_FILES -> {
+                                    val destination = File(stagedDbDir, entry.name)
+                                    destination.outputStream().use { outputStream ->
+                                        zipInputStream.copyTo(outputStream)
                                     }
                                 }
+                                SETTINGS_BACKUP_NAME -> {
+                                    val destination = File(stagingDir, SETTINGS_BACKUP_NAME)
+                                    destination.outputStream().use { outputStream ->
+                                        zipInputStream.copyTo(outputStream)
+                                    }
+                                    stagedSettingsFile = destination
+                                }
+                                HUSHCAST_CONFIG_BACKUP_NAME -> {
+                                    stagedHushCastConfigRaw = zipInputStream.readBytes().toString(Charsets.UTF_8)
+                                }
                             }
+                            zipInputStream.closeEntry()
+                            entry = zipInputStream.nextEntry
                         }
-                        zipInputStream.closeEntry()
-                        entry = zipInputStream.nextEntry
                     }
                 }
-            }
 
-            if (!restoredAnyZipEntry && isRawSqliteBackup(appCtx, uri)) {
-                appCtx.contentResolver.openInputStream(uri)?.use { input ->
-                    File(dbDir, DATABASE_NAME).outputStream().use { output ->
-                        input.copyTo(output)
+                if (!restoredAnyZipEntry && isRawSqliteBackup(appCtx, uri)) {
+                    appCtx.contentResolver.openInputStream(uri)?.use { input ->
+                        File(stagedDbDir, DATABASE_NAME).outputStream().use { output ->
+                            input.copyTo(output)
+                        }
                     }
                 }
+
+                // Validate staged databases BEFORE touching any live files
+                validateSqliteFile(
+                    File(stagedDbDir, DATABASE_NAME),
+                    minVersion = 1,
+                    maxVersion = MAX_APP_DB_VERSION
+                )
+                val stagedAutoMute = File(stagedDbDir, AUTOMUTE_DATABASE_NAME)
+                if (stagedAutoMute.exists()) {
+                    validateSqliteFile(
+                        stagedAutoMute,
+                        minVersion = 1,
+                        maxVersion = MAX_AUTOMUTE_DB_VERSION
+                    )
+                }
+
+                // Cancel background workers before closing Room instances so they don't touch closed DBs
+                runCatching { WorkManager.getInstance(appCtx).cancelAllWork() }
+                closeInstance()
+                AutoMuteDatabase.closeInstance()
+
+                val dbDir = getDatabaseFile(appCtx)!!.parentFile!!
+                DATABASE_BACKUP_FILES.forEach { name ->
+                    File(dbDir, name).delete()
+                }
+                stagedDbDir.listFiles()?.forEach { staged ->
+                    staged.copyTo(File(dbDir, staged.name), overwrite = true)
+                }
+
+                stagedSettingsFile?.let { stagedSettings ->
+                    val dsDir = File(appCtx.filesDir, "datastore").apply { mkdirs() }
+                    stagedSettings.copyTo(File(dsDir, SETTINGS_BACKUP_NAME), overwrite = true)
+                }
+
+                stagedHushCastConfigRaw?.let { raw ->
+                    runCatching {
+                        val cfg = backupJson.decodeFromString<HushCastBackupConfig>(raw)
+                        HushCastPrefs.setFastModelEnabled(appCtx, cfg.fastModelEnabled)
+                        HushCastPrefs.setFastAttentionEnabled(appCtx, cfg.fastAttentionEnabled)
+                        HushCastPrefs.setAnalyzeOnlyWhileCharging(appCtx, cfg.analyzeOnlyWhileCharging)
+                        HushCastPrefs.setDesktopWorkerEnabled(appCtx, cfg.desktopWorkerEnabled)
+                        HushCastPrefs.setDesktopWorkerUrl(appCtx, cfg.desktopWorkerUrl)
+                        if (cfg.desktopWorkerToken.isNotBlank()) {
+                            HushCastPrefs.setDesktopWorkerToken(appCtx, cfg.desktopWorkerToken)
+                        }
+                        HushCastPrefs.setDesktopWorkerFingerprint(appCtx, cfg.desktopWorkerFingerprint)
+                        runCatching {
+                            DownloadAnalysisMethod.valueOf(cfg.autoDownloadMethod)
+                        }.getOrNull()?.let { method ->
+                            HushCastPrefs.setAutoDownloadMethod(appCtx, method)
+                        }
+                        val playbackPrefs = appCtx.getSharedPreferences("hushcast_playback_state", Context.MODE_PRIVATE)
+                        if (cfg.lastPlayingEpisodeId != null) {
+                            playbackPrefs.edit().putString("last_playing_episode_id", cfg.lastPlayingEpisodeId).apply()
+                        } else {
+                            playbackPrefs.edit().remove("last_playing_episode_id").apply()
+                        }
+                    }
+                }
+            } finally {
+                stagingDir.deleteRecursively()
             }
         }
     }

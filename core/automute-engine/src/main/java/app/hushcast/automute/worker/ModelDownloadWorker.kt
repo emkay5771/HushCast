@@ -58,8 +58,15 @@ class ModelDownloadWorker(
         } catch (c: CancellationException) {
             throw c
         } catch (t: Throwable) {
-            android.util.Log.e("HushCastPerf", "Model download failed: ${t.message}", t)
-            Result.retry()
+            android.util.Log.e("HushCastPerf", "Model download failed (attempt $runAttemptCount): ${t.message}", t)
+            val msg = t.message.orEmpty()
+            val permanent = t is SecurityException ||
+                msg.contains("checksum", ignoreCase = true) ||
+                msg.contains("SHA", ignoreCase = true) ||
+                msg.contains("HTTP 40", ignoreCase = true) ||
+                msg.contains("HTTP 41", ignoreCase = true) ||
+                runAttemptCount >= 3
+            if (permanent) Result.failure() else Result.retry()
         }
     }
 

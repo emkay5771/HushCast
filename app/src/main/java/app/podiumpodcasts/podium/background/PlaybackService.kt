@@ -251,6 +251,34 @@ class PlaybackService : MediaLibraryService() {
                 HushCastEngineBridge.loadCustomMuteSound(this@PlaybackService, it)
             }
         }
+        scope.launch {
+            settingsRepository.hushCast.wordMutingEnabled.collect { enabled ->
+                HushCastEngineBridge.wordMutingEnabled = enabled
+                val origin = getOrigin()
+                val podcastOverride = if (origin != null) {
+                    withContext(Dispatchers.IO) {
+                        settingsRepository.hushCast.podcastWordMuting(origin).firstOrNull()
+                    }
+                } else null
+                HushCastEngineBridge.autoMuteProcessor.isEnabled = podcastOverride ?: enabled
+            }
+        }
+        scope.launch {
+            settingsRepository.hushCast.adPolicyMode.collect { mode ->
+                HushCastEngineBridge.defaultAdPolicy = mode
+                val origin = getOrigin()
+                val podcastOverride = if (origin != null) {
+                    withContext(Dispatchers.IO) {
+                        autoMuteDb.dao().getPodcastAdPolicy(origin)?.policyMode?.let {
+                            runCatching { AdPolicyMode.valueOf(it) }.getOrNull()
+                        }
+                    }
+                } else null
+                HushCastEngineBridge.adSkipObserver.policyMode = podcastOverride ?: mode
+                checkActiveSkipsNow()
+                schedulePositionCallbacks()
+            }
+        }
 
         scope.launch {
             settingsRepository.behavior.speedPresets.collect { speedPresets = it }
@@ -340,6 +368,7 @@ class PlaybackService : MediaLibraryService() {
 
     private fun loadHushCastForEpisode(episodeId: String, origin: String) {
         HushCastEngineBridge.currentEpisodeId = episodeId
+        HushCastEngineBridge.clearSkippedChapterRanges()
         loadHushCastJob?.cancel()
         loadHushCastJob = scope.launch(Dispatchers.IO) {
             val globalWordMuting = settingsRepository.hushCast.wordMutingEnabled.firstOrNull() ?: true
@@ -364,9 +393,28 @@ class PlaybackService : MediaLibraryService() {
                 HushCastEngineBridge.adSkipObserver.clear()
             }
 
-            withContext(Dispatchers.Main) {
-                checkActiveSkipsNow()
-                schedulePositionCallbacks()
+            val insights = autoMuteDb.dao().getInsights(episodeId)
+            val chapters = insights?.chaptersJson?.let { raw ->
+                runCatching {
+                    kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                        .decodeFromString<List<app.hushcast.automute.desktop.DesktopChapterDto>>(raw)
+                        .sortedBy { it.startMs }
+                }.getOrDefault(emptyList())
+            } ?: emptyList()
+            val episodeDurationMs = (db.podcastEpisodes().getSyncNullable(episodeId)?.episode?.duration ?: 0) * 1000L
+
+            db.chapterSkips().observe(episodeId).collect { skipModel ->
+                val skippedStarts = skipModel?.skippedStartsSet() ?: emptySet()
+                HushCastEngineBridge.updateSkippedChapterRanges(
+                    episodeId = episodeId,
+                    chapters = chapters,
+                    skippedStarts = skippedStarts,
+                    durationMs = episodeDurationMs
+                )
+                withContext(Dispatchers.Main) {
+                    checkActiveSkipsNow()
+                    schedulePositionCallbacks()
+                }
             }
         }
     }
@@ -631,7 +679,34 @@ class PlaybackService : MediaLibraryService() {
                 newPosition: Player.PositionInfo,
                 reason: Int
             ) {
-                if (reason == Player.DISCONTINUITY_REASON_SEEK) {
+                if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
+                    val prevItem = oldPosition.mediaItem
+                    if (prevItem != null && prevItem != newPosition.mediaItem) {
+                        val prevOrigin = prevItem.getOrigin()
+                        val prevEpisodeId = prevItem.getEpisodeId()
+                        val prevAudioUrl = prevItem.getAudioUrl()
+                        val prevPosSec = (oldPosition.positionMs / 1000L).toInt().coerceAtLeast(1)
+                        if (prevOrigin != null && prevEpisodeId != null && prevAudioUrl != null) {
+                            scope.launch(Dispatchers.IO) {
+                                db.withTransaction {
+                                    db.podcastEpisodePlayStates().savePlayed(prevEpisodeId, true)
+                                    db.podcastEpisodePlayStates().saveState(prevEpisodeId, prevPosSec)
+                                    db.syncActions().addPlayState(
+                                        origin = prevOrigin,
+                                        episodeId = prevEpisodeId,
+                                        audioUrl = prevAudioUrl,
+                                        duration = prevPosSec,
+                                        state = prevPosSec,
+                                        played = true
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else if (reason == Player.DISCONTINUITY_REASON_SEEK ||
+                    reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT ||
+                    reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION
+                ) {
                     checkActiveSkipsNow()
                 }
                 super.onPositionDiscontinuity(oldPosition, newPosition, reason)
@@ -646,6 +721,7 @@ class PlaybackService : MediaLibraryService() {
                             db.podcastEpisodes().updateDuration(epId, (dur / 1000L).toInt())
                         }
                     }
+                    checkActiveSkipsNow()
                     schedulePositionCallbacks()
                 } else if (playbackState == Player.STATE_ENDED) {
                     getEpisodeId()?.let { episodeId ->

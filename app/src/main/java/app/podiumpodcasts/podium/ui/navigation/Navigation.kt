@@ -1,11 +1,15 @@
 package app.podiumpodcasts.podium.ui.navigation
 
+import androidx.activity.BackEventCompat
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
@@ -114,26 +118,32 @@ fun Navigation(
             rememberSaveableStateHolderNavEntryDecorator()
         ),
         transitionSpec = {
-            (fadeIn(animationSpec = tween(180)) +
-                    scaleIn(initialScale = 0.96f, animationSpec = tween(180)))
-                .togetherWith(fadeOut(animationSpec = tween(150)))
+            (slideInHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { it / 10 } +
+                    fadeIn(animationSpec = tween(200, delayMillis = 40)))
+                .togetherWith(
+                    slideOutHorizontally(animationSpec = tween(260, easing = FastOutSlowInEasing)) { -it / 12 } +
+                            fadeOut(animationSpec = tween(150))
+                )
         },
         popTransitionSpec = {
-            (fadeIn(initialAlpha = 0.85f, animationSpec = tween(180)) +
-                    slideInHorizontally(animationSpec = tween(180)) { -it / 12 })
+            (slideInHorizontally(animationSpec = tween(240, easing = FastOutSlowInEasing)) { -it / 12 } +
+                    fadeIn(initialAlpha = 0.85f, animationSpec = tween(200)))
                 .togetherWith(
-                    fadeOut(animationSpec = tween(180)) +
-                            scaleOut(targetScale = 0.90f, animationSpec = tween(180))
+                    slideOutHorizontally(animationSpec = tween(240, easing = FastOutSlowInEasing)) { it / 8 } +
+                            fadeOut(animationSpec = tween(180))
                 ).apply {
                     targetContentZIndex = -1f
                 }
         },
-        predictivePopTransitionSpec = {
-            (fadeIn(initialAlpha = 0.85f, animationSpec = tween(180)) +
-                    slideInHorizontally(animationSpec = tween(180)) { -it / 12 })
+        predictivePopTransitionSpec = { swipeEdge ->
+            val fromLeft = swipeEdge == BackEventCompat.EDGE_LEFT
+            (slideInHorizontally(animationSpec = tween(easing = LinearEasing)) { if (fromLeft) -it / 16 else it / 16 } +
+                    scaleIn(initialScale = 0.97f, animationSpec = tween(easing = LinearEasing)) +
+                    fadeIn(initialAlpha = 0.80f, animationSpec = tween(easing = LinearEasing)))
                 .togetherWith(
-                    fadeOut(animationSpec = tween(180)) +
-                            scaleOut(targetScale = 0.90f, animationSpec = tween(180))
+                    slideOutHorizontally(animationSpec = tween(easing = LinearEasing)) { if (fromLeft) it / 12 else -it / 12 } +
+                            scaleOut(targetScale = 0.85f, animationSpec = tween(easing = LinearEasing)) +
+                            fadeOut(targetAlpha = 0.45f, animationSpec = tween(easing = LinearEasing))
                 ).apply {
                     targetContentZIndex = -1f
                 }

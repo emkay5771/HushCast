@@ -197,11 +197,13 @@ class PodcastEpisodeDownloadWork(
             DownloadTracker.clear(episodeId)
             if (!stateHandled && outcome != DownloadWorkOutcome.Success) {
                 runCatching {
-                    db.podcastEpisodeDownloads().setState(
-                        episodeId,
-                        if (wasAlreadyDownloaded) PodcastEpisodeDownloadState.DOWNLOADED.value
-                        else PodcastEpisodeDownloadState.NOT_DOWNLOADED.value
-                    )
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                        db.podcastEpisodeDownloads().setState(
+                            episodeId,
+                            if (wasAlreadyDownloaded) PodcastEpisodeDownloadState.DOWNLOADED.value
+                            else PodcastEpisodeDownloadState.NOT_DOWNLOADED.value
+                        )
+                    }
                 }
             }
         }

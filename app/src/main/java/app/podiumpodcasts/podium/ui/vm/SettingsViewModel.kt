@@ -108,14 +108,18 @@ class SettingsViewModel(
         title: String
     ) {
         viewModelScope.launch(Dispatchers.IO) {
-            val file = DatabaseManager.getBackupFile(context)
-            exportDatabaseState.value = ExportDatabaseState.Writing(file.name)
+            try {
+                val file = DatabaseManager.getBackupFile(context)
+                exportDatabaseState.value = ExportDatabaseState.Writing(file.name)
 
-            DatabaseManager.writeBackupFile(context, file)
-            delay(500)
-            DatabaseManager.shareBackupFile(context, file, title)
-
-            exportDatabaseState.value = ExportDatabaseState.Idle
+                DatabaseManager.writeBackupFile(context, file)
+                delay(500)
+                DatabaseManager.shareBackupFile(context, file, title)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                exportDatabaseState.value = ExportDatabaseState.Idle
+            }
         }
     }
 

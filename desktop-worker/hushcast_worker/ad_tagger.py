@@ -44,6 +44,112 @@ class AudioFrames:
     bands: np.ndarray  # shape (n, 16) or flat (n * 16,)
 
 
+def extract_audio_frames(pcm_16k: np.ndarray, sr: int = 16000) -> AudioFrames:
+    """Extracts 100 ms acoustic frames from 16 kHz mono float32 PCM for SegmentFeatures."""
+    hop = max(1, sr // 10)  # 1600 samples = 100 ms
+    n = len(pcm_16k) // hop
+    if n <= 0:
+        empty = np.zeros(0, dtype=np.float32)
+        return AudioFrames(
+            n=0,
+            stereo=False,
+            lk=empty,
+            rms=empty,
+            rms10max=empty,
+            rms10min=empty,
+            flatness=empty,
+            side=empty,
+            zcr=empty,
+            cpp=empty,
+            f0=empty,
+            centroid=empty,
+            flux=empty,
+            bands=np.zeros((0, _N_BANDS), dtype=np.float32),
+        )
+
+    frames_2d = pcm_16k[: n * hop].reshape(n, hop).astype(np.float32)
+    eps = 1e-12
+
+    # Frame RMS and sub-frame (10 ms) min/max RMS in dB
+    rms_lin = np.sqrt(np.mean(frames_2d * frames_2d, axis=1) + eps)
+    rms_db = (20.0 * np.log10(rms_lin)).astype(np.float32)
+    sub_hop = max(1, hop // 10)
+    sub_2d = frames_2d[:, : sub_hop * 10].reshape(n, 10, sub_hop)
+    sub_rms_db = 20.0 * np.log10(np.sqrt(np.mean(sub_2d * sub_2d, axis=2) + eps))
+    rms10max = np.max(sub_rms_db, axis=1).astype(np.float32)
+    rms10min = np.min(sub_rms_db, axis=1).astype(np.float32)
+    # Approximate short-term loudness (LKFS-like) from RMS dB
+    lk = (rms_db - 0.691).astype(np.float32)
+
+    # Zero-crossing rate
+    signs = frames_2d >= 0.0
+    zcr = (np.sum(signs[:, 1:] != signs[:, :-1], axis=1) / float(max(1, hop - 1))).astype(np.float32)
+
+    # Spectral features via rFFT
+    win = np.hanning(hop).astype(np.float32)
+    spec = np.abs(np.fft.rfft(frames_2d * win[None, :], axis=1)) + eps  # (n, hop//2 + 1)
+    power = spec * spec
+    freqs = np.fft.rfftfreq(hop, d=1.0 / sr).astype(np.float32)
+
+    # Spectral flatness (geometric mean / arithmetic mean of power)
+    geom_mean = np.exp(np.mean(np.log(power), axis=1))
+    arith_mean = np.mean(power, axis=1) + eps
+    flatness = np.clip(geom_mean / arith_mean, 0.0, 1.0).astype(np.float32)
+
+    # Spectral centroid (Hz)
+    mag_sum = np.sum(spec, axis=1) + eps
+    centroid = (np.sum(spec * freqs[None, :], axis=1) / mag_sum).astype(np.float32)
+
+    # Spectral flux (normalized L2 diff between consecutive frames)
+    norm_spec = spec / mag_sum[:, None]
+    flux = np.zeros(n, dtype=np.float32)
+    if n > 1:
+        diff = norm_spec[1:] - norm_spec[:-1]
+        flux[1:] = np.sqrt(np.sum(diff * diff, axis=1)).astype(np.float32)
+
+    # 16 log-spaced frequency bands in dB
+    band_edges = np.geomspace(40.0, sr / 2.0, _N_BANDS + 1)
+    bands = np.full((n, _N_BANDS), -120.0, dtype=np.float32)
+    for b in range(_N_BANDS):
+        mask = (freqs >= band_edges[b]) & (freqs < band_edges[b + 1])
+        if np.any(mask):
+            b_pow = np.mean(power[:, mask], axis=1)
+            bands[:, b] = (10.0 * np.log10(b_pow + eps)).astype(np.float32)
+
+    # Cepstral peak prominence (CPP) & F0 over 70..350 Hz
+    log_pow = np.log(power + eps)
+    ceps = np.fft.irfft(log_pow, axis=1)
+    min_lag = max(1, sr // 350)
+    max_lag = min(ceps.shape[1] - 1, sr // 70)
+    cpp = np.zeros(n, dtype=np.float32)
+    f0 = np.zeros(n, dtype=np.float32)
+    if max_lag > min_lag:
+        sub_ceps = ceps[:, min_lag : max_lag + 1]
+        peak_rel = np.argmax(sub_ceps, axis=1)
+        peak_val = sub_ceps[np.arange(n), peak_rel]
+        baseline = np.mean(sub_ceps, axis=1)
+        cpp = np.maximum(0.0, (peak_val - baseline) * 20.0).astype(np.float32)
+        f0 = (sr / (min_lag + peak_rel).astype(np.float32)).astype(np.float32)
+
+    side = np.zeros(n, dtype=np.float32)
+    return AudioFrames(
+        n=n,
+        stereo=False,
+        lk=lk,
+        rms=rms_db,
+        rms10max=rms10max,
+        rms10min=rms10min,
+        flatness=flatness,
+        side=side,
+        zcr=zcr,
+        cpp=cpp,
+        f0=f0,
+        centroid=centroid,
+        flux=flux,
+        bands=bands,
+    )
+
+
 def _round_half_even(x: float, digits: int) -> float:
     return float(Decimal(str(x)).quantize(Decimal(10) ** -digits, rounding=ROUND_HALF_EVEN))
 

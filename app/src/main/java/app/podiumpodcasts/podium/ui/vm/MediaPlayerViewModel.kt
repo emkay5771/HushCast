@@ -180,6 +180,17 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         if (oldFinished) {
             controller.replaceMediaItem(insertIdx, mediaItem)
         } else {
+            // Preserve current position on the shifted item so resuming from Up Next doesn't restart at 0:00
+            if (oldPos > 0L && insertIdx < controller.mediaItemCount) {
+                val oldItem = controller.getMediaItemAt(insertIdx)
+                val updatedExtras = android.os.Bundle(oldItem.mediaMetadata.extras ?: android.os.Bundle()).apply {
+                    putLong(app.podiumpodcasts.podium.api.db.model.MediaMetadataExtra.RESUME_AT.name, oldPos)
+                }
+                val updatedOldItem = oldItem.buildUpon()
+                    .setMediaMetadata(oldItem.mediaMetadata.buildUpon().setExtras(updatedExtras).build())
+                    .build()
+                controller.replaceMediaItem(insertIdx, updatedOldItem)
+            }
             // Insert at currentMediaItemIndex so the previous episode shifts to Up Next #1 (P3)
             controller.addMediaItem(insertIdx, mediaItem)
         }

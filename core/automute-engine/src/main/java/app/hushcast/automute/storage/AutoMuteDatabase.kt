@@ -399,6 +399,7 @@ abstract class AutoMuteDatabase : RoomDatabase() {
         internal val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `ad_segments` ADD COLUMN `adClass` TEXT NOT NULL DEFAULT 'sponsor_ad'")
+                db.execSQL("UPDATE `ad_segments` SET `isHighConfidence` = 0")
                 db.execSQL("ALTER TABLE `episode_word_index` ADD COLUMN `encoderDelayMs` INTEGER NOT NULL DEFAULT 0")
                 db.execSQL("ALTER TABLE `episode_analysis_status` ADD COLUMN `encoderDelayMs` INTEGER NOT NULL DEFAULT 0")
             }
@@ -446,7 +447,8 @@ fun MuteRuleEntity.toDomain() = MuteRule(
     matchPlurals = matchPlurals,
     actionMode = runCatching { MuteActionMode.valueOf(actionMode) }.getOrDefault(MuteActionMode.HARD_SILENCE),
     enabled = enabled,
-    category = category
+    category = category,
+    useDefaultMode = actionMode.equals("DEFAULT", ignoreCase = true)
 )
 
 fun MuteSegmentEntity.toDomain() = MuteWindow(

@@ -278,7 +278,7 @@ class PodcastEpisodeDownloadWorker(
                 .getInstance(context)
                 .enqueueUniqueWork(
                     generateUniqueWorkName(episodeId),
-                    if (forceReprocess || !auto) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
+                    if (forceReprocess) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
                     downloadRequest
                 )
         }

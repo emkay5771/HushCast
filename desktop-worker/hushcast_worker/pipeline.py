@@ -471,7 +471,8 @@ class LocalMlBackend:
                 86,
                 f"Embedded {total_segs} segments in {time.monotonic() - t_emb:.1f}s • Detecting ads",
             )
-            feats = compute_segment_features(None, segments, duration_sec=duration_sec)[None, :, :]
+            frames = extract_audio_frames(pcm_16k) if len(pcm_16k) > 0 else None
+            feats = compute_segment_features(frames, segments, duration_sec=duration_sec)[None, :, :]
 
             sess = self._get_ort_session()
             probs = sess.run(None, {"emb": emb, "feats": feats})[0][0]

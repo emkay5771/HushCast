@@ -1,3 +1,28 @@
+# HushCast v1.0.9-hushcast
+
+## What's New
+- **Auto-Skip & Playback Reliability**:
+  - Fixed `AdSkipPlaybackObserver.checkPosition` and `PlaybackService` `PlayerMessage` scheduling with lead-tolerance and explicit media item indexing so auto-skip never misses sponsor boundaries due to clock skew or item transitions.
+  - Fixed ad-skip Undo so bypassing an ad persists before seeking back (`bypassAd`).
+  - Fixed chapter skips leaking across episodes by clearing and observing per-episode chapter skips directly in `PlaybackService`.
+  - Fixed live observation of `wordMutingEnabled` and `adPolicyMode` in `PlaybackService`, plus valid `defaultActionMode` and live processor updates for transcript mutes.
+  - Preserved resume position when moving an interrupted episode into Up Next, and saved finished episodes on auto-advance.
+- **Native Predictive Back Rewrite**:
+  - Rewrote `Navigation` `predictivePopTransitionSpec` with `swipeEdge`-aware horizontal motion and `LinearEasing` 1:1 finger tracking, and removed the competing `PredictiveBackHandler` in `Main.kt` so `NavigableListDetailPaneScaffold` drives native Material 3 predictive back smoothly.
+- **AI Engine & Setup**:
+  - Pinned `ad_tagger.onnx` to commit `5f3b525` (`11,867,080` bytes) and added word-mute-only fallback when optional ad models are missing.
+  - Improved Whisper chunk overlap deduplication (midpoint split + skipping pure-overlap trailing chunks) and audio-thread-safe mute window updates (`AtomicReference`).
+  - Reset `isHighConfidence = 0` on pre-upgrade ad rows in `MIGRATION_2_3` so old boilerplate/promos don't auto-skip.
+  - Wired "Where to process" (`This phone` / `My computer` / `Off`) and `ModelDownloadWorker` into the HushCast setup sheet and "Not Set Up" dialog, and prevented infinite worker retries on permanent errors.
+- **UI, Downloads, Backup & Desktop Worker**:
+  - Rendered the Unsubscribe confirmation dialog in `PodcastDetailView`, added miniplayer clearance on the multi-select bar, and displayed localized `"Favorites"` in Library.
+  - Synced `MediaPlayerBottomSheet` chapter pill with the pager, allowed downward drags to dismiss the sheet, fixed live countdown on the playback strip, and added **End of chapter** / **End of episode** presets to the Sleep Timer.
+  - Added staging + SQLite `quick_check` & `user_version` validation before deleting live databases during restore, excluded secrets from backups/`backup_rules.xml`, and handled backup export errors safely.
+  - Fixed `PodcastEpisodeDownloadWork` `NonCancellable` cancel cleanup, `KEEP` work policy for in-flight downloads, `enqueueAnalyzeNow` for local files, live download bytes in Downloads, and opening the queue from Home's Up Next strip.
+  - Fixed desktop worker `ad_tagger.onnx` setup path, bumped `PIPELINE_VERSION = 4`, extracted real 100 ms acoustic frames for `ad_tagger.onnx`, added 6-hour decoded audio cap, safe thread cancellation, and audio-only cache-clear handling.
+
+---
+
 # HushCast v1.0.8-hushcast
 
 ## What's New

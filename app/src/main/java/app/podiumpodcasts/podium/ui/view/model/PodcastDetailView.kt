@@ -319,7 +319,16 @@ fun PodcastDetailView(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                    .padding(
+                                        start = 8.dp,
+                                        end = 8.dp,
+                                        top = 8.dp,
+                                        bottom = 8.dp + if (maxWidth <= FloatingMediaPlayerBreakpoint) {
+                                            LocalFloatingMediaPlayerHeight.current
+                                        } else {
+                                            0.dp
+                                        }
+                                    ),
                                 horizontalArrangement = Arrangement.SpaceEvenly,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -666,6 +675,37 @@ fun PodcastDetailView(
         onConfirm = {
             vm.deletePodcast()
             onBack()
+        }
+    )
+
+    if(vm.showUnsubscribeDialog.value) androidx.compose.material3.AlertDialog(
+        onDismissRequest = {
+            vm.showUnsubscribeDialog.value = false
+        },
+        title = {
+            Text(stringResource(R.string.common_action_unsubscribe))
+        },
+        text = {
+            Text("Unsubscribe from ${podcast.fetchTitle()}? Downloaded episodes and history will be kept.")
+        },
+        confirmButton = {
+            androidx.compose.material3.Button(
+                onClick = {
+                    vm.showUnsubscribeDialog.value = false
+                    vm.unsubscribe()
+                }
+            ) {
+                Text(stringResource(R.string.common_action_unsubscribe))
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(
+                onClick = {
+                    vm.showUnsubscribeDialog.value = false
+                }
+            ) {
+                Text("Cancel")
+            }
         }
     )
 }
