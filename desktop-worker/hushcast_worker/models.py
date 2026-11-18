@@ -88,10 +88,10 @@ class DesktopJobRequest(BaseModel):
     title: str = ""
     language: Optional[str] = None
     feedTranscriptRaw: Optional[str] = None
-    feedTranscriptMime: str = ""
+    feedTranscriptMime: Optional[str] = None
     feedTranscriptUrl: Optional[str] = None
     feedChaptersUrl: Optional[str] = None
-    feedChaptersType: str = ""
+    feedChaptersType: Optional[str] = None
     force: bool = False
     reprocessStage: Optional[str] = None
 

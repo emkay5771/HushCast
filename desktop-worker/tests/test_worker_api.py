@@ -201,6 +201,8 @@ def test_job_lifecycle_auth_and_sha256_serving(tmp_path: Path) -> None:
                 "episodeId": "ep1",
                 "audioUrl": "https://example.com/1.mp3",
                 "title": "Test Ep",
+                "feedChaptersType": None,
+                "feedTranscriptMime": None,
             },
         )
         assert cached_res.status_code == 200
