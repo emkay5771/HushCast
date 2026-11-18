@@ -840,12 +840,40 @@ fun MediaPlayerBottomSheet(
                                                         } else Modifier
                                                     )
 
-                                                    if (episodeChapters.isNotEmpty()) {
+                                                    val livePosMs = vm.rememberLivePositionMs(500L)
+                                                    var dismissedAdStarts by remember(episodeId) {
+                                                        mutableStateOf(emptySet<Long>())
+                                                    }
+                                                    val activeAd = remember(adEntities, livePosMs, dismissedAdStarts) {
+                                                        adEntities.firstOrNull { seg ->
+                                                            livePosMs in seg.startMs until (seg.endMs - 400L) &&
+                                                                seg.startMs !in dismissedAdStarts
+                                                        }?.toDomain()
+                                                    }
+                                                    if (pendingUndo != null || activeAd != null || episodeChapters.isNotEmpty()) {
                                                         Spacer(Modifier.height(10.dp))
-                                                        ActiveChapterPill(
+                                                        ActivePlaybackContextBar(
                                                             vm = vm,
+                                                            livePosMs = livePosMs,
                                                             chapters = episodeChapters,
-                                                            onClick = { selectedTab = MediaPlayerTab.CHAPTERS }
+                                                            activeAd = activeAd,
+                                                            pendingUndo = pendingUndo,
+                                                            onOpenChapters = { selectedTab = MediaPlayerTab.CHAPTERS },
+                                                            onSkipAd = { ad ->
+                                                                vm.seek(ad.endMs)
+                                                                HushCastEngineBridge.playSponsorSkipIndicator(context)
+                                                            },
+                                                            onDismissAd = { ad ->
+                                                                dismissedAdStarts = dismissedAdStarts + ad.startMs
+                                                            },
+                                                            onUndoSkip = { undoEvent ->
+                                                                HushCastEngineBridge.adSkipObserver.bypassAd(undoEvent.adWindow.startMs)
+                                                                vm.seek(undoEvent.jumpedFromMs)
+                                                                HushCastEngineBridge.clearPendingUndo()
+                                                            },
+                                                            onDismissUndo = {
+                                                                HushCastEngineBridge.clearPendingUndo()
+                                                            }
                                                         )
                                                     }
                                                 }
@@ -1018,44 +1046,6 @@ fun MediaPlayerBottomSheet(
                                                 Text("Download")
                                             }
                                         }
-                                    }
-                                }
-
-                                pendingUndo?.let { undoEvent ->
-                                    OneTapUndoAdSkipBanner(
-                                        event = undoEvent,
-                                        onUndo = {
-                                            HushCastEngineBridge.adSkipObserver.bypassAd(undoEvent.adWindow.startMs)
-                                            vm.seek(undoEvent.jumpedFromMs)
-                                            HushCastEngineBridge.clearPendingUndo()
-                                        },
-                                        onDismiss = { HushCastEngineBridge.clearPendingUndo() }
-                                    )
-                                }
-
-                                if (pendingUndo == null && adEntities.isNotEmpty()) {
-                                    val livePosMs = vm.rememberLivePositionMs()
-                                    var dismissedAdStarts by remember(episodeId) {
-                                        mutableStateOf(emptySet<Long>())
-                                    }
-                                    val activeAd = remember(adEntities, livePosMs, dismissedAdStarts) {
-                                        adEntities.firstOrNull { seg ->
-                                            livePosMs in seg.startMs until (seg.endMs - 400L) &&
-                                                seg.startMs !in dismissedAdStarts
-                                        }?.toDomain()
-                                    }
-                                    activeAd?.let { ad ->
-                                        app.podiumpodcasts.podium.ui.component.media.ActiveAdSkipToastBanner(
-                                            adWindow = ad,
-                                            currentPositionMs = livePosMs,
-                                            onSkip = {
-                                                vm.seek(ad.endMs)
-                                                HushCastEngineBridge.playSponsorSkipIndicator(context)
-                                            },
-                                            onDismiss = {
-                                                dismissedAdStarts = dismissedAdStarts + ad.startMs
-                                            }
-                                        )
                                     }
                                 }
                             }
@@ -1960,6 +1950,35 @@ fun MediaPlayerBottomSheet(
                                         )
                                     }
                                 }
+                                Text(
+                                    text = "Section types to auto-skip",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                val selectedClasses by settingsRepository.hushCast.adAutoSkipClasses.collectAsState(initial = HushCastEngineBridge.autoSkipClasses)
+                                val sectionTypes = listOf(
+                                    "sponsor_ad" to "Sponsors",
+                                    "house_promo" to "Show Promos",
+                                    "membership_pitch" to "Memberships",
+                                    "boilerplate" to "Intros / Outros"
+                                )
+                                androidx.compose.foundation.layout.FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    sectionTypes.forEach { (cls, label) ->
+                                        val checked = cls in selectedClasses
+                                        androidx.compose.material3.FilterChip(
+                                            selected = checked,
+                                            onClick = {
+                                                val updated = if (checked) selectedClasses - cls else selectedClasses + cls
+                                                HushCastEngineBridge.autoSkipClasses = updated
+                                                scope.launch { settingsRepository.hushCast.setAdAutoSkipClasses(updated) }
+                                            },
+                                            label = { Text(label) }
+                                        )
+                                    }
+                                }
                             }
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -2357,28 +2376,122 @@ private fun LiveChaptersTabContent(
 }
 
 @Composable
-private fun ActiveChapterPill(
+private fun ActivePlaybackContextBar(
     vm: MediaPlayerViewModel,
+    livePosMs: Long,
     chapters: List<app.hushcast.automute.desktop.DesktopChapterDto>,
-    onClick: () -> Unit
+    activeAd: app.hushcast.automute.dsp.AdWindow?,
+    pendingUndo: app.hushcast.automute.dsp.AdSkipEvent?,
+    onOpenChapters: () -> Unit,
+    onSkipAd: (app.hushcast.automute.dsp.AdWindow) -> Unit,
+    onDismissAd: (app.hushcast.automute.dsp.AdWindow) -> Unit,
+    onUndoSkip: (app.hushcast.automute.dsp.AdSkipEvent) -> Unit,
+    onDismissUndo: () -> Unit
 ) {
-    val posMs = vm.rememberLivePositionMs(500L)
-    val activeChapter = remember(chapters, posMs) {
-        chapters.lastOrNull { it.startMs <= posMs } ?: chapters.firstOrNull()
-    } ?: return
+    when {
+        pendingUndo != null -> {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Skipped ${pendingUndo.adWindow.label}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    androidx.compose.material3.TextButton(
+                        onClick = { onUndoSkip(pendingUndo) },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("Undo", style = MaterialTheme.typography.labelMedium)
+                    }
+                    IconButton(
+                        onClick = onDismissUndo,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Dismiss",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
 
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-        modifier = Modifier.clickable(onClick = onClick)
-    ) {
-        Text(
-            text = "Ch: ${activeChapter.title}",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-        )
+        activeAd != null -> {
+            val sectionName = when (activeAd.adClass) {
+                "house_promo" -> "Show Promo"
+                "membership_pitch" -> "Membership"
+                "boilerplate" -> "Intro / Outro"
+                else -> "Sponsor"
+            }
+            val remainingSec = ((activeAd.endMs - livePosMs) / 1000L).coerceAtLeast(0L)
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.85f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = if (remainingSec > 0) "$sectionName • ${remainingSec}s" else sectionName,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    androidx.compose.material3.TextButton(
+                        onClick = { onSkipAd(activeAd) },
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                    ) {
+                        Text("Skip", style = MaterialTheme.typography.labelMedium)
+                    }
+                    IconButton(
+                        onClick = { onDismissAd(activeAd) },
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Dismiss",
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+            }
+        }
+
+        chapters.isNotEmpty() -> {
+            val activeChapter = remember(chapters, livePosMs) {
+                chapters.lastOrNull { it.startMs <= livePosMs } ?: chapters.firstOrNull()
+            } ?: return
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                modifier = Modifier.clickable(onClick = onOpenChapters)
+            ) {
+                Text(
+                    text = "Ch: ${activeChapter.title}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
+        }
     }
 }

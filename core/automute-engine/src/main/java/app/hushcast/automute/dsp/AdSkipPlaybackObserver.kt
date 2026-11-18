@@ -29,6 +29,9 @@ class AdSkipPlaybackObserver {
     var autoSkipScope: AdAutoSkipScope = AdAutoSkipScope.HIGH_CONFIDENCE_ONLY
 
     @Volatile
+    var autoSkipClasses: Set<String> = setOf("sponsor_ad")
+
+    @Volatile
     private var adWindows: List<AdWindow> = emptyList()
 
     private val autoSkippedStartMs = ConcurrentHashMap.newKeySet<Long>()
@@ -38,6 +41,7 @@ class AdSkipPlaybackObserver {
     val skipEvents: SharedFlow<AdSkipEvent> = _skipEvents.asSharedFlow()
 
     fun shouldAutoSkip(ad: AdWindow): Boolean {
+        if (ad.adClass !in autoSkipClasses) return false
         return when (autoSkipScope) {
             AdAutoSkipScope.HIGH_CONFIDENCE_ONLY -> ad.isHighConfidence || ad.confidence >= 0.80f
             AdAutoSkipScope.MODERATE_AND_HIGH -> ad.isHighConfidence || ad.confidence >= 0.65f

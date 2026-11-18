@@ -55,6 +55,12 @@ object HushCastEngineBridge {
             adSkipObserver.autoSkipScope = value
         }
 
+    var autoSkipClasses: Set<String>
+        get() = adSkipObserver.autoSkipClasses
+        set(value) {
+            adSkipObserver.autoSkipClasses = value
+        }
+
     @Volatile
     var sponsorSkipSoundEnabled: Boolean = false
 
@@ -138,6 +144,8 @@ object HushCastEngineBridge {
             ?: AdPolicyMode.AUTO_SKIP
         autoSkipScope = settingsRepository.hushCast.adAutoSkipScope.firstOrNull()
             ?: app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY
+        autoSkipClasses = settingsRepository.hushCast.adAutoSkipClasses.firstOrNull()
+            ?: setOf("sponsor_ad")
         volumeBoostEnabled = settingsRepository.behavior.volumeBoost.firstOrNull() ?: false
         sponsorSkipSoundEnabled = settingsRepository.hushCast.sponsorSkipSoundEnabled.firstOrNull() ?: false
         sponsorSkipSoundUri = settingsRepository.hushCast.sponsorSkipSoundUri.firstOrNull()

@@ -1,3 +1,19 @@
+# HushCast v1.0.16-hushcast
+
+## What's New
+- **New Episodes & Podcast List Improvements**:
+  - Fixed **Mark as listened** in the New Episodes feed (`NewEpisodesRoute`, `PodcastEpisodePlayStateDao.upsertPlayed`) so swiping or tapping Mark all as listened properly persists played state and removes episodes when excluding listened.
+  - Added **Exclude listened**, **In Progress**, and **Downloaded** filter chips to the New Episodes feed, fixed SQLite `NULL` handling in `PodcastEpisodesFilter.PLAYED`/`PAUSED` so **Exclude listened** works on podcast pages, and added **Mark all as listened** to the podcast detail overflow menu.
+- **Per-Section Auto-Skip Settings**:
+  - Added **Section types to auto-skip** toggles (**Sponsors / Ads**, **Show Promos**, **Membership Pitches**, **Intros / Outros**) in both HushCast Settings and the in-player HushCast sheet, wired into `AdSkipPlaybackObserver.autoSkipClasses`.
+- **Integrated Skip / Undo Bar**:
+  - Moved the **Skip** and **Undo** controls into the active context pill below the album art (`ActivePlaybackContextBar`) instead of a floating toast over the artwork.
+- **Smoother Scroll Boundaries & Cleaner Queue**:
+  - Disabled the secondary overscroll bounce-back across scrollable lists, pagers, and sheets via `LocalOverscrollFactory provides null` in `PodiumTheme`.
+  - Removed the redundant **Move to top** and **Remove from queue** buttons from Up Next queue items so removal is a clean swipe gesture.
+
+---
+
 # HushCast v1.0.15-hushcast
 
 ## What's New

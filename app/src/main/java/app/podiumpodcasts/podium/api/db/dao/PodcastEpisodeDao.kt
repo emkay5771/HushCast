@@ -34,8 +34,8 @@ enum class PodcastEpisodesOrderBy(
 enum class PodcastEpisodesFilter(
     val condition: String
 ) {
-    PLAYED("p.played = 1"),
-    PAUSED("p.played = 0 AND p.state > 0"),
+    PLAYED("COALESCE(p.played, 0) = 1"),
+    PAUSED("COALESCE(p.played, 0) = 0 AND COALESCE(p.state, 0) > 0"),
     NEW("e.new = 1"),
     FAVORITE("EXISTS(SELECT 1 FROM listItem WHERE contentId = e.id AND listId = -2)"),
     DOWNLOADED("COALESCE(d.state, 0) = ${PodcastEpisodeDownloadState.DOWNLOADED.value}")
@@ -51,10 +51,38 @@ interface PodcastEpisodeDao {
         observedEntities = [
             PodcastEpisodeModel::class,
             PodcastEpisodePlayStateModel::class,
-            PodcastEpisodeDownloadModel::class
+            PodcastEpisodeDownloadModel::class,
+            app.podiumpodcasts.podium.api.db.model.PodcastSubscriptionModel::class
         ]
     )
     fun queryPaged(query: SupportSQLiteQuery): PagingSource<Int, PodcastEpisodeBundle>
+
+    fun buildNewEpisodesQuery(
+        excludePlayed: Boolean,
+        onlyInProgress: Boolean,
+        onlyDownloaded: Boolean
+    ): SimpleSQLiteQuery {
+        val builder = StringBuilder(
+            """
+            SELECT e.* FROM podcastEpisode AS e
+            INNER JOIN podcastSubscription AS s ON e.origin = s.origin
+            LEFT JOIN podcastEpisodePlayState AS ps ON e.id = ps.episodeId
+            LEFT JOIN podcastEpisodeDownload AS d ON e.id = d.episodeId
+            WHERE 1=1
+            """.trimIndent()
+        )
+        if (excludePlayed) {
+            builder.append(" AND COALESCE(ps.played, 0) = 0")
+        }
+        if (onlyInProgress) {
+            builder.append(" AND COALESCE(ps.played, 0) = 0 AND COALESCE(ps.state, 0) > 0")
+        }
+        if (onlyDownloaded) {
+            builder.append(" AND COALESCE(d.state, 0) = ${PodcastEpisodeDownloadState.DOWNLOADED.value}")
+        }
+        builder.append(" ORDER BY e.pubDate DESC")
+        return SimpleSQLiteQuery(builder.toString())
+    }
 
     fun buildQuery(
         origin: String,

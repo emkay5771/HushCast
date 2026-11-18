@@ -105,100 +105,125 @@ fun NewEpisodesRoute(
                         }
                         app.podiumpodcasts.podium.ui.component.common.BubbleButton(
                             icon = androidx.compose.material.icons.Icons.Rounded.Done,
-                            contentDescription = "Mark all seen"
+                            contentDescription = "Mark all as listened"
                         ) {
-                            newEpisodes.itemSnapshotList.items.forEach {
-                                vm.unnew(it)
-                            }
+                            vm.markAllPlayed()
                         }
                     }
                 }
             )
         }
     ) { inset ->
-        PagerScaffold(
-            newEpisodes,
-            isEmpty = {
-                InfoLayout(
-                    modifier = Modifier.padding(inset),
-                    icon = Icons.Rounded.Verified,
-                    title = { stringResource(R.string.route_new_episodes_empty_title) },
-                ) {
-                    Text(
-                        text = stringResource(R.string.route_new_episodes_empty_text),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
+        androidx.compose.foundation.layout.Column(
+            modifier = Modifier
+                .padding(inset)
+                .fillMaxSize()
         ) {
-            LazyColumn(
-                Modifier
-                    .padding(inset)
-                    .fillMaxSize(),
-                state = vm.lazyListState,
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
+            androidx.compose.foundation.layout.Row(
+                modifier = Modifier
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(
-                    newEpisodes.itemCount,
-                    key = newEpisodes.itemKey { it.episode.id }
+                androidx.compose.material3.FilterChip(
+                    selected = vm.excludeListened.value,
+                    onClick = { vm.excludeListened.value = !vm.excludeListened.value },
+                    label = { Text("Exclude listened") }
+                )
+                androidx.compose.material3.FilterChip(
+                    selected = vm.onlyInProgress.value,
+                    onClick = { vm.onlyInProgress.value = !vm.onlyInProgress.value },
+                    label = { Text("In Progress") }
+                )
+                androidx.compose.material3.FilterChip(
+                    selected = vm.onlyDownloaded.value,
+                    onClick = { vm.onlyDownloaded.value = !vm.onlyDownloaded.value },
+                    label = { Text("Downloaded") }
+                )
+            }
+
+            PagerScaffold(
+                newEpisodes,
+                isEmpty = {
+                    InfoLayout(
+                        modifier = Modifier.fillMaxSize(),
+                        icon = Icons.Rounded.Verified,
+                        title = { stringResource(R.string.route_new_episodes_empty_title) },
+                    ) {
+                        Text(
+                            text = stringResource(R.string.route_new_episodes_empty_text),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            ) {
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    state = vm.lazyListState,
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
                 ) {
-                    val item = newEpisodes[it] ?: return@items
-                    val itemPlayerVm = viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
-                    val itemSettings = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
-                    val itemSwipeRightAction = itemSettings.behavior.episodeSwipeRightAction.collectAsState(
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
-                    ).value
+                    items(
+                        newEpisodes.itemCount,
+                        key = newEpisodes.itemKey { it.episode.id }
+                    ) {
+                        val item = newEpisodes[it] ?: return@items
+                        val itemPlayerVm = viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+                        val itemSettings = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
+                        val itemSwipeRightAction = itemSettings.behavior.episodeSwipeRightAction.collectAsState(
+                            app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
+                        ).value
 
-                    val markedAsSeen = stringResource(R.string.snackbar_marked_as_seen)
+                        val secondaryRightType = itemSettings.behavior.episodeSwipeRightSecondaryAction.collectAsState(
+                            app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST
+                        ).value
 
-                    val secondaryRightType = itemSettings.behavior.episodeSwipeRightSecondaryAction.collectAsState(
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST
-                    ).value
-
-                    SwipeableItem(
-                        scope = scope,
-                        modifier = Modifier.animateItem(),
-                        snackbarHostState = snackbarHostState,
-                        startAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
-                            actionType = itemSwipeRightAction,
-                            bundle = item,
-                            playerVm = itemPlayerVm,
-                            onMarkPlayed = { markPlayed ->
-                                db.podcastEpisodePlayStates().savePlayed(item.episode.id, markPlayed)
-                                if (markPlayed) {
-                                    itemPlayerVm.removeEpisodeFromPlaybackAndQueue(item.episode.id)
-                                }
-                            }
-                        ),
-                        secondaryStartAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
-                            actionType = app.podiumpodcasts.podium.ui.component.common.swipeable.consolidateSecondarySwipeAction(
-                                primary = itemSwipeRightAction,
-                                secondary = secondaryRightType,
-                                inQueue = itemPlayerVm.queue.contains(item.episode.id)
-                            ),
-                            bundle = item,
-                            playerVm = itemPlayerVm,
-                            onMarkPlayed = { markPlayed ->
-                                db.podcastEpisodePlayStates().savePlayed(item.episode.id, markPlayed)
-                                if (markPlayed) {
-                                    itemPlayerVm.removeEpisodeFromPlaybackAndQueue(item.episode.id)
-                                }
-                            }
-                        ),
-                        endAction = SwipeableItemActions.CheckAction(
-                            onAction = {
-                                vm.unnew(item)
-
-                                SwipeableItemActionResult(
-                                    isDismissed = true,
-                                    message = markedAsSeen,
-                                    onUndo = {
-                                        vm.new(item)
+                        SwipeableItem(
+                            scope = scope,
+                            modifier = Modifier.animateItem(),
+                            snackbarHostState = snackbarHostState,
+                            startAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
+                                actionType = itemSwipeRightAction,
+                                bundle = item,
+                                playerVm = itemPlayerVm,
+                                onMarkPlayed = { markPlayed ->
+                                    vm.markPlayed(item, markPlayed)
+                                    if (markPlayed) {
+                                        itemPlayerVm.removeEpisodeFromPlaybackAndQueue(item.episode.id)
                                     }
-                                )
-                            }
-                        ),
+                                }
+                            ),
+                            secondaryStartAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
+                                actionType = app.podiumpodcasts.podium.ui.component.common.swipeable.consolidateSecondarySwipeAction(
+                                    primary = itemSwipeRightAction,
+                                    secondary = secondaryRightType,
+                                    inQueue = itemPlayerVm.queue.contains(item.episode.id)
+                                ),
+                                bundle = item,
+                                playerVm = itemPlayerVm,
+                                onMarkPlayed = { markPlayed ->
+                                    vm.markPlayed(item, markPlayed)
+                                    if (markPlayed) {
+                                        itemPlayerVm.removeEpisodeFromPlaybackAndQueue(item.episode.id)
+                                    }
+                                }
+                            ),
+                            endAction = SwipeableItemActions.CheckAction(
+                                onAction = {
+                                    val markPlayed = !(item.playState?.played ?: false)
+                                    vm.markPlayed(item, markPlayed)
+                                    if (markPlayed) {
+                                        itemPlayerVm.removeEpisodeFromPlaybackAndQueue(item.episode.id)
+                                    }
+
+                                    SwipeableItemActionResult(
+                                        isDismissed = vm.excludeListened.value && markPlayed,
+                                        message = if (markPlayed) "Marked as listened" else "Marked as unlistened",
+                                        onUndo = {
+                                            vm.markPlayed(item, !markPlayed)
+                                        }
+                                    )
+                                }
+                            ),
                         content = {
                             PodcastEpisodeListItem(
                                 bundle = item,
@@ -224,6 +249,7 @@ fun NewEpisodesRoute(
                     FloatingMediaPlayerSpacer()
                 }
             }
+        }
         }
     }
 }

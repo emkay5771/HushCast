@@ -388,9 +388,6 @@ fun MediaPlayerQueueBottomSheet(
                                     mediaItem = mediaItem,
                                     index = queueIndexIndex,
                                     count = localQueue.size,
-                                    onMoveToTop = if(queueIndexIndex > 0) {
-                                        { vm.moveToTopOfQueue(queueIndexIndex) }
-                                    } else null,
                                     onOpenDetails = {
                                         scope.launch {
                                             sheetState.hide()

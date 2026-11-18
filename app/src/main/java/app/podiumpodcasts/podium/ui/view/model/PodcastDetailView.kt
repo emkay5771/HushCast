@@ -292,7 +292,19 @@ fun PodcastDetailView(
                                         expanded = showOverflowMenu,
                                         onDismissRequest = { showOverflowMenu = false }
                                     ) {
-                                        if (isSubscribed) {
+                                            androidx.compose.material3.DropdownMenuItem(
+                                                text = { Text("Mark all as listened") },
+                                                leadingIcon = {
+                                                    Icon(Icons.Rounded.Done, contentDescription = null)
+                                                },
+                                                onClick = {
+                                                    showOverflowMenu = false
+                                                    scope.launch {
+                                                        db.podcastEpisodePlayStates().markAllPlayedForOrigin(podcast.origin)
+                                                    }
+                                                }
+                                            )
+                                            if (isSubscribed) {
                                             androidx.compose.material3.DropdownMenuItem(
                                                 text = { Text(stringResource(R.string.common_action_unsubscribe)) },
                                                 leadingIcon = {
@@ -787,7 +799,7 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                             vm.searchFilterOrderBarState.negativeFilter.add(PodcastEpisodesFilter.PLAYED)
                         }
                     },
-                    label = { Text("Unplayed") }
+                    label = { Text("Exclude listened") }
                 )
 
                 val onlyDownloaded = PodcastEpisodesFilter.DOWNLOADED in vm.searchFilterOrderBarState.filter

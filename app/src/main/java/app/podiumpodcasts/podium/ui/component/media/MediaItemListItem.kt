@@ -246,14 +246,6 @@ fun MediaItemListItem(
                     }
                 }
 
-                onMoveToTop?.let { moveToTop ->
-                    IconButton(onClick = moveToTop) {
-                        Icon(
-                            imageVector = Icons.Rounded.VerticalAlignTop,
-                            contentDescription = "Move to top"
-                        )
-                    }
-                }
                 onOpenDetails?.let { openDetails ->
                     IconButton(onClick = openDetails) {
                         Icon(
@@ -261,16 +253,6 @@ fun MediaItemListItem(
                             contentDescription = stringResource(R.string.common_info)
                         )
                     }
-                }
-                FilledIconButton(
-                    onClick = {
-                        vm.dequeue(episodeId)
-                    }
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.PlaylistRemove,
-                        contentDescription = stringResource(R.string.common_action_remove_from_queue)
-                    )
                 }
             }
         }

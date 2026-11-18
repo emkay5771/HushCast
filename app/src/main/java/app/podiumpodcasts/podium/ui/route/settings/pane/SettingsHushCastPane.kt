@@ -905,6 +905,33 @@ fun SettingsHushCastPane(
                                     }
                                 }
                             }
+                            Spacer(Modifier.height(12.dp))
+                            Text("Section types to auto-skip", style = MaterialTheme.typography.labelMedium)
+                            Spacer(Modifier.height(4.dp))
+                            val selectedClasses by settingsRepository.hushCast.adAutoSkipClasses.collectAsState(initial = HushCastEngineBridge.autoSkipClasses)
+                            val sectionTypes = listOf(
+                                "sponsor_ad" to "Sponsors / Ads",
+                                "house_promo" to "Show Promos",
+                                "membership_pitch" to "Membership Pitches",
+                                "boilerplate" to "Intros / Outros"
+                            )
+                            androidx.compose.foundation.layout.FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                sectionTypes.forEach { (cls, label) ->
+                                    val checked = cls in selectedClasses
+                                    FilterChip(
+                                        selected = checked,
+                                        onClick = {
+                                            val updated = if (checked) selectedClasses - cls else selectedClasses + cls
+                                            HushCastEngineBridge.autoSkipClasses = updated
+                                            scope.launch { settingsRepository.hushCast.setAdAutoSkipClasses(updated) }
+                                        },
+                                        label = { Text(label) }
+                                    )
+                                }
+                            }
                         }
                         Spacer(Modifier.height(12.dp))
                         Row(

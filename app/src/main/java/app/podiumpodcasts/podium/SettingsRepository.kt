@@ -723,6 +723,16 @@ class SettingsRepository(val context: Context) {
             preferences[SettingsKeys.HUSHCAST_AD_AUTO_SKIP_SCOPE] = scope.name
         }
 
+        private val HUSHCAST_AUTO_SKIP_CLASSES_KEY = androidx.datastore.preferences.core.stringSetPreferencesKey("hushcast_auto_skip_classes")
+
+        val adAutoSkipClasses: Flow<Set<String>> = dataStore.data.map { preferences ->
+            preferences[HUSHCAST_AUTO_SKIP_CLASSES_KEY] ?: setOf("sponsor_ad")
+        }
+
+        suspend fun setAdAutoSkipClasses(classes: Set<String>) = dataStore.edit { preferences ->
+            preferences[HUSHCAST_AUTO_SKIP_CLASSES_KEY] = classes
+        }
+
         val setupCompleted: Flow<Boolean> = dataStore.data.map { preferences ->
             preferences[SettingsKeys.HUSHCAST_SETUP_COMPLETED] ?: false
         }
