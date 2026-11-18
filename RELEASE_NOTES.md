@@ -1,3 +1,11 @@
+# HushCast v1.0.21-hushcast
+
+## What's New
+- **Reorganized HushCast Settings**:
+  - Grouped settings into clear sections: **CLOUD / DESKTOP WORKER**, **ON-DEVICE ANALYSIS (OFFLINE FALLBACK)** (models + on-device speed/battery toggles), **WORD BLEEPING & MUTING** (action mode, timing precision, dictionary), **AD & SECTION SKIPPING**, and **DIAGNOSTICS**.
+
+---
+
 # HushCast v1.0.20-hushcast
 
 ## What's New

@@ -173,242 +173,10 @@ fun SettingsHushCastPane(
         ) {
             item {
                 Text(
-                    text = "PROCESSING",
+                    text = "CLOUD / DESKTOP WORKER",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
-            }
-
-            // 1. On-Device AI Models Card (collapsible when Desktop/Cloud Worker is active)
-            item {
-                val desktopActive = remember {
-                    app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) &&
-                        app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
-                }
-                var showLocalModels by remember {
-                    mutableStateOf(!desktopActive)
-                }
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(Icons.Rounded.Download, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("On-Device AI Models (~455 MB)", style = MaterialTheme.typography.titleMedium)
-                            }
-                            IconButton(onClick = { showLocalModels = !showLocalModels }) {
-                                Icon(
-                                    imageVector = if (showLocalModels) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                                    contentDescription = if (showLocalModels) "Collapse" else "Expand"
-                                )
-                            }
-                        }
-                        if (!showLocalModels) {
-                            Text(
-                                text = when {
-                                    modelsReady -> "Ready ($downloadedMb MB local). Tap to manage."
-                                    desktopActive -> "Optional offline fallback. Your Cloud / Desktop Worker handles analysis."
-                                    else -> "Tap to download or manage on-device models."
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        } else {
-                            Spacer(Modifier.height(4.dp))
-                        Text(
-                            when {
-                                modelsReady -> "All models ready ($downloadedMb MB stored locally). $0 server cost, 100% private."
-                                desktopActive -> "Optional offline fallback: your Cloud / Desktop Worker is active, so on-device models aren't needed unless you want offline analysis."
-                                else -> "Download Whisper base.en q5_1 (58 MB), Silero VAD (2 MB), and Qwen3-Embedding Q4 (395 MB) over Wi-Fi."
-                            },
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        downloadProgress?.let { p ->
-                            Spacer(Modifier.height(8.dp))
-                            Text("${p.modelName}: ${p.bytesDownloaded / (1024 * 1024)} MB", style = MaterialTheme.typography.labelSmall)
-                            val frac = if (p.totalBytes > 0) p.bytesDownloaded.toFloat() / p.totalBytes.toFloat() else 0f
-                            LinearProgressIndicator(
-                                progress = { frac.coerceIn(0f, 1f) },
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                        downloadError?.let { err ->
-                            Spacer(Modifier.height(6.dp))
-                            Text(err, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                enabled = downloadProgress == null,
-                                onClick = {
-                                    downloadError = null
-                                    scope.launch {
-                                        try {
-                                            withContext(Dispatchers.IO) {
-                                                modelManager.ensureAllModels { prog ->
-                                                    downloadProgress = prog
-                                                }
-                                            }
-                                            modelsReady = modelManager.areAllModelsReady()
-                                            downloadedMb = (modelManager.totalDownloadedBytes() / (1024L * 1024L)).toInt()
-                                        } catch (t: Throwable) {
-                                            downloadError = t.message ?: "Download failed"
-                                        } finally {
-                                            downloadProgress = null
-                                        }
-                                    }
-                                }
-                            ) {
-                                Text(if (modelsReady) "Verify Models" else "Download Models (Wi-Fi)")
-                            }
-                            if (downloadedMb > 0) {
-                                OutlinedButton(onClick = {
-                                    modelManager.deleteAllModels()
-                                    modelsReady = false
-                                    downloadedMb = 0
-                                }) {
-                                    Text("Delete")
-                                }
-                            }
-                        }
-                        }
-                    }
-                }
-            }
-
-            // 1b. Performance & Battery Card
-            item {
-                var fastModelEnabled by remember {
-                    mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.isFastModelEnabled(context))
-                }
-                var fastAttentionEnabled by remember {
-                    mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.isFastAttentionEnabled(context))
-                }
-                var chargingOnly by remember {
-                    mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context))
-                }
-                val thermalLabel = remember {
-                    app.hushcast.automute.engine.CpuTopology.thermalStatusLabel(context)
-                }
-                val perfCores = remember {
-                    app.hushcast.automute.engine.CpuTopology.performanceCoreCount()
-                }
-                var tinyReady by remember { mutableStateOf(modelManager.isTinyModelReady()) }
-
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Memory, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Performance & Battery", style = MaterialTheme.typography.titleMedium)
-                        }
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            "Using $perfCores performance CPU cores • Thermal: $thermalLabel",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(10.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                                Text("Fast transcription model (tiny.en)", style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    if (tinyReady) "2–3× faster (32 MB). Slightly lower word accuracy."
-                                    else "2–3× faster (downloads 32 MB tiny.en q5_1).",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Switch(
-                                checked = fastModelEnabled,
-                                onCheckedChange = { enabled ->
-                                    fastModelEnabled = enabled
-                                    app.hushcast.automute.engine.HushCastPrefs.setFastModelEnabled(context, enabled)
-                                    if (enabled && !tinyReady && downloadProgress == null) {
-                                        scope.launch {
-                                            try {
-                                                withContext(Dispatchers.IO) {
-                                                    modelManager.ensureTinyModel { prog ->
-                                                        downloadProgress = prog
-                                                    }
-                                                }
-                                                tinyReady = modelManager.isTinyModelReady()
-                                                downloadedMb = (modelManager.totalDownloadedBytes() / (1024L * 1024L)).toInt()
-                                            } catch (t: Throwable) {
-                                                downloadError = t.message ?: "tiny.en download failed"
-                                            } finally {
-                                                downloadProgress = null
-                                            }
-                                        }
-                                    }
-                                }
-                            )
-                        }
-
-                        Spacer(Modifier.height(10.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                                Text("Fast timing mode (Flash Attention)", style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    "1.3× faster by skipping DTW word alignment; mute timing is slightly looser.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Switch(
-                                checked = fastAttentionEnabled,
-                                onCheckedChange = { enabled ->
-                                    fastAttentionEnabled = enabled
-                                    app.hushcast.automute.engine.HushCastPrefs.setFastAttentionEnabled(context, enabled)
-                                }
-                            )
-                        }
-
-                        Spacer(Modifier.height(10.dp))
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
-                                Text("Analyze only while charging", style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    "Defers episode analysis until plugged in to save battery and prevent heat.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Switch(
-                                checked = chargingOnly,
-                                onCheckedChange = { enabled ->
-                                    chargingOnly = enabled
-                                    app.hushcast.automute.engine.HushCastPrefs.setAnalyzeOnlyWhileCharging(context, enabled)
-                                }
-                            )
-                        }
-                    }
-                }
             }
 
             // 1c. Desktop Companion (Mac / GPU) Card
@@ -747,6 +515,254 @@ fun SettingsHushCastPane(
                 }
             }
 
+            item {
+                Text(
+                    text = "ON-DEVICE ANALYSIS (OFFLINE FALLBACK)",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            // 1. On-Device AI Models Card (collapsible when Desktop/Cloud Worker is active)
+            item {
+                val desktopActive = remember {
+                    app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) &&
+                        app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+                }
+                var showLocalModels by remember {
+                    mutableStateOf(!desktopActive)
+                }
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Rounded.Download, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("On-Device AI Models (~455 MB)", style = MaterialTheme.typography.titleMedium)
+                            }
+                            IconButton(onClick = { showLocalModels = !showLocalModels }) {
+                                Icon(
+                                    imageVector = if (showLocalModels) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                    contentDescription = if (showLocalModels) "Collapse" else "Expand"
+                                )
+                            }
+                        }
+                        if (!showLocalModels) {
+                            Text(
+                                text = when {
+                                    modelsReady -> "Ready ($downloadedMb MB local). Tap to manage."
+                                    desktopActive -> "Optional offline fallback. Your Cloud / Desktop Worker handles analysis."
+                                    else -> "Tap to download or manage on-device models."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        } else {
+                            Spacer(Modifier.height(4.dp))
+                        Text(
+                            when {
+                                modelsReady -> "All models ready ($downloadedMb MB stored locally). $0 server cost, 100% private."
+                                desktopActive -> "Optional offline fallback: your Cloud / Desktop Worker is active, so on-device models aren't needed unless you want offline analysis."
+                                else -> "Download Whisper base.en q5_1 (58 MB), Silero VAD (2 MB), and Qwen3-Embedding Q4 (395 MB) over Wi-Fi."
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        downloadProgress?.let { p ->
+                            Spacer(Modifier.height(8.dp))
+                            Text("${p.modelName}: ${p.bytesDownloaded / (1024 * 1024)} MB", style = MaterialTheme.typography.labelSmall)
+                            val frac = if (p.totalBytes > 0) p.bytesDownloaded.toFloat() / p.totalBytes.toFloat() else 0f
+                            LinearProgressIndicator(
+                                progress = { frac.coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        downloadError?.let { err ->
+                            Spacer(Modifier.height(6.dp))
+                            Text(err, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                enabled = downloadProgress == null,
+                                onClick = {
+                                    downloadError = null
+                                    scope.launch {
+                                        try {
+                                            withContext(Dispatchers.IO) {
+                                                modelManager.ensureAllModels { prog ->
+                                                    downloadProgress = prog
+                                                }
+                                            }
+                                            modelsReady = modelManager.areAllModelsReady()
+                                            downloadedMb = (modelManager.totalDownloadedBytes() / (1024L * 1024L)).toInt()
+                                        } catch (t: Throwable) {
+                                            downloadError = t.message ?: "Download failed"
+                                        } finally {
+                                            downloadProgress = null
+                                        }
+                                    }
+                                }
+                            ) {
+                                Text(if (modelsReady) "Verify Models" else "Download Models (Wi-Fi)")
+                            }
+                            if (downloadedMb > 0) {
+                                OutlinedButton(onClick = {
+                                    modelManager.deleteAllModels()
+                                    modelsReady = false
+                                    downloadedMb = 0
+                                }) {
+                                    Text("Delete")
+                                }
+                            }
+                        }
+                        }
+                    }
+                }
+            }
+
+            // 1b. Performance & Battery Card
+            item {
+                var fastModelEnabled by remember {
+                    mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.isFastModelEnabled(context))
+                }
+                var fastAttentionEnabled by remember {
+                    mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.isFastAttentionEnabled(context))
+                }
+                var chargingOnly by remember {
+                    mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context))
+                }
+                val thermalLabel = remember {
+                    app.hushcast.automute.engine.CpuTopology.thermalStatusLabel(context)
+                }
+                val perfCores = remember {
+                    app.hushcast.automute.engine.CpuTopology.performanceCoreCount()
+                }
+                var tinyReady by remember { mutableStateOf(modelManager.isTinyModelReady()) }
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Memory, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Performance & Battery", style = MaterialTheme.typography.titleMedium)
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Using $perfCores performance CPU cores • Thermal: $thermalLabel",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text("Fast transcription model (tiny.en)", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    if (tinyReady) "2–3× faster (32 MB). Slightly lower word accuracy."
+                                    else "2–3× faster (downloads 32 MB tiny.en q5_1).",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = fastModelEnabled,
+                                onCheckedChange = { enabled ->
+                                    fastModelEnabled = enabled
+                                    app.hushcast.automute.engine.HushCastPrefs.setFastModelEnabled(context, enabled)
+                                    if (enabled && !tinyReady && downloadProgress == null) {
+                                        scope.launch {
+                                            try {
+                                                withContext(Dispatchers.IO) {
+                                                    modelManager.ensureTinyModel { prog ->
+                                                        downloadProgress = prog
+                                                    }
+                                                }
+                                                tinyReady = modelManager.isTinyModelReady()
+                                                downloadedMb = (modelManager.totalDownloadedBytes() / (1024L * 1024L)).toInt()
+                                            } catch (t: Throwable) {
+                                                downloadError = t.message ?: "tiny.en download failed"
+                                            } finally {
+                                                downloadProgress = null
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text("Fast timing mode (Flash Attention)", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "1.3× faster by skipping DTW word alignment; mute timing is slightly looser.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = fastAttentionEnabled,
+                                onCheckedChange = { enabled ->
+                                    fastAttentionEnabled = enabled
+                                    app.hushcast.automute.engine.HushCastPrefs.setFastAttentionEnabled(context, enabled)
+                                }
+                            )
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                                Text("Analyze only while charging", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "Defers episode analysis until plugged in to save battery and prevent heat.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = chargingOnly,
+                                onCheckedChange = { enabled ->
+                                    chargingOnly = enabled
+                                    app.hushcast.automute.engine.HushCastPrefs.setAnalyzeOnlyWhileCharging(context, enabled)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Text(
+                    text = "WORD BLEEPING & MUTING",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
             // 2. Feature A: Word Auto-Muting Controls
             item {
                 Card(modifier = Modifier.fillMaxWidth()) {
@@ -867,149 +883,6 @@ fun SettingsHushCastPane(
                                     },
                                     label = { Text(precision.label) }
                                 )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 3. Feature B: Sponsor / Ad Blocker Controls
-            item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Shield, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("On-Device Ad Blocker", style = MaterialTheme.typography.titleMedium)
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        val policies = listOf(
-                            AdPolicyMode.AUTO_SKIP to "Auto-Skip",
-                            AdPolicyMode.MARK_ONLY to "Mark Only",
-                            AdPolicyMode.OFF to "Off"
-                        )
-                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                            policies.forEachIndexed { idx, (policy, label) ->
-                                SegmentedButton(
-                                    selected = selectedAdPolicy == policy,
-                                    onClick = {
-                                        HushCastEngineBridge.defaultAdPolicy = policy
-                                        HushCastEngineBridge.adSkipObserver.policyMode = policy
-                                        scope.launch { settingsRepository.hushCast.setAdPolicyMode(policy) }
-                                    },
-                                    shape = SegmentedButtonDefaults.itemShape(idx, policies.size)
-                                ) {
-                                    Text(label)
-                                }
-                            }
-                        }
-                        if (selectedAdPolicy == AdPolicyMode.AUTO_SKIP) {
-                            Spacer(Modifier.height(12.dp))
-                            Text("Auto-Skip When", style = MaterialTheme.typography.labelMedium)
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = when (selectedAutoSkipScope) {
-                                    app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY ->
-                                        "Only skip high-confidence sponsor reads (80%+). Suggested ads show a Skip button."
-                                    app.hushcast.automute.dsp.AdAutoSkipScope.MODERATE_AND_HIGH ->
-                                        "Skip likely and high-confidence ads (65%+)."
-                                    app.hushcast.automute.dsp.AdAutoSkipScope.ALL_DETECTED ->
-                                        "Skip all detected ads, including suggested ads."
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            val scopes = listOf(
-                                app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY to "High (80%+)",
-                                app.hushcast.automute.dsp.AdAutoSkipScope.MODERATE_AND_HIGH to "Balanced",
-                                app.hushcast.automute.dsp.AdAutoSkipScope.ALL_DETECTED to "All Ads"
-                            )
-                            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                                scopes.forEachIndexed { idx, (scopeVal, label) ->
-                                    SegmentedButton(
-                                        selected = selectedAutoSkipScope == scopeVal,
-                                        onClick = {
-                                            HushCastEngineBridge.autoSkipScope = scopeVal
-                                            scope.launch { settingsRepository.hushCast.setAdAutoSkipScope(scopeVal) }
-                                        },
-                                        shape = SegmentedButtonDefaults.itemShape(idx, scopes.size)
-                                    ) {
-                                        Text(label)
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.height(12.dp))
-                            Text("Section types to auto-skip", style = MaterialTheme.typography.labelMedium)
-                            Spacer(Modifier.height(4.dp))
-                            val selectedClasses by settingsRepository.hushCast.adAutoSkipClasses.collectAsState(initial = HushCastEngineBridge.autoSkipClasses)
-                            val sectionTypes = listOf(
-                                "sponsor_ad" to "Sponsors / Ads",
-                                "house_promo" to "Show Promos",
-                                "membership_pitch" to "Membership Pitches",
-                                "boilerplate" to "Intros / Outros"
-                            )
-                            androidx.compose.foundation.layout.FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                sectionTypes.forEach { (cls, label) ->
-                                    val checked = cls in selectedClasses
-                                    androidx.compose.material3.FilterChip(
-                                        selected = checked,
-                                        onClick = {
-                                            val updated = if (checked) selectedClasses - cls else selectedClasses + cls
-                                            HushCastEngineBridge.autoSkipClasses = updated
-                                            scope.launch { settingsRepository.hushCast.setAdAutoSkipClasses(updated) }
-                                        },
-                                        label = { Text(label) }
-                                    )
-                                }
-                            }
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Sponsor skip indicator sound", style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    text = if (sponsorSkipSoundUri != null) "Custom sound selected" else "Play a subtle chime when an ad is skipped",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Switch(
-                                checked = sponsorSkipSoundEnabled,
-                                onCheckedChange = { enabled ->
-                                    HushCastEngineBridge.sponsorSkipSoundEnabled = enabled
-                                    scope.launch { settingsRepository.hushCast.setSponsorSkipSoundEnabled(enabled) }
-                                }
-                            )
-                        }
-                        if (sponsorSkipSoundEnabled) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                androidx.compose.material3.TextButton(onClick = {
-                                    HushCastEngineBridge.playSponsorSkipIndicator(context, forceTest = true)
-                                }) {
-                                    Text("Test chime")
-                                }
-                                androidx.compose.material3.TextButton(onClick = { skipSoundPicker.launch(arrayOf("audio/*")) }) {
-                                    Text(if (sponsorSkipSoundUri != null) "Change sound" else "Custom sound")
-                                }
-                                if (sponsorSkipSoundUri != null) {
-                                    androidx.compose.material3.TextButton(onClick = {
-                                        HushCastEngineBridge.sponsorSkipSoundUri = null
-                                        scope.launch { settingsRepository.hushCast.setSponsorSkipSoundUri(null) }
-                                    }) {
-                                        Text("Reset to chime")
-                                    }
-                                }
                             }
                         }
                     }
@@ -1213,6 +1086,165 @@ fun SettingsHushCastPane(
                 }
             }
 
+            item {
+                Text(
+                    text = "AD & SECTION SKIPPING",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            // 3. Feature B: Sponsor / Ad Blocker Controls
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Shield, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Sponsor & Section Skipping", style = MaterialTheme.typography.titleMedium)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        val policies = listOf(
+                            AdPolicyMode.AUTO_SKIP to "Auto-Skip",
+                            AdPolicyMode.MARK_ONLY to "Mark Only",
+                            AdPolicyMode.OFF to "Off"
+                        )
+                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                            policies.forEachIndexed { idx, (policy, label) ->
+                                SegmentedButton(
+                                    selected = selectedAdPolicy == policy,
+                                    onClick = {
+                                        HushCastEngineBridge.defaultAdPolicy = policy
+                                        HushCastEngineBridge.adSkipObserver.policyMode = policy
+                                        scope.launch { settingsRepository.hushCast.setAdPolicyMode(policy) }
+                                    },
+                                    shape = SegmentedButtonDefaults.itemShape(idx, policies.size)
+                                ) {
+                                    Text(label)
+                                }
+                            }
+                        }
+                        if (selectedAdPolicy == AdPolicyMode.AUTO_SKIP) {
+                            Spacer(Modifier.height(12.dp))
+                            Text("Auto-Skip When", style = MaterialTheme.typography.labelMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = when (selectedAutoSkipScope) {
+                                    app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY ->
+                                        "Only skip high-confidence sponsor reads (80%+). Suggested ads show a Skip button."
+                                    app.hushcast.automute.dsp.AdAutoSkipScope.MODERATE_AND_HIGH ->
+                                        "Skip likely and high-confidence ads (65%+)."
+                                    app.hushcast.automute.dsp.AdAutoSkipScope.ALL_DETECTED ->
+                                        "Skip all detected ads, including suggested ads."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            val scopes = listOf(
+                                app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY to "High (80%+)",
+                                app.hushcast.automute.dsp.AdAutoSkipScope.MODERATE_AND_HIGH to "Balanced",
+                                app.hushcast.automute.dsp.AdAutoSkipScope.ALL_DETECTED to "All Ads"
+                            )
+                            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                scopes.forEachIndexed { idx, (scopeVal, label) ->
+                                    SegmentedButton(
+                                        selected = selectedAutoSkipScope == scopeVal,
+                                        onClick = {
+                                            HushCastEngineBridge.autoSkipScope = scopeVal
+                                            scope.launch { settingsRepository.hushCast.setAdAutoSkipScope(scopeVal) }
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(idx, scopes.size)
+                                    ) {
+                                        Text(label)
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            Text("Section types to auto-skip", style = MaterialTheme.typography.labelMedium)
+                            Spacer(Modifier.height(4.dp))
+                            val selectedClasses by settingsRepository.hushCast.adAutoSkipClasses.collectAsState(initial = HushCastEngineBridge.autoSkipClasses)
+                            val sectionTypes = listOf(
+                                "sponsor_ad" to "Sponsors / Ads",
+                                "house_promo" to "Show Promos",
+                                "membership_pitch" to "Membership Pitches",
+                                "boilerplate" to "Intros / Outros"
+                            )
+                            androidx.compose.foundation.layout.FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                sectionTypes.forEach { (cls, label) ->
+                                    val checked = cls in selectedClasses
+                                    androidx.compose.material3.FilterChip(
+                                        selected = checked,
+                                        onClick = {
+                                            val updated = if (checked) selectedClasses - cls else selectedClasses + cls
+                                            HushCastEngineBridge.autoSkipClasses = updated
+                                            scope.launch { settingsRepository.hushCast.setAdAutoSkipClasses(updated) }
+                                        },
+                                        label = { Text(label) }
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Sponsor skip indicator sound", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    text = if (sponsorSkipSoundUri != null) "Custom sound selected" else "Play a subtle chime when an ad is skipped",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = sponsorSkipSoundEnabled,
+                                onCheckedChange = { enabled ->
+                                    HushCastEngineBridge.sponsorSkipSoundEnabled = enabled
+                                    scope.launch { settingsRepository.hushCast.setSponsorSkipSoundEnabled(enabled) }
+                                }
+                            )
+                        }
+                        if (sponsorSkipSoundEnabled) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                androidx.compose.material3.TextButton(onClick = {
+                                    HushCastEngineBridge.playSponsorSkipIndicator(context, forceTest = true)
+                                }) {
+                                    Text("Test chime")
+                                }
+                                androidx.compose.material3.TextButton(onClick = { skipSoundPicker.launch(arrayOf("audio/*")) }) {
+                                    Text(if (sponsorSkipSoundUri != null) "Change sound" else "Custom sound")
+                                }
+                                if (sponsorSkipSoundUri != null) {
+                                    androidx.compose.material3.TextButton(onClick = {
+                                        HushCastEngineBridge.sponsorSkipSoundUri = null
+                                        scope.launch { settingsRepository.hushCast.setSponsorSkipSoundUri(null) }
+                                    }) {
+                                        Text("Reset to chime")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Text(
+                    text = "DIAGNOSTICS",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
             // 5. On-Device Diagnostics Card
             item {
                 var queueClearedMsg by remember { mutableStateOf<String?>(null) }
@@ -1224,7 +1256,7 @@ fun SettingsHushCastPane(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Rounded.Memory, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("On-Device Diagnostics", style = MaterialTheme.typography.titleMedium)
+                            Text("HushCast Diagnostics", style = MaterialTheme.typography.titleMedium)
                         }
                         Spacer(Modifier.height(4.dp))
                         Text(
