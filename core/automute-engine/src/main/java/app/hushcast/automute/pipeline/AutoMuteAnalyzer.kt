@@ -398,6 +398,7 @@ class AutoMuteAnalyzer(
         }
 
         setStage("Saving ad segments")
+        dao.deleteAdSegmentsByEpisode(episodeId)
         dao.replaceAdSegments(sha256, adEntities)
 
         val elapsed = System.currentTimeMillis() - startTime

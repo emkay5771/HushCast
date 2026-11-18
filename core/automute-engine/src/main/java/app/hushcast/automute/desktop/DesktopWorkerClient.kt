@@ -326,6 +326,7 @@ object DesktopWorkerClient {
             postPadMs = postPadMs,
             defaultActionMode = defaultActionMode
         )
+        dao.deleteMuteSegmentsByEpisode(episodeId)
         dao.replaceMuteSegments(
             sha,
             windows.map { w ->
@@ -342,6 +343,7 @@ object DesktopWorkerClient {
             }
         )
 
+        dao.deleteAdSegmentsByEpisode(episodeId)
         dao.replaceAdSegments(
             sha,
             bundle.adSegments.map { ad ->

@@ -1,3 +1,11 @@
+# HushCast v1.0.19-hushcast
+
+## What's New
+- **Fix Stale / Shifted Ad Segments on Dynamic-Ad Podcasts (DAI)**:
+  - `DesktopWorkerClient` and `AutoMuteAnalyzer` now clear previous `ad_segments` (and `mute_segments`) by `episodeId` before inserting newly analyzed segments, preventing old dynamic-ad timestamps from previous `sha256` downloads (e.g. Megaphone DAI) from stacking on top of the updated transcript and causing false "Sponsor" labels on normal content.
+
+---
+
 # HushCast v1.0.18-hushcast
 
 ## What's New
