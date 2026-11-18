@@ -1390,6 +1390,8 @@ private fun isWordInMuteWindows(
     sortedActiveMutes: List<MuteWindow>
 ): Boolean {
     if (sortedActiveMutes.isEmpty()) return false
+    val wordMidMs = (wordStartMs + wordEndMs) / 2L
+    val wordDurMs = (wordEndMs - wordStartMs).coerceAtLeast(1L)
     var lo = 0
     var hi = sortedActiveMutes.lastIndex
     while (lo <= hi) {
@@ -1398,7 +1400,11 @@ private fun isWordInMuteWindows(
         when {
             wordEndMs <= m.startMs -> hi = mid - 1
             wordStartMs >= m.endMs -> lo = mid + 1
-            else -> return true
+            else -> {
+                if (wordMidMs in m.startMs..m.endMs) return true
+                val overlapMs = (minOf(wordEndMs, m.endMs) - maxOf(wordStartMs, m.startMs)).coerceAtLeast(0L)
+                return overlapMs * 2L >= wordDurMs
+            }
         }
     }
     return false

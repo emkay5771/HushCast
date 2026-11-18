@@ -153,6 +153,49 @@ object WordMatcher {
         val normalizedWords = words.map { normalizeToken(it.text) }
         val rawWindows = ArrayList<MuteWindow>()
 
+        fun neighborBoundedWindow(
+            firstIdx: Int,
+            lastIdx: Int,
+            wordText: String,
+            ruleId: Long,
+            mode: MuteActionMode
+        ): MuteWindow {
+            val first = words[firstIdx]
+            val last = words[lastIdx]
+            val rawStartMs = (first.start * 1000.0).toLong()
+            val rawEndMs = (last.end * 1000.0).toLong()
+
+            val effectivePre = if (firstIdx > 0) {
+                val prev = words[firstIdx - 1]
+                val prevEndMs = (prev.end * 1000.0).toLong()
+                val prevDurMs = ((prev.end - prev.start) * 1000.0).toLong().coerceAtLeast(0L)
+                val gapMs = (rawStartMs - prevEndMs).coerceAtLeast(0L)
+                val maxOverlap = maxOf(15L, prevDurMs / 4L)
+                minOf(prePadMs, gapMs + maxOverlap)
+            } else {
+                prePadMs
+            }
+
+            val effectivePost = if (lastIdx + 1 < words.size) {
+                val next = words[lastIdx + 1]
+                val nextStartMs = (next.start * 1000.0).toLong()
+                val nextDurMs = ((next.end - next.start) * 1000.0).toLong().coerceAtLeast(0L)
+                val gapMs = (nextStartMs - rawEndMs).coerceAtLeast(0L)
+                val maxOverlap = maxOf(15L, nextDurMs / 4L)
+                minOf(postPadMs, gapMs + maxOverlap)
+            } else {
+                postPadMs
+            }
+
+            return MuteWindow(
+                startMs = (rawStartMs - effectivePre).coerceAtLeast(0L),
+                endMs = (rawEndMs + effectivePost).coerceAtLeast(rawStartMs + 1L),
+                word = wordText,
+                ruleId = ruleId,
+                actionMode = mode
+            )
+        }
+
         for (i in words.indices) {
             val w = words[i]
             val norm = normalizedWords[i]
@@ -161,12 +204,12 @@ object WordMatcher {
             val exactRule = exactSet[norm]
             if (exactRule != null) {
                 rawWindows.add(
-                    MuteWindow(
-                        startMs = ((w.start * 1000.0).toLong() - prePadMs).coerceAtLeast(0L),
-                        endMs = (w.end * 1000.0).toLong() + postPadMs,
-                        word = w.text.trim(),
+                    neighborBoundedWindow(
+                        firstIdx = i,
+                        lastIdx = i,
+                        wordText = w.text.trim(),
                         ruleId = exactRule.id,
-                        actionMode = effectiveMode(exactRule, defaultActionMode)
+                        mode = effectiveMode(exactRule, defaultActionMode)
                     )
                 )
                 continue
@@ -178,12 +221,12 @@ object WordMatcher {
             }
             if (matchedRegex != null) {
                 rawWindows.add(
-                    MuteWindow(
-                        startMs = ((w.start * 1000.0).toLong() - prePadMs).coerceAtLeast(0L),
-                        endMs = (w.end * 1000.0).toLong() + postPadMs,
-                        word = trimmedRaw,
+                    neighborBoundedWindow(
+                        firstIdx = i,
+                        lastIdx = i,
+                        wordText = trimmedRaw,
                         ruleId = matchedRegex.second.id,
-                        actionMode = effectiveMode(matchedRegex.second, defaultActionMode)
+                        mode = effectiveMode(matchedRegex.second, defaultActionMode)
                     )
                 )
             }
@@ -201,16 +244,14 @@ object WordMatcher {
                     }
                 }
                 if (allMatch) {
-                    val first = words[i]
-                    val last = words[i + len - 1]
                     val phraseText = words.subList(i, i + len).joinToString(" ") { it.text.trim() }
                     rawWindows.add(
-                        MuteWindow(
-                            startMs = ((first.start * 1000.0).toLong() - prePadMs).coerceAtLeast(0L),
-                            endMs = (last.end * 1000.0).toLong() + postPadMs,
-                            word = phraseText,
+                        neighborBoundedWindow(
+                            firstIdx = i,
+                            lastIdx = i + len - 1,
+                            wordText = phraseText,
                             ruleId = rule.id,
-                            actionMode = effectiveMode(rule, defaultActionMode)
+                            mode = effectiveMode(rule, defaultActionMode)
                         )
                     )
                 }

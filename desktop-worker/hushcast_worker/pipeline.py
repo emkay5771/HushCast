@@ -16,6 +16,7 @@ from .audio import (
     download_audio_streaming_sha256,
 )
 from .chapters import generate_chapters_and_summary
+from .forced_align import ForcedAligner
 from .models import (
     AdSegmentDto,
     DesktopAnalysisBundle,
@@ -204,6 +205,7 @@ class LocalMlBackend:
         self._embedding_llm = None
         self._whisper_instance = None
         self._ort_session = None
+        self._forced_aligner = ForcedAligner(models_dir=str(models_dir / "torch"))
 
     def _resolve_whisper_model(self) -> Path:
         env_model = os.environ.get("HUSHCAST_WHISPER_MODEL", "").strip()
@@ -450,6 +452,17 @@ class LocalMlBackend:
                 f"Transcribed {len(segments)} segments / {len(words)} words in {tr_sec:.1f}s ({rt_speed:.1f}x realtime)",
             )
 
+        if words and segments and len(pcm_16k) > 0 and self._forced_aligner.is_available():
+            on_progress(JobState.TRANSCRIBING, 61, f"Refining word timing ({len(words)} words)")
+            t_fa = time.monotonic()
+            n_aligned = self._forced_aligner.align_words(pcm_16k, segments, words)
+            if n_aligned > 0:
+                on_progress(
+                    JobState.TRANSCRIBING,
+                    62,
+                    f"Aligned {n_aligned}/{len(words)} words in {time.monotonic() - t_fa:.1f}s",
+                )
+
         if segments and len(pcm_16k) > 0:
             on_progress(JobState.TRANSCRIBING, 63, f"Identifying speakers across {len(segments)} segments")
             assign_speakers(pcm_16k, segments)
@@ -649,7 +662,8 @@ def _extract_whisper_words_and_segments(
                     if cur_t0 is None:
                         cur_t0 = t0
                     cur_text += tok_text
-                    if has_dtw or cur_t1 is None or (t1 - cur_t0) <= 1.2:
+                    has_alnum = any(ch.isalnum() for ch in tok_text)
+                    if cur_t1 is None or (has_alnum and (has_dtw or (t1 - cur_t0) <= 1.2)):
                         cur_t1 = max(cur_t1 or t1, t1)
             if cur_text.strip():
                 words.append(
@@ -660,6 +674,9 @@ def _extract_whisper_words_and_segments(
                     )
                 )
         if segments:
+            for i in range(len(words) - 1):
+                if words[i + 1].start > words[i].start and words[i].end > words[i + 1].start:
+                    words[i].end = words[i + 1].start
             return words, segments
 
     for seg in raw_segments:

@@ -61,6 +61,7 @@ _base_image = (
         "GGML_CUDA": "1",
         "CMAKE_ARGS": "-DGGML_CUDA=1 -DCMAKE_CUDA_ARCHITECTURES=75 -DCMAKE_POLICY_VERSION_MINIMUM=3.5",
         "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+        "TORCH_HOME": "/data/models/torch",
     })
     .pip_install(
         "fastapi==0.115.12",
@@ -73,6 +74,11 @@ _base_image = (
         "av==14.2.0",
     )
     .pip_install(
+        "torch==2.5.1",
+        "torchaudio==2.5.1",
+        extra_options="--index-url https://download.pytorch.org/whl/cu124",
+    )
+    .pip_install(
         "pywhispercpp==1.5.1",
         extra_options="--no-binary pywhispercpp",
     )
@@ -83,7 +89,7 @@ _base_image = (
     .run_commands(
         "find /usr/local/lib/python3.11/site-packages -name 'libwhisper*.so*' -o -name 'libggml*.so*' | xargs -r -n1 dirname | sort -u > /etc/ld.so.conf.d/hushcast-cuda.conf",
         "ldconfig",
-        "mkdir -p /tmp/cuda-stubs && ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /tmp/cuda-stubs/libcuda.so.1 && LD_LIBRARY_PATH=/tmp/cuda-stubs:${LD_LIBRARY_PATH:-} python3 -c 'import av, numpy, onnxruntime, llama_cpp; from pywhispercpp.model import Model; print(\"ML imports OK\")' && rm -rf /tmp/cuda-stubs",
+        "mkdir -p /tmp/cuda-stubs && ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /tmp/cuda-stubs/libcuda.so.1 && LD_LIBRARY_PATH=/tmp/cuda-stubs:${LD_LIBRARY_PATH:-} python3 -c 'import av, numpy, onnxruntime, llama_cpp, torch, torchaudio; from pywhispercpp.model import Model; print(\"ML imports OK\")' && rm -rf /tmp/cuda-stubs",
     )
 )
 if _LOCAL_AD_TAGGER is not None:

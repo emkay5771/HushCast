@@ -47,3 +47,38 @@ def test_extract_whisper_words_prefers_t_dtw(monkeypatch) -> None:
     fucking = words[2]
     assert fucking.start == 305.8
     assert fucking.end == 306.17
+
+
+def test_extract_whisper_words_clamps_overlap_and_skips_punctuation(monkeypatch) -> None:
+    tokens = [
+        (" asshole", SimpleNamespace(t0=703000, t1=703100, t_dtw=703060)),
+        (".", SimpleNamespace(t0=703100, t1=703800, t_dtw=703750)),
+        (" next", SimpleNamespace(t0=703100, t1=703200, t_dtw=703150)),
+    ]
+
+    fake_pw = SimpleNamespace(
+        whisper_full_n_segments=lambda ctx: 1,
+        whisper_full_get_segment_text=lambda ctx, s: "asshole. next",
+        whisper_full_get_segment_t0=lambda ctx, s: 703000,
+        whisper_full_get_segment_t1=lambda ctx, s: 703500,
+        whisper_full_n_tokens=lambda ctx, s: len(tokens),
+        whisper_full_get_token_text=lambda ctx, s, t: tokens[t][0],
+        whisper_full_get_token_data=lambda ctx, s, t: tokens[t][1],
+    )
+    monkeypatch.setitem(sys.modules, "_pywhispercpp", fake_pw)
+
+    words, _ = _extract_whisper_words_and_segments(SimpleNamespace(_ctx=object()), [])
+    assert [w.text for w in words] == ["asshole.", "next"]
+    assert words[0].end <= words[1].start
+    assert words[0].end == 7031.0
+
+
+def test_normalize_align_word_and_graceful_aligner() -> None:
+    from hushcast_worker.forced_align import ForcedAligner, normalize_align_word
+
+    assert normalize_align_word("fucking?") == "fucking"
+    assert normalize_align_word("don't") == "dont"
+    assert normalize_align_word("2026!") == ""
+    aligner = ForcedAligner()
+    assert aligner.align_words([], [], []) == 0
+
