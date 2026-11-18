@@ -310,7 +310,7 @@ fun PodcastEpisodeDetailView(
                             onDismissRequest = { showMoreMenu = false }
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Play Next") },
+                                text = { Text("Play next") },
                                 onClick = {
                                     showMoreMenu = false
                                     detailMediaVm.playNext(downloadContext, bundle)

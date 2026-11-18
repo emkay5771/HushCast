@@ -740,7 +740,7 @@ private fun swipeActionIcon(
 private fun swipeActionShortLabel(
     action: app.podiumpodcasts.podium.EpisodeSwipeAction
 ): String = when (action) {
-    app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT -> "Play Next"
+    app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT -> "Play next"
     app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST -> "Play Last"
     app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD -> "Download"
     app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED -> "Played"
