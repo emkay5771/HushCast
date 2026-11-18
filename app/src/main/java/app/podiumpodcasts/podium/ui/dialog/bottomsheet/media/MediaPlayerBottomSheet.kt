@@ -2418,7 +2418,7 @@ private fun ActivePlaybackContextBar(
                         modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.Close,
+                            imageVector = androidx.compose.material.icons.Icons.Rounded.Close,
                             contentDescription = "Dismiss",
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.size(16.dp)
@@ -2464,7 +2464,7 @@ private fun ActivePlaybackContextBar(
                         modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.Close,
+                            imageVector = androidx.compose.material.icons.Icons.Rounded.Close,
                             contentDescription = "Dismiss",
                             tint = MaterialTheme.colorScheme.onTertiaryContainer,
                             modifier = Modifier.size(16.dp)

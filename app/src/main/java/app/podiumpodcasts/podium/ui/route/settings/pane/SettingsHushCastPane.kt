@@ -921,7 +921,7 @@ fun SettingsHushCastPane(
                             ) {
                                 sectionTypes.forEach { (cls, label) ->
                                     val checked = cls in selectedClasses
-                                    FilterChip(
+                                    androidx.compose.material3.FilterChip(
                                         selected = checked,
                                         onClick = {
                                             val updated = if (checked) selectedClasses - cls else selectedClasses + cls
