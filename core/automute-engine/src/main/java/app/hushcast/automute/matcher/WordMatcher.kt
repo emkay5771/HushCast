@@ -3,6 +3,7 @@ package app.hushcast.automute.matcher
 import app.hushcast.automute.dsp.MuteActionMode
 import app.hushcast.automute.dsp.MuteWindow
 import app.hushcast.automute.engine.Word
+import kotlin.math.roundToLong
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -162,13 +163,13 @@ object WordMatcher {
         ): MuteWindow {
             val first = words[firstIdx]
             val last = words[lastIdx]
-            val rawStartMs = (first.start * 1000.0).toLong()
-            val rawEndMs = (last.end * 1000.0).toLong()
+            val rawStartMs = (first.start * 1000.0).roundToLong()
+            val rawEndMs = (last.end * 1000.0).roundToLong()
 
             val effectivePre = if (firstIdx > 0) {
                 val prev = words[firstIdx - 1]
-                val prevEndMs = (prev.end * 1000.0).toLong()
-                val prevDurMs = ((prev.end - prev.start) * 1000.0).toLong().coerceAtLeast(0L)
+                val prevEndMs = (prev.end * 1000.0).roundToLong()
+                val prevDurMs = ((prev.end - prev.start) * 1000.0).roundToLong().coerceAtLeast(0L)
                 val gapMs = (rawStartMs - prevEndMs).coerceAtLeast(0L)
                 val maxOverlap = maxOf(15L, prevDurMs / 4L)
                 minOf(prePadMs, gapMs + maxOverlap)
@@ -178,8 +179,8 @@ object WordMatcher {
 
             val effectivePost = if (lastIdx + 1 < words.size) {
                 val next = words[lastIdx + 1]
-                val nextStartMs = (next.start * 1000.0).toLong()
-                val nextDurMs = ((next.end - next.start) * 1000.0).toLong().coerceAtLeast(0L)
+                val nextStartMs = (next.start * 1000.0).roundToLong()
+                val nextDurMs = ((next.end - next.start) * 1000.0).roundToLong().coerceAtLeast(0L)
                 val gapMs = (nextStartMs - rawEndMs).coerceAtLeast(0L)
                 val maxOverlap = maxOf(15L, nextDurMs / 4L)
                 minOf(postPadMs, gapMs + maxOverlap)
