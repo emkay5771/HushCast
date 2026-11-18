@@ -1780,7 +1780,7 @@ fun MediaPlayerBottomSheet(
                                                     val root = org.json.JSONObject().apply {
                                                         put("episodeId", episodeId)
                                                         put("episodeTitle", currentEpisodeBundle?.episode?.title ?: "")
-                                                        put("podcastTitle", currentEpisodeBundle?.podcast?.title ?: "")
+                                                        put("podcastTitle", currentEpisodeBundle?.episode?.podcastTitle ?: "")
                                                         put("stageLabel", analysisStatus?.stageLabel ?: "")
                                                         put("summary", episodeSummary ?: "")
                                                         put(
