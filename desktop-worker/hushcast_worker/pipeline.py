@@ -9,7 +9,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional, Protocol
 
-from .ad_tagger import compute_segment_features, decode_ad_segments
+from .ad_tagger import compute_segment_features, decode_ad_segments, extract_audio_frames
 from .audio import (
     assign_speakers,
     decode_audio_16k_mono,
@@ -275,6 +275,7 @@ class LocalMlBackend:
                 model_path=str(self.qwen_model),
                 embedding=True,
                 pooling_type=3,  # LLAMA_POOLING_TYPE_LAST
+                n_ctx=2048,
                 n_gpu_layers=-1,
                 verbose=False,
             )
@@ -282,6 +283,7 @@ class LocalMlBackend:
             llm = Llama(
                 model_path=str(self.qwen_model),
                 embedding=True,
+                n_ctx=2048,
                 n_gpu_layers=-1,
                 verbose=False,
             )
