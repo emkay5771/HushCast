@@ -367,7 +367,7 @@ def create_app(
                         fileSha256=sha256,
                     )
                     if on_state_change:
-                        on_state_change()
+                        await asyncio.to_thread(on_state_change)
                     return
 
                 def on_ml_progress(state: JobState, pct: int, stage: str) -> None:
@@ -424,7 +424,7 @@ def create_app(
                     fileSha256=sha256,
                 )
                 if on_state_change:
-                    on_state_change()
+                    await asyncio.to_thread(on_state_change)
         except _JobCancelledError:
             tmp_audio.unlink(missing_ok=True)
             _update_job(job_id, state=JobState.CANCELLED, stageLabel="Cancelled")
@@ -543,7 +543,7 @@ def create_app(
         }
         res = cache.clear(audio_only=audio_only, active_job_ids=active_ids)
         if on_state_change:
-            on_state_change()
+            await asyncio.to_thread(on_state_change)
         return res
 
     return app
