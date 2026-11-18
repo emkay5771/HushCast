@@ -403,12 +403,22 @@ class LocalMlBackend:
 
             hb = threading.Thread(target=_whisper_heartbeat, daemon=True)
             hb.start()
+            def _load_whisper() -> WhisperModel:
+                try:
+                    return WhisperModel(
+                        str(self.whisper_model),
+                        print_progress=False,
+                        context_params={"dtw_token_timestamps": True},
+                    )
+                except TypeError:
+                    return WhisperModel(str(self.whisper_model), print_progress=False)
+
             try:
                 if self._low_mem:
-                    whisper = WhisperModel(str(self.whisper_model), print_progress=False)
+                    whisper = _load_whisper()
                 else:
                     if self._whisper_instance is None:
-                        self._whisper_instance = WhisperModel(str(self.whisper_model), print_progress=False)
+                        self._whisper_instance = _load_whisper()
                     whisper = self._whisper_instance
                 raw_segments = whisper.transcribe(pcm_16k, token_timestamps=True)
                 words, segments = _extract_whisper_words_and_segments(whisper, raw_segments)

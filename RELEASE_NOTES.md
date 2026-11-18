@@ -1,3 +1,14 @@
+# HushCast v1.0.20-hushcast
+
+## What's New
+- **Higher-Accuracy Word Bleeping (DTW Alignment + Timing Precision)**:
+  - Enabled DTW token timestamps (`dtw_token_timestamps=True`) on the Cloud / Desktop Whisper worker (`pipeline.py`) to eliminate 300–500 ms early word-boundary drift after silences.
+  - Added **Bleep / Mute Timing Precision** (`Tight (40/60 ms)`, `Balanced (80/100 ms)`, `Wide (150/180 ms)`) under **Word Auto-Muting** in HushCast Settings (`SettingsHushCastPane`), wired into both Cloud and On-Device matching and automatic rule re-evaluation.
+- **Clearer Settings Grouping**:
+  - Clarified **On-Device Performance & Battery** (`tiny.en`, `Flash Attention`, `Analyze only while charging`) as **On-device only (ignored by Cloud / Desktop Worker)**.
+
+---
+
 # HushCast v1.0.19-hushcast
 
 ## What's New

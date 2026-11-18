@@ -21,8 +21,9 @@ class RuleReevaluationWorker(
 ) : CoroutineWorker(appContext, params) {
 
     override suspend fun doWork(): Result {
-        val prePadMs = inputData.getLong(KEY_PRE_PAD_MS, 80L)
-        val postPadMs = inputData.getLong(KEY_POST_PAD_MS, 100L)
+        val precision = app.hushcast.automute.engine.HushCastPrefs.getMuteTimingPrecision(applicationContext)
+        val prePadMs = inputData.getLong(KEY_PRE_PAD_MS, precision.prePadMs)
+        val postPadMs = inputData.getLong(KEY_POST_PAD_MS, precision.postPadMs)
         val defaultActionMode = runCatching {
             MuteActionMode.valueOf(inputData.getString(KEY_ACTION_MODE) ?: MuteActionMode.HARD_SILENCE.name)
         }.getOrDefault(MuteActionMode.HARD_SILENCE)
@@ -50,15 +51,16 @@ class RuleReevaluationWorker(
 
         fun enqueue(
             context: Context,
-            prePadMs: Long = 80L,
-            postPadMs: Long = 100L,
+            prePadMs: Long? = null,
+            postPadMs: Long? = null,
             defaultActionMode: MuteActionMode = MuteActionMode.HARD_SILENCE
         ) {
+            val precision = app.hushcast.automute.engine.HushCastPrefs.getMuteTimingPrecision(context)
             val request = OneTimeWorkRequestBuilder<RuleReevaluationWorker>()
                 .setInputData(
                     workDataOf(
-                        KEY_PRE_PAD_MS to prePadMs,
-                        KEY_POST_PAD_MS to postPadMs,
+                        KEY_PRE_PAD_MS to (prePadMs ?: precision.prePadMs),
+                        KEY_POST_PAD_MS to (postPadMs ?: precision.postPadMs),
                         KEY_ACTION_MODE to defaultActionMode.name
                     )
                 )

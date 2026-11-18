@@ -407,10 +407,13 @@ class PodcastEpisodeDownloadWork(
                     sha256 = sha256
                 )
                 app.hushcast.automute.worker.EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
+                val mutePrecision = app.hushcast.automute.engine.HushCastPrefs.getMuteTimingPrecision(context)
                 app.hushcast.automute.desktop.DesktopWorkerClient.ingestBundleIntoDb(
                     db = autoMuteDb,
                     episodeId = episodeId,
                     bundle = bundle,
+                    prePadMs = mutePrecision.prePadMs,
+                    postPadMs = mutePrecision.postPadMs,
                     defaultActionMode = app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode
                 )
                 app.hushcast.automute.worker.EpisodeAnalysisWorker.analysisCompletedEvents.tryEmit(episodeId)

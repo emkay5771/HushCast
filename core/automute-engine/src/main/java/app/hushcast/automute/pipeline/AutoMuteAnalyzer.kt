@@ -76,16 +76,19 @@ class AutoMuteAnalyzer(
         quickWordMuteOnly: Boolean = false,
         feedTranscriptRaw: String? = null,
         feedTranscriptMime: String = "",
-        prePadMs: Long = 80L,
-        postPadMs: Long = 100L,
+        prePadMs: Long? = null,
+        postPadMs: Long? = null,
         defaultActionMode: MuteActionMode = MuteActionMode.HARD_SILENCE,
         onProgress: (AnalysisProgress) -> Unit = {}
     ): AnalysisResult {
         var stage = "Starting"
+        val precision = HushCastPrefs.getMuteTimingPrecision(context)
+        val resolvedPrePad = prePadMs ?: precision.prePadMs
+        val resolvedPostPad = postPadMs ?: precision.postPadMs
         try {
             return runPipeline(
                 episodeId, audioFile, knownSha256, quickWordMuteOnly, feedTranscriptRaw,
-                feedTranscriptMime, prePadMs, postPadMs, defaultActionMode, onProgress
+                feedTranscriptMime, resolvedPrePad, resolvedPostPad, defaultActionMode, onProgress
             ) { stage = it }
         } catch (c: CancellationException) {
             android.util.Log.w("HushCastPerf", "Analysis cancelled during [$stage]")

@@ -116,6 +116,15 @@ object HushCastPrefs {
         prefs(context).edit().putString(KEY_AUTO_DOWNLOAD_METHOD, method.name).apply()
     }
 
+    fun getMuteTimingPrecision(context: Context): MuteTimingPrecision {
+        val raw = prefs(context).getString(KEY_MUTE_TIMING_PRECISION, null)
+        return MuteTimingPrecision.entries.firstOrNull { it.name == raw } ?: MuteTimingPrecision.BALANCED
+    }
+
+    fun setMuteTimingPrecision(context: Context, precision: MuteTimingPrecision) {
+        prefs(context).edit().putString(KEY_MUTE_TIMING_PRECISION, precision.name).apply()
+    }
+
     private fun getOrCreateKey(): SecretKey {
         val ks = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         (ks.getKey(KEYSTORE_ALIAS, null) as? SecretKey)?.let { return it }
@@ -159,4 +168,14 @@ enum class DownloadAnalysisMethod {
     DESKTOP,
     ON_DEVICE,
     SKIP_ANALYSIS
+}
+
+enum class MuteTimingPrecision(
+    val prePadMs: Long,
+    val postPadMs: Long,
+    val label: String
+) {
+    TIGHT(40L, 60L, "Tight (40/60 ms)"),
+    BALANCED(80L, 100L, "Balanced (80/100 ms)"),
+    WIDE(150L, 180L, "Wide (150/180 ms)")
 }

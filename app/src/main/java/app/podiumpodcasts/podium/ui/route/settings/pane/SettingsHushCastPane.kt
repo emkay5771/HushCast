@@ -835,6 +835,40 @@ fun SettingsHushCastPane(
                                 }
                             }
                         }
+
+                        Spacer(Modifier.height(10.dp))
+                        var selectedPrecision by remember {
+                            mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.getMuteTimingPrecision(context))
+                        }
+                        Text("Bleep / Mute Timing Precision", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            "Controls pre/post padding around each matched word (applies to both Cloud and On-Device).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                        androidx.compose.foundation.layout.FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            app.hushcast.automute.engine.MuteTimingPrecision.entries.forEach { precision ->
+                                androidx.compose.material3.FilterChip(
+                                    selected = selectedPrecision == precision,
+                                    onClick = {
+                                        selectedPrecision = precision
+                                        app.hushcast.automute.engine.HushCastPrefs.setMuteTimingPrecision(context, precision)
+                                        app.hushcast.automute.worker.RuleReevaluationWorker.enqueue(
+                                            context = context,
+                                            prePadMs = precision.prePadMs,
+                                            postPadMs = precision.postPadMs,
+                                            defaultActionMode = selectedActionMode
+                                        )
+                                    },
+                                    label = { Text(precision.label) }
+                                )
+                            }
+                        }
                     }
                 }
             }
