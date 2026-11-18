@@ -199,6 +199,7 @@ class PodcastUpdateWork(
         val loader = SingletonImageLoader.get(context)
         val request = ImageRequest.Builder(context)
             .data(url)
+            .size(256)
             .allowHardware(false)
             .build()
 

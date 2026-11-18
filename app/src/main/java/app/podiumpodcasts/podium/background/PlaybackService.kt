@@ -172,7 +172,7 @@ class PlaybackService : MediaLibraryService() {
             .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)
 
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
-            .setBufferDurationsMs(15_000, 60_000, 1_500, 3_000)
+            .setBufferDurationsMs(60_000, 300_000, 1_500, 3_000)
             .build()
 
         exoPlayer = ExoPlayer.Builder(this, renderersFactory)

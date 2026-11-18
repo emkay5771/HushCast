@@ -57,6 +57,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -443,29 +444,27 @@ fun HomeRoute(
                 )
             } else if (allSubscriptions.isNotEmpty()) {
                 val pullState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+                val refreshWorkInfos by androidx.work.WorkManager.getInstance(context)
+                    .getWorkInfosForUniqueWorkFlow(
+                        app.podiumpodcasts.podium.background.worker.PeriodicPodcastUpdateWorker.INSTANT_UNIQUE_NAME
+                    )
+                    .collectAsState(initial = emptyList())
+                val isWorkRefreshing = refreshWorkInfos.any {
+                    it.state == androidx.work.WorkInfo.State.ENQUEUED ||
+                        it.state == androidx.work.WorkInfo.State.RUNNING
+                }
                 androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-                    isRefreshing = isRefreshing,
+                    isRefreshing = isWorkRefreshing || isRefreshing,
                     state = pullState,
                     onRefresh = {
-                        if (!isRefreshing) {
-                            scope.launch {
-                                isRefreshing = true
-                                try {
-                                    app.podiumpodcasts.podium.background.work.PodcastUpdateWork(context, db).doWork()
-                                } catch (e: kotlinx.coroutines.CancellationException) {
-                                    throw e
-                                } catch (e: Exception) {
-                                    snackbarHostState.showSnackbar(e.message ?: "Refresh failed")
-                                } finally {
-                                    isRefreshing = false
-                                }
-                            }
+                        if (!isWorkRefreshing && !isRefreshing) {
+                            app.podiumpodcasts.podium.background.worker.PeriodicPodcastUpdateWorker.enqueueNow(context)
                         }
                     },
                     indicator = {
                         androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.LoadingIndicator(
                             state = pullState,
-                            isRefreshing = isRefreshing,
+                            isRefreshing = isWorkRefreshing || isRefreshing,
                             modifier = Modifier.align(Alignment.TopCenter)
                         )
                     },

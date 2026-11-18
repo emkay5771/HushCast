@@ -37,6 +37,20 @@ class PeriodicPodcastUpdateWorker(
     }
 
     companion object {
+        const val INSTANT_UNIQUE_NAME = "PeriodicPodcastUpdateWorkerInstant"
+
+        fun enqueueNow(context: Context) {
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                INSTANT_UNIQUE_NAME,
+                androidx.work.ExistingWorkPolicy.KEEP,
+                androidx.work.OneTimeWorkRequestBuilder<PeriodicPodcastUpdateWorker>()
+                    .setConstraints(
+                        Constraints(requiredNetworkType = NetworkType.CONNECTED)
+                    )
+                    .build()
+            )
+        }
+
         suspend fun enqueueWorker(
             context: Context,
             settingsRepository: SettingsRepository,

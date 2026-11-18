@@ -41,12 +41,6 @@ class SubscriptionsViewModel(
                 initialValue = emptyMap()
             )
 
-    init {
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching { db.podcastSubscriptions().recalculateAllNewEpisodesCounts() }
-        }
-    }
-
     val subscriptions = Pager(
         PagingConfig(
             pageSize = 200,
