@@ -1,3 +1,14 @@
+# HushCast v1.0.14-hushcast
+
+## What's New
+- **Reliable Monotonic Processing & Retry Recovery**:
+  - Fixed desktop/cloud offload retries (`PodcastEpisodeDownloadWork` / `PodcastEpisodeDownloadWorker`) so retries pass `force = false` and re-attach to the already in-flight or cached job instead of restarting transcription from 0%.
+  - Serialized desktop status writes and clamped notification progress monotonically (`EpisodeAnalysisWorker`, `PodcastEpisodeDownloadWorker`, and `AutoMuteAnalyzer` chunked transcription) so progress never jumps backwards.
+  - Added proper `CancellationException` / `stopReason` handling in `PodcastEpisodeDownloadWorker` and used `FOREGROUND_SERVICE_TYPE_MEDIA_PROCESSING` on Android 15+ for AI analysis downloads.
+  - Increased `DesktopWorkerClient` queued-job wait timeout to 25 minutes and `fetchBundle` timeout to 30s, and skipped redundant HTTP re-downloads when analyzing an already-downloaded episode on-device.
+
+---
+
 # HushCast v1.0.13-hushcast
 
 ## What's New
