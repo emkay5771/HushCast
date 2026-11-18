@@ -12,6 +12,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Colorize
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -439,7 +441,10 @@ fun SettingsAppearancePane(
                                             }
                                         }
                                     ) {
-                                        Text("▲")
+                                        Icon(
+                                            androidx.compose.material.icons.Icons.Rounded.KeyboardArrowUp,
+                                            contentDescription = "Move up"
+                                        )
                                     }
                                     androidx.compose.material3.IconButton(
                                         enabled = enabledIdx < enabledItems.lastIndex,
@@ -454,7 +459,10 @@ fun SettingsAppearancePane(
                                             }
                                         }
                                     ) {
-                                        Text("▼")
+                                        Icon(
+                                            androidx.compose.material.icons.Icons.Rounded.KeyboardArrowDown,
+                                            contentDescription = "Move down"
+                                        )
                                     }
                                 }
                             }

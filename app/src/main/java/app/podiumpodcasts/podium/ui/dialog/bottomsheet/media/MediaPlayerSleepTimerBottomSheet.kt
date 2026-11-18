@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -189,23 +190,44 @@ fun MediaPlayerSleepTimerBottomSheet(
                 30 to "30 minutes",
                 60 to "1 hour"
             ).forEach { (mins, label) ->
+                val key = "${mins}m"
+                val isSelected = isSleepTimerEnabled && vm.sleepTimerPresetKey == key
                 ListItem(
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     headlineContent = { Text(label) },
+                    trailingContent = if (isSelected) {
+                        {
+                            Icon(
+                                androidx.compose.material.icons.Icons.Rounded.Check,
+                                contentDescription = "Active",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    } else null,
                     modifier = Modifier.clickable {
                         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        vm.setSleepTimer(System.currentTimeMillis() + mins * 60_000L)
+                        vm.setSleepTimer(System.currentTimeMillis() + mins * 60_000L, presetKey = key)
                         onDismiss()
                     }
                 )
             }
 
             if (currentOrNextChapterEndMs != null && endOfChapterWallMs != null) {
+                val isSelected = isSleepTimerEnabled && vm.sleepTimerPresetKey == "END_OF_CHAPTER"
                 ListItem(
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     headlineContent = {
                         Text("End of chapter · ${formatTimerDuration(endOfChapterWallMs)}")
                     },
+                    trailingContent = if (isSelected) {
+                        {
+                            Icon(
+                                androidx.compose.material.icons.Icons.Rounded.Check,
+                                contentDescription = "Active",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    } else null,
                     modifier = Modifier.clickable {
                         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                         vm.setSleepTimerEndOfChapter(currentOrNextChapterEndMs, endOfChapterWallMs)
@@ -215,11 +237,21 @@ fun MediaPlayerSleepTimerBottomSheet(
             }
 
             if (endOfEpisodeWallMs != null) {
+                val isSelected = isSleepTimerEnabled && vm.sleepTimerPresetKey == "END_OF_EPISODE"
                 ListItem(
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     headlineContent = {
                         Text("End of episode · ${formatTimerDuration(endOfEpisodeWallMs)}")
                     },
+                    trailingContent = if (isSelected) {
+                        {
+                            Icon(
+                                androidx.compose.material.icons.Icons.Rounded.Check,
+                                contentDescription = "Active",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    } else null,
                     modifier = Modifier.clickable {
                         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                         vm.setSleepTimerEndOfEpisode(endOfEpisodeWallMs)

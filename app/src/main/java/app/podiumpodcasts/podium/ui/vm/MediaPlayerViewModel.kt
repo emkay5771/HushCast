@@ -81,6 +81,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     // unix millis when sleep timer should trigger
     var sleepTimerTrigger by mutableStateOf<Long?>(null)
+    var sleepTimerPresetKey by mutableStateOf<String?>(null)
 
     var metadataOrigin by mutableStateOf<String?>(null)
     var metadataEpisodeId by mutableStateOf<String?>(null)
@@ -494,8 +495,10 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         )
     }
 
-    fun setSleepTimer(sleepTimer: Long?) {
-        sleepTimerTrigger = sleepTimer?.takeIf { it != 0L }
+    fun setSleepTimer(sleepTimer: Long?, presetKey: String? = null) {
+        val next = sleepTimer?.takeIf { it != 0L }
+        sleepTimerTrigger = next
+        sleepTimerPresetKey = if (next == null) null else presetKey
         mediaController?.sendCustomCommand(
             SessionCommand(COMMAND_SLEEP_TIMER_SET, Bundle().apply {
                 putLong("trigger", sleepTimer ?: 0L)
@@ -507,6 +510,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun setSleepTimerEndOfEpisode(approxWallMs: Long) {
         val approxTrigger = System.currentTimeMillis() + approxWallMs
         sleepTimerTrigger = approxTrigger
+        sleepTimerPresetKey = "END_OF_EPISODE"
         mediaController?.sendCustomCommand(
             SessionCommand(COMMAND_SLEEP_TIMER_SET, Bundle().apply {
                 putString("mode", "END_OF_EPISODE")
@@ -519,6 +523,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun setSleepTimerEndOfChapter(chapterEndMs: Long, approxWallMs: Long) {
         val approxTrigger = System.currentTimeMillis() + approxWallMs
         sleepTimerTrigger = approxTrigger
+        sleepTimerPresetKey = "END_OF_CHAPTER"
         mediaController?.sendCustomCommand(
             SessionCommand(COMMAND_SLEEP_TIMER_SET, Bundle().apply {
                 putString("mode", "END_OF_CHAPTER")

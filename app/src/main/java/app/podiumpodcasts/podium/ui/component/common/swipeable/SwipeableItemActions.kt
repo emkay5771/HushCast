@@ -9,8 +9,8 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.PlaylistRemove
 import androidx.compose.material.icons.rounded.RemoveDone
 import androidx.compose.material.icons.rounded.RestartAlt
-import androidx.compose.material.icons.rounded.VerticalAlignBottom
-import androidx.compose.material.icons.rounded.VerticalAlignTop
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.QueuePlayNext
 import androidx.compose.material.icons.rounded.WatchLater
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -112,8 +112,8 @@ interface SwipeableItemActions {
                     else -> Icons.Rounded.Check
                 }.let {
                     if (inQueue) androidx.compose.material.icons.Icons.Rounded.PlaylistRemove
-                    else if (playNext) androidx.compose.material.icons.Icons.Rounded.VerticalAlignTop
-                    else androidx.compose.material.icons.Icons.Rounded.VerticalAlignBottom
+                    else if (playNext) androidx.compose.material.icons.Icons.Rounded.QueuePlayNext
+                    else androidx.compose.material.icons.Icons.AutoMirrored.Rounded.PlaylistAdd
                 },
                 backgroundColor = MaterialTheme.colorScheme.primaryContainer,
                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,

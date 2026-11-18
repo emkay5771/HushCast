@@ -728,17 +728,45 @@ fun MediaPlayerBottomSheet(
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
                                                     )
-                                                    if (vm.mediaSourceType is SourceTypeState.Streaming && !downloadBannerDismissedForEp) {
+                                                }
+                                                if (vm.mediaSourceType is SourceTypeState.Streaming && !downloadBannerDismissedForEp) {
+                                                    Spacer(Modifier.height(4.dp))
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
                                                         Text(
-                                                            text = " · Streaming",
-                                                            style = MaterialTheme.typography.bodyLarge,
-                                                            color = MaterialTheme.colorScheme.primary,
-                                                            maxLines = 1,
-                                                            modifier = Modifier.clickable {
-                                                                triggerDownloadNow()
-                                                                downloadBannerDismissedForEp = true
-                                                            }
+                                                            text = "Streaming",
+                                                            style = MaterialTheme.typography.labelMedium,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                                         )
+                                                        Surface(
+                                                            shape = RoundedCornerShape(50),
+                                                            color = MaterialTheme.colorScheme.secondaryContainer,
+                                                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(50))
+                                                                .clickable {
+                                                                    triggerDownloadNow()
+                                                                    downloadBannerDismissedForEp = true
+                                                                }
+                                                        ) {
+                                                            Row(
+                                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    imageVector = Icons.Rounded.Download,
+                                                                    contentDescription = null,
+                                                                    modifier = Modifier.size(14.dp)
+                                                                )
+                                                                Text(
+                                                                    text = "Download",
+                                                                    style = MaterialTheme.typography.labelSmall
+                                                                )
+                                                            }
+                                                        }
                                                     }
                                                 }
 

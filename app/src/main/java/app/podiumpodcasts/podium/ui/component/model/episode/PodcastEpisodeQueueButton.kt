@@ -10,8 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.PlaylistRemove
-import androidx.compose.material.icons.rounded.VerticalAlignBottom
-import androidx.compose.material.icons.rounded.VerticalAlignTop
+import androidx.compose.material.icons.rounded.QueuePlayNext
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -81,9 +80,9 @@ fun PodcastEpisodeQueueButton(
                 onDismissRequest = { showMenu = false }
             ) {
                 DropdownMenuItem(
-                    text = { Text("Play Next") },
+                    text = { Text("Play next") },
                     leadingIcon = {
-                        Icon(Icons.Rounded.VerticalAlignTop, contentDescription = null)
+                        Icon(Icons.Rounded.QueuePlayNext, contentDescription = null)
                     },
                     onClick = {
                         showMenu = false
@@ -91,9 +90,9 @@ fun PodcastEpisodeQueueButton(
                     }
                 )
                 DropdownMenuItem(
-                    text = { Text("Play Last") },
+                    text = { Text("Play last") },
                     leadingIcon = {
-                        Icon(Icons.Rounded.VerticalAlignBottom, contentDescription = null)
+                        Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null)
                     },
                     onClick = {
                         showMenu = false

@@ -55,8 +55,7 @@ import androidx.compose.material.icons.rounded.RssFeed
 import androidx.compose.material.icons.rounded.SearchOff
 import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.Settings
-import androidx.compose.material.icons.rounded.VerticalAlignBottom
-import androidx.compose.material.icons.rounded.VerticalAlignTop
+import androidx.compose.material.icons.rounded.QueuePlayNext
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
@@ -409,7 +408,7 @@ fun PodcastDetailView(
                                     }
                                 ) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                        Icon(Icons.Rounded.VerticalAlignTop, contentDescription = null)
+                                        Icon(Icons.Rounded.QueuePlayNext, contentDescription = null)
                                         Text("Play next", style = MaterialTheme.typography.labelSmall)
                                     }
                                 }

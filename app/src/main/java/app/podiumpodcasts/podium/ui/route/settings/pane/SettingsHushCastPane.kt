@@ -361,7 +361,7 @@ fun SettingsHushCastPane(
                         SettingsListItem(
                             icon = { Icon(Icons.AutoMirrored.Rounded.VolumeOff, null) },
                             label = "Muting",
-                            description = if (wordMutingEnabled) "Enabled · ${selectedActionMode.name.lowercase().replace('_', ' ')}" else "Off",
+                            description = if (wordMutingEnabled) "Enabled · ${selectedActionMode.displayLabel()}" else "Off",
                             index = 0,
                             count = 5,
                             onClick = { onNavigate(SettingsHushCastKey(HushCastSettingsSection.MUTING)) }
@@ -961,8 +961,10 @@ fun SettingsHushCastPane(
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(rule.pattern, style = MaterialTheme.typography.bodyMedium)
+                                        val actionLabel = runCatching { MuteActionMode.valueOf(rule.actionMode).displayLabel() }
+                                            .getOrElse { rule.actionMode.lowercase().replace('_', ' ') }
                                         Text(
-                                            "${rule.category} • ${rule.actionMode}${if (rule.isRegex) " • Regex" else ""}",
+                                            "${rule.category} • $actionLabel${if (rule.isRegex) " • Regex" else ""}",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -1556,3 +1558,12 @@ private fun parseWorkerPairingPayload(raw: String): Pair<String, String>? {
     }
     return null
 }
+
+private fun MuteActionMode.displayLabel(): String = when (this) {
+    MuteActionMode.HARD_SILENCE -> "Hard silence"
+    MuteActionMode.VOLUME_DUCK -> "Gentle duck"
+    MuteActionMode.SAMPLE_DROP_MICRO_SKIP -> "Micro-skip"
+    MuteActionMode.BEEP -> "Bleep tone"
+    MuteActionMode.CUSTOM_SOUND -> "Custom sound"
+}
+
