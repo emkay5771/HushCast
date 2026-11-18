@@ -1773,6 +1773,104 @@ fun MediaPlayerBottomSheet(
                                         Spacer(Modifier.width(8.dp))
                                         Text("Refresh AI Analysis")
                                     }
+                                    androidx.compose.material3.OutlinedButton(
+                                        onClick = {
+                                            scope.launch {
+                                                val shareUri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                                    val root = org.json.JSONObject().apply {
+                                                        put("episodeId", episodeId)
+                                                        put("episodeTitle", currentEpisodeBundle?.episode?.title ?: "")
+                                                        put("podcastTitle", currentEpisodeBundle?.podcast?.title ?: "")
+                                                        put("stageLabel", analysisStatus?.stageLabel ?: "")
+                                                        put("summary", episodeSummary ?: "")
+                                                        put(
+                                                            "adSegments",
+                                                            org.json.JSONArray().apply {
+                                                                adEntities.sortedBy { it.startMs }.forEach { ad ->
+                                                                    put(
+                                                                        org.json.JSONObject().apply {
+                                                                            put("startMs", ad.startMs)
+                                                                            put("endMs", ad.endMs)
+                                                                            put("confidence", ad.confidence.toDouble())
+                                                                            put("isHighConfidence", ad.isHighConfidence)
+                                                                            put("label", ad.label)
+                                                                            put("adClass", ad.adClass)
+                                                                        }
+                                                                    )
+                                                                }
+                                                            }
+                                                        )
+                                                        put(
+                                                            "muteWindows",
+                                                            org.json.JSONArray().apply {
+                                                                muteEntities.sortedBy { it.startMs }.forEach { m ->
+                                                                    put(
+                                                                        org.json.JSONObject().apply {
+                                                                            put("startMs", m.startMs)
+                                                                            put("endMs", m.endMs)
+                                                                            put("word", m.word)
+                                                                            put("actionMode", m.actionMode)
+                                                                            put("enabled", m.enabled)
+                                                                        }
+                                                                    )
+                                                                }
+                                                            }
+                                                        )
+                                                        put(
+                                                            "chapters",
+                                                            org.json.JSONArray().apply {
+                                                                episodeChapters.forEach { ch ->
+                                                                    put(
+                                                                        org.json.JSONObject().apply {
+                                                                            put("startMs", ch.startMs)
+                                                                            put("title", ch.title)
+                                                                            put("source", ch.source)
+                                                                        }
+                                                                    )
+                                                                }
+                                                            }
+                                                        )
+                                                        put(
+                                                            "transcriptSegments",
+                                                            org.json.JSONArray().apply {
+                                                                transcriptBlob?.segments.orEmpty().forEach { seg ->
+                                                                    put(
+                                                                        org.json.JSONObject().apply {
+                                                                            put("startMs", (seg.start * 1000.0).toLong())
+                                                                            put("endMs", (seg.end * 1000.0).toLong())
+                                                                            put("speaker", seg.speaker ?: "")
+                                                                            put("text", seg.text)
+                                                                        }
+                                                                    )
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                                    val exportDir = java.io.File(context.cacheDir, "export").apply { mkdirs() }
+                                                    val safeTitle = (currentEpisodeBundle?.episode?.title ?: "episode")
+                                                        .replace(Regex("[^A-Za-z0-9._-]+"), "_")
+                                                        .take(40)
+                                                    val outFile = java.io.File(exportDir, "hushcast_timeline_${safeTitle}.json")
+                                                    outFile.writeText(root.toString(2))
+                                                    androidx.core.content.FileProvider.getUriForFile(
+                                                        context,
+                                                        "${context.packageName}.fileprovider",
+                                                        outFile
+                                                    )
+                                                }
+                                                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                                    type = "application/json"
+                                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "HushCast Timeline: ${currentEpisodeBundle?.episode?.title ?: episodeId}")
+                                                    putExtra(android.content.Intent.EXTRA_STREAM, shareUri)
+                                                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                }
+                                                context.startActivity(android.content.Intent.createChooser(intent, "Export Timeline Data"))
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Export Timeline Data (Debug)")
+                                    }
                                 }
                                 else -> {
                                     Text(

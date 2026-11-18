@@ -1008,7 +1008,7 @@ fun SyncedTranscriptCard(
                                     },
                                     label = {
                                         Text(
-                                            text = "Sponsor skipped · $durFormatted",
+                                            text = "${row.displayLabel} · $durFormatted",
                                             style = MaterialTheme.typography.labelMedium
                                         )
                                     },

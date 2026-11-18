@@ -1,3 +1,13 @@
+# HushCast v1.0.18-hushcast
+
+## What's New
+- **Debug Timeline Export**:
+  - Added **Export Timeline Data (Debug)** in the in-player HushCast AI sheet (`MediaPlayerBottomSheet`) to share an episode's existing `adSegments` (including confidence, `adClass`, and `label`), `muteWindows`, `chapters`, `summary`, and `transcriptSegments` as a `.json` file via the Android Share sheet with zero extra APK or per-episode storage overhead.
+- **Accurate Transcript Ad Labels**:
+  - Updated collapsed ad chips in the Transcript tab (`HushCastPlayerOverlays`) to show `displayLabel` (e.g. `Suggested Ad`, `Sponsor: <Brand>`, `Show Promo`, `Intro / Outro`) instead of hardcoding `Sponsor skipped` for every detected span.
+
+---
+
 # HushCast v1.0.17-hushcast
 
 ## What's New
