@@ -189,7 +189,7 @@ class ForcedAligner:
                     # Only apply if aligner has reasonable confidence and sane span (<= 1.5s/word per V23)
                     ns = round(chunk_s + spans[0].start * ratio, 3)
                     ne = round(chunk_s + spans[-1].end * ratio, 3)
-                    if ne > ns and (ne - ns) <= 1.5 and avg_score > -5.0:
+                    if ne > ns and (ne - ns) <= 1.5 and avg_score > -2.5:
                         words[wi].start = ns
                         words[wi].end = ne
                         refined += 1

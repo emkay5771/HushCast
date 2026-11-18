@@ -29,14 +29,17 @@ class WorkerCache:
         self.episodes_dir.mkdir(parents=True, exist_ok=True)
         self.tmp_dir.mkdir(parents=True, exist_ok=True)
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
+        self._index_mtime: Optional[float] = None
         self._index: dict[str, dict] = self._load_index()
         # sha -> (embeddings_matrix, episodeId, list[(startSec, endSec, text)])
         self._search_cache: dict[str, tuple] = {}
 
     def _load_index(self) -> dict[str, dict]:
         if not self.index_path.exists():
+            self._index_mtime = None
             return {"by_url": {}, "by_sha": {}}
         try:
+            self._index_mtime = self.index_path.stat().st_mtime
             data = json.loads(self.index_path.read_text(encoding="utf-8"))
             data.setdefault("by_url", {})
             data.setdefault("by_sha", {})
@@ -44,10 +47,22 @@ class WorkerCache:
         except Exception:
             return {"by_url": {}, "by_sha": {}}
 
+    def reload_index_if_changed(self) -> None:
+        try:
+            mtime = self.index_path.stat().st_mtime
+        except OSError:
+            return
+        if mtime != self._index_mtime:
+            self._index = self._load_index()
+
     def _save_index(self) -> None:
         tmp = self.index_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self._index, separators=(",", ":")), encoding="utf-8")
         os.replace(tmp, self.index_path)
+        try:
+            self._index_mtime = self.index_path.stat().st_mtime
+        except OSError:
+            pass
 
     def audio_path(self, sha256: str) -> Path:
         return self.episodes_dir / f"{sha256}.audio"
@@ -89,15 +104,25 @@ class WorkerCache:
             return sha
         return None
 
-    def lookup_by_episode_id(self, episode_id: str, audio_url: str = "") -> Optional[str]:
+    def lookup_by_episode_id(self, episode_id: str, audio_url: Optional[str] = "") -> Optional[str]:
         if audio_url:
             sha = self._index["by_url"].get(audio_url)
             if sha and self.has_bundle(sha):
                 return sha
+        best_sha: Optional[str] = None
+        best_ts: float = -1.0
         for sha, meta in self._index["by_sha"].items():
             if meta.get("episodeId") == episode_id and self.has_bundle(sha):
-                return sha
-        return None
+                ts = float(meta.get("createdAtMs") or 0)
+                if ts <= 0:
+                    try:
+                        ts = self.bundle_path(sha).stat().st_mtime * 1000.0
+                    except OSError:
+                        ts = 0.0
+                if ts > best_ts:
+                    best_ts = ts
+                    best_sha = sha
+        return best_sha
 
     def get_bundle(self, sha256: str) -> Optional[DesktopAnalysisBundle]:
         path = self.bundle_path(sha256)

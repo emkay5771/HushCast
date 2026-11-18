@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: modal-deploy
+  group: modal-deploy-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

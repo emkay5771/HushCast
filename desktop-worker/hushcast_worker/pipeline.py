@@ -495,6 +495,11 @@ class LocalMlBackend:
             self._forced_aligner._ensure_loaded()
             with self._model_lock:
                 self._get_embedding_llm()
+            if not self._low_mem:
+                chat_path = self.chat_model_path()
+                if chat_path is not None and chat_path.exists():
+                    from .chapters import _get_chat_llm
+                    _get_chat_llm(chat_path)
         except Exception:
             logger.warning("Model warmup partially failed", exc_info=True)
 
@@ -814,15 +819,31 @@ class LocalMlBackend:
                 else:
                     use_dtw = not self._forced_aligner.is_available()
                     whisper = self._get_whisper_cpp(use_dtw=use_dtw)
+                    last_cb_ts = 0.0
+
+                    def _on_new_segment(seg) -> None:
+                        nonlocal last_cb_ts
+                        if cancel_event is not None and cancel_event.is_set():
+                            return
+                        now_m = time.monotonic()
+                        if now_m - last_cb_ts < 0.75:
+                            return
+                        last_cb_ts = now_m
+                        t_end_sec = getattr(seg, "t1", 0) / 100.0 if hasattr(seg, "t1") else 0.0
+                        if duration_sec > 0 and t_end_sec > 0:
+                            pct = min(59, 30 + int(29 * min(1.0, t_end_sec / duration_sec)))
+                            on_progress(JobState.TRANSCRIBING, pct, f"Transcribing ({int(t_end_sec // 60)}m/{int(duration_sec // 60)}m)")
+
+                    def _abort_cb() -> bool:
+                        return bool(cancel_event is not None and cancel_event.is_set())
+
                     transcribe_kwargs: dict[str, object] = {
                         "token_timestamps": True,
                         "language": lang,
                         "temperature_inc": 0.0,
+                        "new_segment_callback": _on_new_segment,
+                        "abort_callback": _abort_cb,
                     }
-                    vad_path = self._resolve_vad_model()
-                    if vad_path is not None:
-                        transcribe_kwargs["vad"] = True
-                        transcribe_kwargs["vad_model_path"] = str(vad_path)
                     try:
                         raw_segments = whisper.transcribe(pcm_16k, **transcribe_kwargs)
                     except TypeError:
@@ -831,6 +852,8 @@ class LocalMlBackend:
                         if not self.whisper_model.name.endswith(".en.bin"):
                             fallback_kwargs["language"] = lang
                         raw_segments = whisper.transcribe(pcm_16k, **fallback_kwargs)
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise RuntimeError("Job cancelled")
                     words, segments = _extract_whisper_words_and_segments(whisper, raw_segments)
             finally:
                 tr_done.set()
@@ -898,6 +921,13 @@ class LocalMlBackend:
                 92,
                 f"Found {len(ad_segments)} ad span(s) • Generating chapters & {sum_mode}",
             )
+            def _on_llm_token(tok_count: int) -> None:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise RuntimeError("Job cancelled")
+                if tok_count == 1 or tok_count % 20 == 0:
+                    pct = min(97, 92 + tok_count // 120)
+                    on_progress(JobState.TAGGING, pct, f"Summarizing ({tok_count} tokens)")
+
             summary, chapters = generate_chapters_and_summary(
                 segments=segments,
                 embeddings=emb_2d,
@@ -905,6 +935,7 @@ class LocalMlBackend:
                 chat_model_path=chat_path,
                 audio_path=audio_path,
                 has_feed_chapters=bool(feed_chapters_url),
+                on_token=_on_llm_token,
             )
             on_progress(
                 JobState.TAGGING,

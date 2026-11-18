@@ -185,3 +185,128 @@ def test_modal_fastapi_post_jobs_and_reprocess_lookup(tmp_path: Path, monkeypatc
         )
         assert reproc.status_code == 200, reproc.text
         assert len(spawned) == 2
+
+
+class _CountingDict(dict):
+    def __init__(self) -> None:
+        super().__init__()
+        self.gets = 0
+        self.puts = 0
+
+    def get(self, key, default=None):
+        self.gets += 1
+        return super().get(key, default)
+
+    def __setitem__(self, key, value) -> None:
+        self.puts += 1
+        super().__setitem__(key, value)
+
+
+def test_modal_download_throttles_dict_calls_57mb(tmp_path: Path, monkeypatch) -> None:
+    modal_app = _import_modal_app_with_stub()
+    counting_dict = _CountingDict()
+    cache = WorkerCache(tmp_path / "cache")
+
+    class _FakeBackend:
+        def analyze_with_embeddings(self, **kwargs):
+            bundle = DesktopAnalysisBundle(
+                fileSha256=kwargs["file_sha256"],
+                episodeId=kwargs["episode_id"],
+                durationSec=3600.0,
+                wordIndexBlob=WordIndexBlobDto(words=[WordDto(start=0.0, end=0.5, text="hi")], segments=[]),
+                adSegments=[],
+                whisperModel="ggml-large-v3-turbo.bin",
+                analysisDurationMs=10,
+                workerAccelerator="cuda",
+            )
+            return bundle, None
+
+    worker = modal_app.GpuWorker()
+    worker.cache = cache
+    worker.backend = _FakeBackend()
+
+    async def _fake_download(audio_url, dest_path, on_bytes=None, **kwargs):
+        total = 57 * 1024 * 1024
+        chunk = 65536
+        dest_path.write_bytes(b"fake")
+        for rec in range(chunk, total + 1, chunk):
+            if on_bytes:
+                on_bytes(min(rec, total), total)
+        return hashlib.sha256(b"57mb-audio").hexdigest(), "audio/mpeg"
+
+    import hushcast_worker.audio as audio_mod
+
+    monkeypatch.setattr(audio_mod, "download_audio_streaming_sha256", _fake_download)
+    monkeypatch.setattr(modal_app, "job_dict", counting_dict)
+
+    worker.run_job(
+        "job-57mb",
+        {
+            "episodeId": "ep-57mb",
+            "audioUrl": "https://example.com/57mb.mp3",
+            "title": "Long Episode",
+        },
+    )
+
+    assert counting_dict["job-57mb"]["state"] == "READY"
+    assert (counting_dict.gets + counting_dict.puts) < 200
+
+
+def test_modal_stale_heartbeat_reports_failed_retryable(tmp_path: Path, monkeypatch) -> None:
+    import time
+
+    modal_app = _import_modal_app_with_stub()
+    fake_dict = {
+        "stale-1": {
+            "jobId": "stale-1",
+            "episodeId": "ep-stale",
+            "state": "TRANSCRIBING",
+            "stage": "TRANSCRIBING",
+            "progressPercent": 42,
+            "stageLabel": "Transcribing",
+            "rev": 3,
+            "createdAt": time.time() - 500.0,
+            "heartbeatAt": time.time() - 200.0,
+        }
+    }
+    monkeypatch.setattr(modal_app, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(modal_app, "job_dict", fake_dict)
+    monkeypatch.setenv("HUSHCAST_WORKER_TOKEN", "test-token")
+
+    app = modal_app.fastapi_app()
+    with TestClient(app) as client:
+        resp = client.get("/v1/jobs/stale-1", headers={"Authorization": "Bearer test-token"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["state"] == "FAILED"
+        assert body["retryable"] is True
+        assert body["errorCode"] == "WORKER_STALE"
+
+
+def test_lookup_by_episode_id_returns_newest_bundle(tmp_path: Path) -> None:
+    cache = WorkerCache(tmp_path / "cache")
+    sha_old = hashlib.sha256(b"old-audio").hexdigest()
+    sha_new = hashlib.sha256(b"new-audio").hexdigest()
+    for sha, url in ((sha_old, "https://example.com/old.mp3"), (sha_new, "https://example.com/new.mp3")):
+        bundle = DesktopAnalysisBundle(
+            fileSha256=sha,
+            episodeId="same-ep",
+            durationSec=10.0,
+            wordIndexBlob=WordIndexBlobDto(words=[WordDto(start=0.0, end=0.5, text="hi")], segments=[]),
+            adSegments=[],
+            whisperModel="ggml-large-v3-turbo.bin",
+            analysisDurationMs=10,
+            workerAccelerator="cuda",
+        )
+        cache.save_episode(
+            sha256=sha,
+            audio_tmp_path=None,
+            bundle=bundle,
+            audio_url=url,
+            title="Ep",
+            content_type="audio/mpeg",
+        )
+    cache._index["by_sha"][sha_old]["createdAtMs"] = 1000
+    cache._index["by_sha"][sha_new]["createdAtMs"] = 5000
+    assert cache.lookup_by_episode_id("same-ep", "") == sha_new
+

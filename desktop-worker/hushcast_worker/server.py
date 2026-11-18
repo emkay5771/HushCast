@@ -205,6 +205,10 @@ def create_app(
     )
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 
+    warmup_fn = getattr(backend, "warmup", None)
+    if callable(warmup_fn) and backend.models_ready() and not getattr(backend, "models_loaded", lambda: False)():
+        threading.Thread(target=warmup_fn, daemon=True, name="hushcast-warmup").start()
+
     jobs: dict[str, DesktopJobResponse] = cache.load_jobs()
     for _jid, _job in list(jobs.items()):
         if _job.state not in (JobState.READY, JobState.FAILED, JobState.CANCELLED):
@@ -682,7 +686,8 @@ def create_app(
                     if cancel_event.is_set():
                         return
 
-                    cache.save_episode(
+                    await asyncio.to_thread(
+                        cache.save_episode,
                         sha256=sha256,
                         audio_tmp_path=None,
                         bundle=bundle,
@@ -823,10 +828,11 @@ def create_app(
         bundle_path = cache.bundle_path(clean_sha)
         if not bundle_path.exists():
             raise HTTPException(status_code=404, detail="Bundle not found")
+        etag = f'"{clean_sha}-v{PIPELINE_VERSION}-{bundle_path.stat().st_mtime_ns}"'
         return FileResponse(
             path=bundle_path,
             media_type="application/json",
-            headers={"ETag": f'"{clean_sha}"'},
+            headers={"ETag": etag},
         )
 
     @app.get(
