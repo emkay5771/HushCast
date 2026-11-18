@@ -27,6 +27,7 @@ object HushCastPrefs {
     private const val KEY_DESKTOP_TOKEN_LEGACY = "desktop_worker_token"
     private const val KEY_DESKTOP_FINGERPRINT = "desktop_worker_cert_fp"
     private const val KEY_AUTO_DOWNLOAD_METHOD = "auto_download_analysis_method"
+    private const val KEY_MUTE_TIMING_PRECISION = "mute_timing_precision"
 
     private const val KEYSTORE_ALIAS = "hushcast_worker_token_aes"
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
