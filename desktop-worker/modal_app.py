@@ -73,7 +73,7 @@ _cpu_image = (
         "pydantic==2.11.3",
         "zeroconf==0.146.5",
         "numpy==2.2.5",
-        "onnxruntime==1.20.2",
+        "onnxruntime==1.20.1",
         "qrcode==8.0",
     )
     .add_local_python_source("hushcast_worker")
