@@ -25,10 +25,27 @@ class WordMatcherTest {
         val windows = WordMatcher.matchWords(words, rules, prePadMs = 80L, postPadMs = 100L)
 
         assertEquals(2, windows.size)
-        assertEquals(1520L, windows[0].startMs)
-        assertEquals(2100L, windows[0].endMs)
+        // Adjacent 300ms words ("the" and "is") bound overlap to max(15, 300/4) = 75ms
+        assertEquals(1525L, windows[0].startMs)
+        assertEquals(2075L, windows[0].endMs)
+        // Isolated word ("fucks") with >2s gap before and no word after gets full padding
         assertEquals(4920L, windows[1].startMs)
         assertEquals(5500L, windows[1].endMs)
+    }
+
+    @Test
+    fun boundsPaddingAgainstShortAdjacentWords() {
+        val words = listOf(
+            Word(1.00, 1.12, " a"),      // 120ms -> maxOverlap = 30ms
+            Word(1.12, 1.40, " fuck"),
+            Word(1.40, 1.48, " it")      // 80ms  -> maxOverlap = 20ms
+        )
+        val rules = PresetDictionaries.profanityRules(MuteActionMode.HARD_SILENCE)
+        val windows = WordMatcher.matchWords(words, rules, prePadMs = 80L, postPadMs = 100L)
+
+        assertEquals(1, windows.size)
+        assertEquals(1090L, windows[0].startMs) // 1120 - 30
+        assertEquals(1420L, windows[0].endMs)   // 1400 + 20
     }
 
     @Test
