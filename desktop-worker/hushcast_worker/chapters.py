@@ -34,37 +34,51 @@ def _get_chat_llm(chat_model_path: Path):
             and _CACHED_CHAT_LLM[1] == key_cls
         ):
             return _CACHED_CHAT_LLM[2]
-        llm = Llama(
-            model_path=key_path,
-            n_ctx=2048,
-            n_gpu_layers=-1,
-            verbose=False,
-        )
+        try:
+            llm = Llama(
+                model_path=key_path,
+                n_ctx=4096,
+                n_gpu_layers=-1,
+                verbose=False,
+            )
+        except Exception:
+            logger.warning("Chat LLM GPU init failed; retrying with CPU layers", exc_info=True)
+            llm = Llama(
+                model_path=key_path,
+                n_ctx=4096,
+                n_gpu_layers=0,
+                verbose=False,
+            )
         _CACHED_CHAT_LLM = (key_path, key_cls, llm)
         return llm
 
 _STOPWORDS = {
-    "a", "about", "above", "actually", "after", "again", "all", "also", "always",
-    "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been",
-    "before", "being", "but", "by", "can", "can't", "could", "did", "didn't", "do",
-    "does", "doesn't", "doing", "don't", "down", "during", "each", "even", "ever",
-    "every", "feel", "for", "from", "get", "getting", "go", "going", "good", "got",
-    "great", "had", "has", "have", "having", "he", "her", "here", "hers", "him",
-    "his", "how", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is",
+    "a", "about", "above", "across", "actually", "after", "again", "against", "all",
+    "almost", "already", "also", "always", "am", "an", "and", "any", "are", "aren't",
+    "around", "as", "at", "basically", "be", "became", "because", "become", "been",
+    "before", "behind", "being", "between", "beyond", "but", "by", "can", "can't",
+    "certainly", "comes", "coming", "could", "definitely", "did", "didn't", "do",
+    "does", "doesn't", "doing", "don't", "down", "during", "each", "either", "enough",
+    "especially", "essentially", "even", "ever", "every", "feel", "for", "from",
+    "get", "getting", "go", "goes", "going", "good", "got", "great", "had", "has",
+    "have", "having", "he", "her", "here", "hers", "him", "his", "how", "however",
+    "i", "i'd", "i'll", "i'm", "i've", "if", "in", "inside", "instead", "into", "is",
     "isn't", "it", "it's", "its", "just", "kind", "know", "like", "literally",
-    "little", "lot", "made", "make", "many", "maybe", "me", "mean", "more", "most",
-    "much", "my", "need", "no", "not", "now", "obviously", "of", "off", "oh", "ok",
-    "okay", "on", "one", "only", "or", "other", "our", "out", "over", "own",
-    "people", "personally", "pretty", "probably", "put", "really", "right", "said",
-    "same", "say", "saying", "see", "she", "should", "so", "some", "something",
-    "sort", "still", "stuff", "such", "sure", "take", "talking", "tell", "than",
-    "that", "that's", "the", "their", "them", "then", "there", "there's", "these",
-    "they", "they're", "thing", "things", "think", "this", "those", "though",
-    "through", "time", "to", "too", "totally", "try", "trying", "um", "uh", "up",
-    "us", "use", "used", "using", "very", "want", "was", "wasn't", "way", "we",
-    "we're", "well", "were", "what", "what's", "when", "where", "which", "while",
-    "who", "why", "will", "with", "would", "yeah", "yes", "you", "you're", "your",
-    "yours",
+    "little", "looking", "looks", "lot", "made", "make", "many", "maybe", "me",
+    "mean", "meanwhile", "more", "most", "much", "my", "need", "neither", "no",
+    "not", "now", "obviously", "of", "off", "oh", "ok", "okay", "on", "one",
+    "only", "or", "other", "our", "out", "outside", "over", "own", "people",
+    "personally", "pretty", "probably", "put", "rather", "really", "right", "said",
+    "same", "say", "saying", "see", "seemed", "seems", "she", "should", "so",
+    "some", "something", "sort", "still", "stuff", "such", "sure", "take",
+    "talking", "tell", "than", "that", "that's", "the", "their", "them", "then",
+    "there", "there's", "therefore", "these", "they", "they're", "thing", "things",
+    "think", "this", "those", "though", "through", "time", "to", "too", "totally",
+    "toward", "towards", "try", "trying", "uh", "um", "under", "up", "us", "use",
+    "used", "using", "very", "wait", "want", "was", "wasn't", "way", "we", "we're",
+    "well", "were", "what", "what's", "when", "where", "whether", "which", "while",
+    "who", "why", "will", "with", "within", "without", "would", "yeah", "yes",
+    "you", "you're", "your", "yours",
 }
 
 
@@ -115,7 +129,7 @@ def _name_chapter_from_tfidf(
             continue
         df = sum(1 for s in all_chunk_token_sets if term in s)
         idf = math.log((n_chapters + 1.0) / (df + 0.5)) + 0.5
-        boost = 1.35 if " " in term else 1.0
+        boost = 1.65 if " " in term else 1.0
         if term in proper_forms:
             boost *= 1.25
         scored.append((count * idf * boost, term))
@@ -130,7 +144,7 @@ def _name_chapter_from_tfidf(
         used_words.update(parts)
         pretty = " ".join(proper_forms.get(p, p.capitalize()) for p in parts)
         picked.append(pretty)
-        if len(picked) >= 3:
+        if len(picked) >= 2:
             break
 
     if not picked:
@@ -253,14 +267,12 @@ def generate_chapters_and_summary(
 
     if chat_model_path is not None and chat_model_path.exists():
         try:
-            from llama_cpp import Llama
-
             chapter_blocks: list[str] = []
             for b_pos, txts in enumerate(chapter_texts_list):
                 non_empty = [t.strip() for t in txts if t.strip()]
                 if non_empty:
-                    step_c = max(1, len(non_empty) // 4)
-                    excerpt = " ".join(non_empty[::step_c][:4])[:320]
+                    step_c = max(1, len(non_empty) // 5)
+                    excerpt = " ".join(non_empty[::step_c][:5])[:420]
                 else:
                     excerpt = ""
                 start_sec = chapter_starts_ms[b_pos] // 1000
@@ -279,27 +291,39 @@ def generate_chapters_and_summary(
             chat_llm = _get_chat_llm(chat_model_path)
             with _CHAT_LLM_LOCK:
                 if hasattr(chat_llm, "create_chat_completion"):
-                    out = chat_llm.create_chat_completion(
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": (
-                                    "You are a concise podcast editor. Return ONLY valid JSON with no "
-                                    "markdown fences or extra commentary."
-                                ),
-                            },
-                            {"role": "user", "content": prompt},
-                        ],
-                        max_tokens=512,
-                        temperature=0.2,
-                    )
+                    messages = [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a concise podcast editor. Return ONLY valid JSON with no "
+                                "markdown fences or extra commentary."
+                            ),
+                        },
+                        {"role": "user", "content": prompt},
+                    ]
+                    try:
+                        out = chat_llm.create_chat_completion(
+                            messages=messages,
+                            max_tokens=768,
+                            temperature=0.2,
+                            response_format={"type": "json_object"},
+                        )
+                    except TypeError:
+                        out = chat_llm.create_chat_completion(
+                            messages=messages,
+                            max_tokens=768,
+                            temperature=0.2,
+                        )
                     raw_text = out["choices"][0]["message"]["content"].strip()
                 else:
-                    out = chat_llm.create_completion(prompt, max_tokens=512, temperature=0.2)
+                    out = chat_llm.create_completion(prompt, max_tokens=768, temperature=0.2)
                     raw_text = out["choices"][0]["text"].strip()
-            m_json = re.search(r"\{.*\}", raw_text, flags=re.DOTALL)
+
+            cleaned_raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_text.strip(), flags=re.IGNORECASE)
+            m_json = re.search(r"\{.*\}", cleaned_raw, flags=re.DOTALL)
             if m_json:
-                parsed = json.loads(m_json.group(0))
+                json_candidate = re.sub(r",\s*([}\]])", r"\1", m_json.group(0))
+                parsed = json.loads(json_candidate)
                 llm_summary = str(parsed.get("summary") or "").strip() or None
                 raw_titles = parsed.get("titles") or []
                 seen_titles: set[str] = set()
@@ -328,8 +352,13 @@ def generate_chapters_and_summary(
                 final_chapters = embedded_chapters if len(embedded_chapters) >= 2 else llm_chapters
                 if llm_summary and final_chapters:
                     return llm_summary, final_chapters
+                logger.warning("Chat model JSON missing summary/chapters; raw=%r", raw_text[:240])
+            else:
+                logger.warning("Chat model returned non-JSON output; raw=%r", raw_text[:240])
         except Exception:
             logger.exception("Chat model summary/chapters failed; falling back to extractive")
+    else:
+        logger.info("No chat model found at %s; using extractive summary & TF-IDF chapters", chat_model_path)
 
     if embedded_chapters:
         chapters = embedded_chapters
