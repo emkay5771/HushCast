@@ -1932,42 +1932,87 @@ fun MediaPlayerBottomSheet(
                                 )
                             }
                             if (wordMutingEnabled) {
+                                val muteCustomSoundUri by settingsRepository.hushCast.muteCustomSoundUri.collectAsState(initial = null)
+                                val muteSoundPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+                                    contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+                                ) { uri ->
+                                    if (uri != null) {
+                                        runCatching {
+                                            context.contentResolver.takePersistableUriPermission(
+                                                uri,
+                                                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                            )
+                                        }
+                                        val uriStr = uri.toString()
+                                        HushCastEngineBridge.loadCustomMuteSound(context, uriStr)
+                                        scope.launch { settingsRepository.hushCast.setMuteCustomSoundUri(uriStr) }
+                                    }
+                                }
                                 Text(
                                     text = "Mute style",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Row(
+                                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                                androidx.compose.foundation.layout.FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
                                     val styleOptions = listOf(
                                         app.hushcast.automute.dsp.MuteActionMode.HARD_SILENCE to "Silence",
+                                        app.hushcast.automute.dsp.MuteActionMode.VOLUME_DUCK to "Duck",
+                                        app.hushcast.automute.dsp.MuteActionMode.SAMPLE_DROP_MICRO_SKIP to "Micro-Skip",
                                         app.hushcast.automute.dsp.MuteActionMode.BEEP to "Bleep",
-                                        app.hushcast.automute.dsp.MuteActionMode.VOLUME_DUCK to "Duck"
+                                        app.hushcast.automute.dsp.MuteActionMode.CUSTOM_SOUND to "Custom"
                                     )
                                     styleOptions.forEach { (mode, label) ->
                                         androidx.compose.material3.FilterChip(
                                             selected = muteActionMode == mode,
                                             onClick = {
+                                                HushCastEngineBridge.defaultActionMode = mode
                                                 scope.launch {
                                                     settingsRepository.hushCast.setMuteActionMode(mode)
                                                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                                                         autoMuteDb.dao().updateAllRulesActionMode(mode.name)
                                                         autoMuteDb.dao().updateAllMuteSegmentsActionMode(mode.name)
-                                                        val currentEpId = HushCastEngineBridge.currentEpisodeId
-                                                        if (!currentEpId.isNullOrBlank()) {
-                                                            val sha = autoMuteDb.dao().getStatus(currentEpId)?.fileSha256
-                                                            if (!sha.isNullOrBlank()) {
-                                                                val updated = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
-                                                                HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
-                                                            }
+                                                        val activeEpId = HushCastEngineBridge.currentEpisodeId ?: episodeId
+                                                        if (activeEpId.isNotBlank()) {
+                                                            val updated = autoMuteDb.dao()
+                                                                .observeMuteSegmentsByEpisode(activeEpId)
+                                                                .first()
+                                                                .map { it.toDomain() }
+                                                            HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
                                                         }
                                                     }
                                                 }
                                             },
                                             label = { Text(label) }
                                         )
+                                    }
+                                }
+                                if (muteActionMode == app.hushcast.automute.dsp.MuteActionMode.CUSTOM_SOUND) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = if (muteCustomSoundUri != null) "Custom sound active" else "Default bleep (no file chosen)",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        androidx.compose.material3.TextButton(onClick = { muteSoundPicker.launch(arrayOf("audio/*")) }) {
+                                            Text(if (muteCustomSoundUri != null) "Change" else "Choose file")
+                                        }
+                                        if (muteCustomSoundUri != null) {
+                                            androidx.compose.material3.TextButton(onClick = {
+                                                HushCastEngineBridge.loadCustomMuteSound(context, null)
+                                                scope.launch { settingsRepository.hushCast.setMuteCustomSoundUri(null) }
+                                            }) {
+                                                Text("Clear")
+                                            }
+                                        }
                                     }
                                 }
                             }

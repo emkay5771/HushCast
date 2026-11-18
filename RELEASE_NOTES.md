@@ -1,3 +1,12 @@
+# HushCast v1.0.22-hushcast
+
+## What's New
+- **Custom Mute Sound & Live Mode Switching in Player**:
+  - Added **Custom** (`CUSTOM_SOUND`) and **Micro-Skip** chips plus an inline **Choose file / Change / Clear** custom sound picker to the in-player HushCast menu (`MediaPlayerBottomSheet`).
+  - Wired `muteActionMode` changes in `PlaybackService` and `MediaPlayerBottomSheet` to immediately update `HushCastEngineBridge.defaultActionMode` and reload the active episode's mute windows by `episodeId` into `AutoMuteAudioProcessor`.
+
+---
+
 # HushCast v1.0.21-hushcast
 
 ## What's New

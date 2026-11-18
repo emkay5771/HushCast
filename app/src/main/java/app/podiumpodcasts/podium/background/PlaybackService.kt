@@ -255,6 +255,22 @@ class PlaybackService : MediaLibraryService() {
             }
         }
         scope.launch {
+            settingsRepository.hushCast.muteActionMode.collect { mode ->
+                HushCastEngineBridge.defaultActionMode = mode
+                val activeEpId = exoPlayer.currentMediaItem?.getEpisodeId() ?: HushCastEngineBridge.currentEpisodeId
+                if (!activeEpId.isNullOrBlank()) {
+                    withContext(Dispatchers.IO) {
+                        autoMuteDb.dao().updateAllMuteSegmentsActionMode(mode.name)
+                        val updated = autoMuteDb.dao()
+                            .observeMuteSegmentsByEpisode(activeEpId)
+                            .first()
+                            .map { it.toDomain() }
+                        HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
+                    }
+                }
+            }
+        }
+        scope.launch {
             settingsRepository.hushCast.wordMutingEnabled.collect { enabled ->
                 HushCastEngineBridge.wordMutingEnabled = enabled
                 val origin = getOrigin()
