@@ -404,14 +404,28 @@ class LocalMlBackend:
             hb = threading.Thread(target=_whisper_heartbeat, daemon=True)
             hb.start()
             def _load_whisper() -> WhisperModel:
+                preset = _resolve_dtw_aheads_preset(self.whisper_model.name)
+                ctx_params: dict[str, object] = {
+                    "dtw_token_timestamps": True,
+                    "flash_attn": False,
+                }
+                if preset:
+                    ctx_params["dtw_aheads_preset"] = preset
                 try:
                     return WhisperModel(
                         str(self.whisper_model),
                         print_progress=False,
-                        context_params={"dtw_token_timestamps": True},
+                        context_params=ctx_params,
                     )
-                except TypeError:
-                    return WhisperModel(str(self.whisper_model), print_progress=False)
+                except (TypeError, ValueError):
+                    try:
+                        return WhisperModel(
+                            str(self.whisper_model),
+                            print_progress=False,
+                            context_params={"dtw_token_timestamps": True},
+                        )
+                    except (TypeError, ValueError):
+                        return WhisperModel(str(self.whisper_model), print_progress=False)
 
             try:
                 if self._low_mem:
@@ -526,6 +540,44 @@ class LocalMlBackend:
         return bundle, emb_2d
 
 
+_DTW_PRESET_TABLE: tuple[tuple[str, str, int], ...] = (
+    ("large-v3-turbo", "WHISPER_AHEADS_LARGE_V3_TURBO", 14),
+    ("large-v3", "WHISPER_AHEADS_LARGE_V3", 13),
+    ("large-v2", "WHISPER_AHEADS_LARGE_V2", 12),
+    ("large-v1", "WHISPER_AHEADS_LARGE_V1", 11),
+    ("medium.en", "WHISPER_AHEADS_MEDIUM_EN", 9),
+    ("medium", "WHISPER_AHEADS_MEDIUM", 10),
+    ("small.en", "WHISPER_AHEADS_SMALL_EN", 7),
+    ("small", "WHISPER_AHEADS_SMALL", 8),
+    ("base.en", "WHISPER_AHEADS_BASE_EN", 5),
+    ("base", "WHISPER_AHEADS_BASE", 6),
+    ("tiny.en", "WHISPER_AHEADS_TINY_EN", 3),
+    ("tiny", "WHISPER_AHEADS_TINY", 4),
+)
+
+
+def _resolve_dtw_aheads_preset(model_name: str, pw_mod=None) -> Optional[object]:
+    low = (model_name or "").lower()
+    if pw_mod is None:
+        try:
+            import _pywhispercpp as pw_mod
+        except Exception:
+            pw_mod = None
+    for needle, symbol_name, enum_val in _DTW_PRESET_TABLE:
+        if needle in low:
+            if pw_mod is not None:
+                val = getattr(pw_mod, symbol_name, None)
+                if val is not None:
+                    return val
+                enum_cls = getattr(pw_mod, "whisper_alignment_heads_preset", None)
+                if enum_cls is not None:
+                    val = getattr(enum_cls, symbol_name, None)
+                    if val is not None:
+                        return val
+            return enum_val
+    return None
+
+
 def _extract_whisper_words_and_segments(
     whisper, raw_segments
 ) -> tuple[list[WordDto], list[SegmentDto]]:
@@ -570,8 +622,18 @@ def _extract_whisper_words_and_segments(
                 if not tok_text or tok_text.startswith("[_"):
                     continue
                 tdata = pw.whisper_full_get_token_data(ctx, s_idx, t_idx)
-                t0 = round(tdata.t0 / 100.0, 3)
-                t1 = round(max(tdata.t1, tdata.t0 + 1) / 100.0, 3)
+                raw_dtw = getattr(tdata, "t_dtw", -1)
+                has_dtw = isinstance(raw_dtw, (int, float)) and raw_dtw >= 0
+                if has_dtw:
+                    t0 = round(raw_dtw / 100.0, 3)
+                    if tdata.t1 >= tdata.t0 and tdata.t1 >= raw_dtw and (tdata.t1 - raw_dtw) <= 80:
+                        t1 = round(tdata.t1 / 100.0, 3)
+                    else:
+                        t1 = round(t0 + 0.15, 3)
+                else:
+                    t0 = round(tdata.t0 / 100.0, 3)
+                    t1 = round(max(tdata.t1, tdata.t0 + 1) / 100.0, 3)
+
                 if tok_text[0].isspace() and cur_text.strip():
                     words.append(
                         WordDto(
@@ -587,7 +649,8 @@ def _extract_whisper_words_and_segments(
                     if cur_t0 is None:
                         cur_t0 = t0
                     cur_text += tok_text
-                    cur_t1 = t1
+                    if has_dtw or cur_t1 is None or (t1 - cur_t0) <= 1.2:
+                        cur_t1 = max(cur_t1 or t1, t1)
             if cur_text.strip():
                 words.append(
                     WordDto(
