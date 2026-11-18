@@ -9,6 +9,7 @@ import app.podiumpodcasts.podium.api.download.HttpDownloadClient
 import app.podiumpodcasts.podium.api.download.HttpDownloadClientResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -210,6 +211,15 @@ class PodcastEpisodeDownloadWork(
                         }
                         db.podcastEpisodeDownloads()
                             .registerDownload(episodeId, file.absolutePath, finalSize)
+                        runCatching {
+                            app.podiumpodcasts.podium.api.chapters.EpisodeChapterHelper.extractAndStoreId3FromFile(
+                                context = context,
+                                db = db,
+                                episodeId = episodeId,
+                                uri = android.net.Uri.fromFile(file),
+                                durationMs = episode.duration * 1000L
+                            )
+                        }
 
                         app.podiumpodcasts.podium.background.PlaybackService.notifyEpisodeDownloaded(episodeId)
 
@@ -304,7 +314,21 @@ class PodcastEpisodeDownloadWork(
         }
     }
 
-    private fun friendlyWorkerStage(rawStage: String): String {
+    private fun friendlyWorkerStage(rawStage: String, stage: String? = null): String {
+        when (stage?.uppercase()) {
+            "QUEUED" -> return "Queued on worker…"
+            "DOWNLOADING" -> return "Downloading audio…"
+            "DECODING" -> return "Preparing audio…"
+            "TRANSCRIBING" -> return "Transcribing speech…"
+            "ALIGNING" -> return "Aligning transcript…"
+            "SPEAKER_ID" -> return "Detecting speakers…"
+            "EMBEDDING" -> return "Analyzing transcript…"
+            "TAGGING" -> return "Scanning for ads…"
+            "SUMMARIZING" -> return "Creating summary & chapters…"
+            "READY" -> return "Ready"
+            "CANCELLED" -> return "Cancelled"
+            "FAILED" -> return "Worker failed"
+        }
         val lower = rawStage.lowercase()
         return when {
             "cached" in lower || "matched existing" in lower -> "Ready"
@@ -365,6 +389,8 @@ class PodcastEpisodeDownloadWork(
             }
             var trackedJobId: String? = null
             var completedSuccessfully = false
+            var earlyAudioDeferred: kotlinx.coroutines.Deferred<Boolean>? = null
+            var earlyAudioSha: String? = null
             try {
                 val existing = runCatching { autoMuteDb.dao().getStatus(episodeId) }.getOrNull()
                 val resumeAnalyzing = !forceReprocess &&
@@ -383,21 +409,22 @@ class PodcastEpisodeDownloadWork(
                     reportDesktopStatus(highestPct, startStage)
                 }
 
+                val jobReq = app.hushcast.automute.desktop.DesktopJobRequest(
+                    episodeId = episodeId,
+                    audioUrl = audioUrl,
+                    title = title,
+                    feedTranscriptMime = feedTranscriptMime,
+                    feedTranscriptUrl = feedTranscriptUrl,
+                    feedChaptersUrl = feedChaptersUrl,
+                    feedChaptersType = feedChaptersType,
+                    language = language,
+                    force = forceReprocess,
+                    reprocessStage = reprocessStage
+                )
                 val job = app.hushcast.automute.desktop.DesktopWorkerClient.submitJob(
                     baseUrl = workerUrl,
                     token = token,
-                    request = app.hushcast.automute.desktop.DesktopJobRequest(
-                        episodeId = episodeId,
-                        audioUrl = audioUrl,
-                        title = title,
-                        feedTranscriptMime = feedTranscriptMime,
-                        feedTranscriptUrl = feedTranscriptUrl,
-                        feedChaptersUrl = feedChaptersUrl,
-                        feedChaptersType = feedChaptersType,
-                        language = language,
-                        force = forceReprocess,
-                        reprocessStage = reprocessStage
-                    )
+                    request = jobReq
                 )
                 Log.i(
                     "HushCastDesktop",
@@ -417,12 +444,35 @@ class PodcastEpisodeDownloadWork(
                 val ready = app.hushcast.automute.desktop.DesktopWorkerClient.pollJobUntilReady(
                     baseUrl = workerUrl,
                     token = token,
-                    jobId = job.jobId
+                    jobId = job.jobId,
+                    resubmitRequest = jobReq,
+                    onResubmitted = { newJobId -> trackedJobId = newJobId }
                 ) { status ->
+                    // V5: Start early Range audio pull as soon as fileSha256 is known
+                    val shaEarly = status.fileSha256?.takeIf { it.isNotBlank() }
+                    if (shaEarly != null && earlyAudioDeferred == null && reprocessStage == null) {
+                        earlyAudioSha = shaEarly
+                        earlyAudioDeferred = async(Dispatchers.IO) {
+                            runCatching {
+                                val alreadyOk = destFile.exists() && destFile.length() > 0L &&
+                                    app.hushcast.automute.hash.StreamingSha256.hashFile(destFile) == shaEarly
+                                if (!alreadyOk) {
+                                    app.hushcast.automute.desktop.DesktopWorkerClient.downloadAudioAndVerifySha256(
+                                        baseUrl = workerUrl,
+                                        token = token,
+                                        expectedSha256 = shaEarly,
+                                        destFile = destFile
+                                    )
+                                }
+                                true
+                            }.getOrDefault(false)
+                        }
+                    }
+
                     val rawPct = (5 + ((status.progressPercent * 65) / 100)).coerceIn(5, 70)
                     val unifiedPct = maxOf(highestPct, rawPct)
                     highestPct = unifiedPct
-                    val friendlyStage = friendlyWorkerStage(status.stageLabel.ifBlank { status.state })
+                    val friendlyStage = friendlyWorkerStage(status.stageLabel.ifBlank { status.state }, status.stage)
                     val now = System.currentTimeMillis()
                     if ((unifiedPct != lastPollNotifyPct || friendlyStage != lastFriendlyStage) &&
                         (now - lastPollNotifyMs >= 500L || unifiedPct >= 70 || friendlyStage != lastFriendlyStage)
@@ -436,9 +486,14 @@ class PodcastEpisodeDownloadWork(
                     }
                 }
                 val sha256 = ready.fileSha256 ?: return@coroutineScope false
-                Log.i("HushCastDesktop", "Job ${job.jobId} READY ep=$episodeId sha=${sha256.take(12)}")
+                Log.i("HushCastDesktop", "Job ${trackedJobId ?: job.jobId} READY ep=$episodeId sha=${sha256.take(12)}")
 
-                val localAlreadyMatches = withContext(Dispatchers.IO) {
+                val earlyPulledOk = if (earlyAudioSha == sha256 && earlyAudioDeferred != null) {
+                    runCatching { earlyAudioDeferred!!.await() }.getOrDefault(false)
+                } else {
+                    false
+                }
+                val localAlreadyMatches = earlyPulledOk || withContext(Dispatchers.IO) {
                     destFile.exists() && destFile.length() > 0L &&
                         runCatching { app.hushcast.automute.hash.StreamingSha256.hashFile(destFile) == sha256 }
                             .getOrDefault(false)
@@ -499,40 +554,38 @@ class PodcastEpisodeDownloadWork(
                 app.hushcast.automute.worker.EpisodeAnalysisWorker.analysisCompletedEvents.tryEmit(episodeId)
 
                 db.podcastEpisodeDownloads().registerDownload(episodeId, destFile.absolutePath, destFile.length())
+                runCatching {
+                    app.podiumpodcasts.podium.api.chapters.EpisodeChapterHelper.extractAndStoreId3FromFile(
+                        context = context,
+                        db = db,
+                        episodeId = episodeId,
+                        uri = android.net.Uri.fromFile(destFile)
+                    )
+                }
                 app.podiumpodcasts.podium.background.PlaybackService.notifyEpisodeDownloaded(episodeId)
                 completedSuccessfully = true
                 true
             } catch (c: CancellationException) {
                 statusChannel.close()
                 statusWriter.cancel()
-                trackedJobId?.let { jobId ->
-                    withContext(kotlinx.coroutines.NonCancellable) {
-                        runCatching {
-                            app.hushcast.automute.desktop.DesktopWorkerClient.cancelJob(workerUrl, token, jobId)
-                        }
-                    }
-                }
+                earlyAudioDeferred?.cancel()
+                // Do not cancel the remote job on WorkManager constraint stops so retries can re-attach
                 throw c
             } catch (t: Throwable) {
                 statusChannel.close()
                 statusWriter.cancel()
-                trackedJobId?.let { jobId ->
-                    withContext(kotlinx.coroutines.NonCancellable) {
-                        runCatching {
-                            app.hushcast.automute.desktop.DesktopWorkerClient.cancelJob(workerUrl, token, jobId)
-                        }
-                    }
-                }
+                earlyAudioDeferred?.cancel()
                 val errMsg = t.message ?: t.javaClass.simpleName
-                Log.w("HushCastDesktop", "Desktop worker offload failed for $episodeId: $errMsg", t)
-                if (resetStatusOnError) {
+                val isPermanent = (t as? app.hushcast.automute.desktop.DesktopWorkerClient.DesktopWorkerJobException)?.retryable == false
+                Log.w("HushCastDesktop", "Desktop worker offload failed for $episodeId (permanent=$isPermanent): $errMsg", t)
+                if (resetStatusOnError || isPermanent) {
                     runCatching {
                         autoMuteDb.dao().upsertStatus(
                             app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
                                 episodeId = episodeId,
                                 badge = app.hushcast.automute.dsp.ReadinessBadge.NOT_PROCESSED.name,
                                 progressPercent = 0,
-                                stageLabel = "Desktop/Cloud failed",
+                                stageLabel = if (isPermanent) "Worker error (permanent)" else "Desktop/Cloud failed",
                                 errorMessage = errMsg
                             )
                         )

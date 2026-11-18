@@ -29,6 +29,8 @@ import androidx.room.withTransaction
 import app.hushcast.automute.dsp.AdPolicyMode
 import app.hushcast.automute.dsp.HushCastAudioProcessorChain
 import app.hushcast.automute.storage.AutoMuteDatabase
+import app.hushcast.automute.storage.loadResolvedMuteWindows
+import app.hushcast.automute.storage.loadResolvedMuteWindowsByEpisode
 import app.hushcast.automute.storage.toDomain
 import app.podiumpodcasts.podium.HeadsetNextAction
 import app.podiumpodcasts.podium.HeadsetPrevAction
@@ -268,10 +270,7 @@ class PlaybackService : MediaLibraryService() {
                 val activeEpId = exoPlayer.currentMediaItem?.getEpisodeId() ?: HushCastEngineBridge.currentEpisodeId
                 if (!activeEpId.isNullOrBlank()) {
                     withContext(Dispatchers.IO) {
-                        val updated = autoMuteDb.dao()
-                            .observeMuteSegmentsByEpisode(activeEpId)
-                            .first()
-                            .map { it.toDomain() }
+                        val updated = autoMuteDb.dao().loadResolvedMuteWindowsByEpisode(activeEpId, mode)
                         HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
                     }
                 }
@@ -409,7 +408,7 @@ class PlaybackService : MediaLibraryService() {
             val status = autoMuteDb.dao().getStatus(episodeId)
             val sha = status?.fileSha256?.takeIf { it.isNotBlank() }
             if (sha != null) {
-                val mutes = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
+                val mutes = autoMuteDb.dao().loadResolvedMuteWindows(sha, HushCastEngineBridge.defaultActionMode)
                 val ads = autoMuteDb.dao().getAdSegments(sha).map { it.toDomain() }
                 val policyStr = autoMuteDb.dao().getPodcastAdPolicy(origin)?.policyMode
                 val policy = policyStr?.let {

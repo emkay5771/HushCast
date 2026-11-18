@@ -464,21 +464,8 @@ fun SettingsHushCastPane(
                                                 enabled = wordMutingEnabled,
                                                 selected = selectedActionMode == mode,
                                                 onClick = {
-                                                    HushCastEngineBridge.defaultActionMode = mode
                                                     scope.launch {
                                                         settingsRepository.hushCast.setMuteActionMode(mode)
-                                                        withContext(Dispatchers.IO) {
-                                                            autoMuteDb.dao().updateAllRulesActionMode(mode.name)
-                                                            autoMuteDb.dao().updateAllMuteSegmentsActionMode(mode.name)
-                                                            val currentEpId = HushCastEngineBridge.currentEpisodeId
-                                                            if (!currentEpId.isNullOrBlank()) {
-                                                                val sha = autoMuteDb.dao().getStatus(currentEpId)?.fileSha256
-                                                                if (!sha.isNullOrBlank()) {
-                                                                    val updated = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
-                                                                    HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
-                                                                }
-                                                            }
-                                                        }
                                                     }
                                                 },
                                                 label = { Text(label) }
@@ -1108,7 +1095,11 @@ fun SettingsHushCastPane(
                                                                 desktopStatus = if (authErr != null) {
                                                                     "Server reachable (${health.hostname}), but auth failed: ${authErr.message ?: authErr.javaClass.simpleName}"
                                                                 } else {
-                                                                    "Connected: ${health.hostname} (${health.accelerator.uppercase()}) • ${health.whisperModel}"
+                                                                    val outdatedNote = if (
+                                                                        health.apiVersion < app.hushcast.automute.desktop.DesktopWorkerClient.MIN_WORKER_API_VERSION ||
+                                                                        health.pipelineVersion < app.hushcast.automute.pipeline.AutoMuteAnalyzer.CURRENT_PIPELINE_VERSION
+                                                                    ) " • Worker outdated (update recommended)" else ""
+                                                                    "Connected: ${health.hostname} (${health.accelerator.uppercase()}) • ${health.whisperModel}$outdatedNote"
                                                                 }
                                                             } catch (t: Throwable) {
                                                                 desktopStatus = "Saved QR config, but connection check failed: ${t.message ?: t.javaClass.simpleName}"
@@ -1163,9 +1154,13 @@ fun SettingsHushCastPane(
                                                                 if (health.whisperModel.isNotBlank()) append(" • ${health.whisperModel}")
                                                                 if (health.chatModelReady) append(" • LLM Chat")
                                                             }
+                                                            val outdatedNote = if (
+                                                                health.apiVersion < app.hushcast.automute.desktop.DesktopWorkerClient.MIN_WORKER_API_VERSION ||
+                                                                health.pipelineVersion < app.hushcast.automute.pipeline.AutoMuteAnalyzer.CURRENT_PIPELINE_VERSION
+                                                            ) " • Worker outdated (update recommended)" else ""
                                                             "Connected: ${health.hostname} (${health.accelerator.uppercase()}) • " +
                                                                 (if (health.modelsReady) "Models Ready" else "Models Missing") +
-                                                                "$modelNote • ${health.cachedEpisodes} cached"
+                                                                "$modelNote • ${health.cachedEpisodes} cached$outdatedNote"
                                                         }
                                                     } catch (t: Throwable) {
                                                         desktopStatus = "Connection failed: ${t.message ?: t.javaClass.simpleName}"

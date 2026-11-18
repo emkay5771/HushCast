@@ -236,6 +236,24 @@ interface PodcastEpisodeDao {
     @Query("UPDATE podcastEpisode SET duration = :durationSec WHERE id = :id AND (duration <= 0 OR duration != :durationSec)")
     suspend fun updateDuration(id: String, durationSec: Int)
 
+    @Query(
+        """
+        UPDATE podcastEpisode
+        SET transcriptUrl = CASE WHEN :transcriptUrl != '' THEN :transcriptUrl ELSE transcriptUrl END,
+            transcriptType = CASE WHEN :transcriptUrl != '' THEN :transcriptType ELSE transcriptType END,
+            chaptersUrl = CASE WHEN :chaptersUrl != '' THEN :chaptersUrl ELSE chaptersUrl END,
+            chaptersType = CASE WHEN :chaptersUrl != '' THEN :chaptersType ELSE chaptersType END
+        WHERE id = :id
+        """
+    )
+    suspend fun updateFeedExtras(
+        id: String,
+        transcriptUrl: String,
+        transcriptType: String,
+        chaptersUrl: String,
+        chaptersType: String
+    )
+
     @Query("DELETE FROM podcastEpisode WHERE id=:id")
     suspend fun delete(id: String)
 

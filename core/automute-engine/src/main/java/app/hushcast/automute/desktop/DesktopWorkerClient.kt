@@ -33,6 +33,8 @@ import javax.net.ssl.X509TrustManager
  * Downloads pre-analyzed audio + WordIndexBlob + AdSegments keyed by fileSha256.
  */
 object DesktopWorkerClient {
+    const val MIN_WORKER_API_VERSION = 2
+
     internal val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -131,9 +133,15 @@ object DesktopWorkerClient {
         }
     }
 
+    class DesktopWorkerJobException(
+        message: String,
+        val errorCode: String? = null,
+        val retryable: Boolean = true
+    ) : IllegalStateException(message)
+
     /**
      * Polls job status with long-polling (?waitMs=&sinceRev=), HTTP 404 auto-resubmit (V2),
-     * and exponential backoff on transient network errors (E18).
+     * dynamic ETA*2 deadline (V9), and exponential backoff on transient network errors (E18).
      */
     suspend fun pollJobUntilReady(
         baseUrl: String,
@@ -143,9 +151,10 @@ object DesktopWorkerClient {
         maxWaitMs: Long = 30 * 60 * 1000L,
         certFingerprint: String = "",
         resubmitRequest: DesktopJobRequest? = null,
+        onResubmitted: (String) -> Unit = {},
         onProgress: suspend (DesktopJobResponse) -> Unit = {}
     ): DesktopJobResponse {
-        val deadline = System.currentTimeMillis() + maxWaitMs
+        var deadline = System.currentTimeMillis() + maxWaitMs
         val maxQueuedWaitMs = 25 * 60 * 1000L
         var currentJobId = jobId
         var lastRev = 0L
@@ -178,6 +187,7 @@ object DesktopWorkerClient {
                     currentJobId = newJob.jobId
                     lastRev = newJob.rev
                     trackActiveJob(resubmitRequest.episodeId, baseUrl, token, currentJobId, certFingerprint)
+                    onResubmitted(currentJobId)
                     continue
                 }
                 consecutiveErrors++
@@ -189,7 +199,17 @@ object DesktopWorkerClient {
                 continue
             }
 
-            highestReportedPct = maxOf(highestReportedPct, rawStatus.progressPercent)
+            if (rawStatus.progressPercent > highestReportedPct) {
+                highestReportedPct = rawStatus.progressPercent
+                // Progressing job: extend deadline by at least 15 min
+                deadline = maxOf(deadline, System.currentTimeMillis() + 15 * 60 * 1000L)
+            }
+            // V9: Refresh deadline from ETA * 2 when worker reports etaSec
+            val eta = rawStatus.etaSec
+            if (eta != null && eta > 0) {
+                deadline = maxOf(deadline, System.currentTimeMillis() + maxOf(10 * 60 * 1000L, eta.toLong() * 2000L))
+            }
+
             val status = if (rawStatus.progressPercent < highestReportedPct && rawStatus.state !in setOf("READY", "FAILED", "CANCELLED")) {
                 rawStatus.copy(progressPercent = highestReportedPct)
             } else {
@@ -200,8 +220,10 @@ object DesktopWorkerClient {
             when (status.state) {
                 "READY" -> return status
                 "CANCELLED" -> throw CancellationException("Desktop worker job cancelled: $currentJobId")
-                "FAILED" -> throw IllegalStateException(
-                    "Desktop worker failed: ${status.errorMessage ?: status.stageLabel}"
+                "FAILED" -> throw DesktopWorkerJobException(
+                    message = "Desktop worker failed: ${status.errorMessage ?: status.stageLabel}",
+                    errorCode = status.errorCode,
+                    retryable = status.retryable ?: true
                 )
                 "QUEUED" -> {
                     val now = System.currentTimeMillis()

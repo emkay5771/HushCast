@@ -18,11 +18,19 @@ interface EpisodeChapterDao {
     @Query("DELETE FROM episodeChapter WHERE episodeId = :episodeId")
     suspend fun deleteByEpisode(episodeId: String)
 
+    @Query("DELETE FROM chapterSkip WHERE episodeId = :episodeId")
+    suspend fun clearChapterSkips(episodeId: String)
+
     @Insert
     suspend fun insertAll(chapters: List<EpisodeChapterModel>)
 
     @Transaction
     suspend fun replaceByEpisode(episodeId: String, chapters: List<EpisodeChapterModel>) {
+        val prevSource = getByEpisodeSync(episodeId).firstOrNull()?.source
+        val nextSource = chapters.firstOrNull()?.source
+        if (prevSource != null && nextSource != prevSource) {
+            clearChapterSkips(episodeId)
+        }
         deleteByEpisode(episodeId)
         if (chapters.isNotEmpty()) {
             insertAll(chapters)

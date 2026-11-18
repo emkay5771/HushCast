@@ -258,6 +258,7 @@ fun MediaPlayerBottomSheet(
     }
 
     var selectedTab by remember { mutableStateOf(MediaPlayerTab.PLAYER) }
+    var chaptersScrollTargetIndex by remember { mutableStateOf<Int?>(null) }
     var showTranscriptOverlay by remember { mutableStateOf(false) }
 
     val pagerState = rememberPagerState(
@@ -710,6 +711,7 @@ fun MediaPlayerBottomSheet(
                                                         onSeekToMs = { vm.seek(it) },
                                                         onOpenChaptersTab = {
                                                             if (MediaPlayerTab.CHAPTERS in visibleTabs) {
+                                                                chaptersScrollTargetIndex = currentChapterIndex.takeIf { it >= 0 }
                                                                 selectedTab = MediaPlayerTab.CHAPTERS
                                                             }
                                                         }
@@ -936,6 +938,7 @@ fun MediaPlayerBottomSheet(
                                             if (!vm.isPlaying) vm.play()
                                         }
                                     },
+                                    targetChapterIndex = chaptersScrollTargetIndex,
                                     contentBottomPadding = 16.dp
                                 )
                             }
@@ -1318,6 +1321,9 @@ private fun ChapterNavigationLine(
         val spatial = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
         AnimatedContent(
             targetState = currentChapter,
+            transitionSpec = {
+                fadeIn(animationSpec = spatial) togetherWith fadeOut(animationSpec = spatial)
+            },
             modifier = Modifier
                 .weight(1f)
                 .clickable(onClick = onOpenChaptersTab),

@@ -125,6 +125,8 @@ class AutoMuteAnalyzer(
 
         var lastDbWriteMs = 0L
 
+        var existingStatusSnapshot: EpisodeAnalysisStatusEntity? = null
+
         suspend fun writeStatus(
             pct: Int,
             stage: String,
@@ -135,6 +137,13 @@ class AutoMuteAnalyzer(
             setStage(stage)
             peakRssMb = maxOf(peakRssMb, currentRssMb())
             onProgress(AnalysisProgress(pct, stage, badge))
+            val prev = existingStatusSnapshot
+            val preserveExistingReady = prev != null &&
+                prev.badge == ReadinessBadge.READY.name &&
+                prev.fileSha256 == currentSha &&
+                prev.pipelineVersion < CURRENT_PIPELINE_VERSION &&
+                badge != ReadinessBadge.READY
+            if (preserveExistingReady) return
             val now = System.currentTimeMillis()
             if (force || now - lastDbWriteMs >= STATUS_WRITE_INTERVAL_MS) {
                 lastDbWriteMs = now
@@ -166,6 +175,7 @@ class AutoMuteAnalyzer(
         // R2: Skip full run if already READY for this sha256 at current pipeline version
         val existingIndex = dao.getWordIndex(sha256)
         val existingStatus = dao.getStatus(episodeId)
+        existingStatusSnapshot = existingStatus
         val hasAdSegments = dao.getAdSegments(sha256).isNotEmpty()
         if (shouldSkipFullAnalysis(
                 existingIndex = existingIndex,
@@ -283,7 +293,7 @@ class AutoMuteAnalyzer(
 
             if (daiSucceeded) {
                 words = daiWords
-                segments = daiSegments
+                segments = app.hushcast.automute.engine.SentenceSplitter.split(daiWords)
                 if (!effectiveQuickWordMuteOnly) {
                     writeStatus(42, "Extracting acoustic features", ReadinessBadge.ANALYZING)
                     val extractor = FrameExtractor()
@@ -306,7 +316,8 @@ class AutoMuteAnalyzer(
             } else {
                 // E1 + E5 + R2: Stream 180s+5s overlapping chunks with checkpoint resume
                 val extractor = if (!effectiveQuickWordMuteOnly) FrameExtractor() else null
-                val checkpoints = dao.getCheckpoints(sha256).associateBy { it.chunkIndex }
+                val checkpointKey = "$sha256:${if (useFastModel) "tiny" else "base"}:dtw"
+                val checkpoints = dao.getCheckpoints(checkpointKey).associateBy { it.chunkIndex }
                 writeStatus(5, "Loading Whisper", ReadinessBadge.ANALYZING)
                 val transcriber = Transcriber(
                     modelPath = whisperModelPath,
@@ -344,7 +355,7 @@ class AutoMuteAnalyzer(
                                 kotlinx.coroutines.runBlocking {
                                     dao.upsertCheckpoint(
                                         EpisodeChunkCheckpointEntity(
-                                            fileSha256 = sha256,
+                                            fileSha256 = checkpointKey,
                                             chunkIndex = idx,
                                             chunkStartSec = chunkStartSec,
                                             wordsJson = json.encodeToString(out.words),
@@ -603,10 +614,12 @@ class AutoMuteAnalyzer(
         defaultActionMode: MuteActionMode
     ): Int {
         val rules = dao.getEnabledRules().map { it.toDomain() }
+        val rulesById = rules.associateBy { it.id }
         val windows = WordMatcher.matchWords(words, rules, prePadMs, postPadMs, defaultActionMode)
         dao.replaceMuteSegments(
             sha256,
             windows.map { w ->
+                val isDefaultRule = rulesById[w.ruleId]?.useDefaultMode == true
                 MuteSegmentEntity(
                     fileSha256 = sha256,
                     episodeId = episodeId,
@@ -614,11 +627,12 @@ class AutoMuteAnalyzer(
                     endMs = w.endMs,
                     word = w.word,
                     ruleId = w.ruleId,
-                    actionMode = w.actionMode.name,
+                    actionMode = if (isDefaultRule) "DEFAULT" else w.actionMode.name,
                     enabled = w.enabled
                 )
             }
         )
+        dao.clearAnalysisForOtherHashes(episodeId, sha256)
         return windows.size
     }
 

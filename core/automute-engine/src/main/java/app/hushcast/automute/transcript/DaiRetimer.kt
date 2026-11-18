@@ -28,7 +28,7 @@ object DaiRetimer {
     private const val MAX_BISECT_DEPTH = 6
     private const val MIN_GAP_MS = 3500L
 
-    private data class AnchorMatch(
+    internal data class AnchorMatch(
         val downloadCenterSec: Double,
         val transcriptCenterSec: Double,
         val shiftSec: Double,
@@ -286,7 +286,64 @@ object DaiRetimer {
         val mid = matchClip(
             audioPath, clipStart, clipEnd, transcriber, vadModelPath,
             refWords, refNorm, trigramIndex, shouldAbort
-        ) ?: return
+        )
+        if (mid == null) {
+            // Clip landed inside an ad or unaligned span: probe left and right sub-windows so we still find the break
+            if (span > BISECT_STOP_WINDOW_SEC * 2.0) {
+                val leftProbeCenter = left.downloadCenterSec + span * 0.25
+                val rightProbeCenter = left.downloadCenterSec + span * 0.75
+                val leftProbe = matchClip(
+                    audioPath,
+                    (leftProbeCenter - 12.5).coerceIn(0.0, (durationSec - 25.0).coerceAtLeast(0.0)),
+                    (leftProbeCenter + 12.5).coerceAtMost(durationSec),
+                    transcriber, vadModelPath, refWords, refNorm, trigramIndex, shouldAbort
+                )
+                val rightProbe = matchClip(
+                    audioPath,
+                    (rightProbeCenter - 12.5).coerceIn(0.0, (durationSec - 25.0).coerceAtLeast(0.0)),
+                    (rightProbeCenter + 12.5).coerceAtMost(durationSec),
+                    transcriber, vadModelPath, refWords, refNorm, trigramIndex, shouldAbort
+                )
+                if (leftProbe != null) {
+                    outAnchors.add(leftProbe)
+                    if (abs(leftProbe.shiftSec - left.shiftSec) > OFFSET_DISAGREEMENT_SEC) {
+                        bisectBreak(
+                            audioPath, left, leftProbe, durationSec, transcriber, vadModelPath,
+                            refWords, refNorm, trigramIndex, shouldAbort, depth + 1, outAnchors
+                        )
+                    }
+                    if (rightProbe != null) {
+                        outAnchors.add(rightProbe)
+                        if (abs(rightProbe.shiftSec - leftProbe.shiftSec) > OFFSET_DISAGREEMENT_SEC) {
+                            bisectBreak(
+                                audioPath, leftProbe, rightProbe, durationSec, transcriber, vadModelPath,
+                                refWords, refNorm, trigramIndex, shouldAbort, depth + 1, outAnchors
+                            )
+                        }
+                    } else if (abs(right.shiftSec - leftProbe.shiftSec) > OFFSET_DISAGREEMENT_SEC) {
+                        bisectBreak(
+                            audioPath, leftProbe, right, durationSec, transcriber, vadModelPath,
+                            refWords, refNorm, trigramIndex, shouldAbort, depth + 1, outAnchors
+                        )
+                    }
+                } else if (rightProbe != null) {
+                    outAnchors.add(rightProbe)
+                    if (abs(rightProbe.shiftSec - left.shiftSec) > OFFSET_DISAGREEMENT_SEC) {
+                        bisectBreak(
+                            audioPath, left, rightProbe, durationSec, transcriber, vadModelPath,
+                            refWords, refNorm, trigramIndex, shouldAbort, depth + 1, outAnchors
+                        )
+                    }
+                    if (abs(right.shiftSec - rightProbe.shiftSec) > OFFSET_DISAGREEMENT_SEC) {
+                        bisectBreak(
+                            audioPath, rightProbe, right, durationSec, transcriber, vadModelPath,
+                            refWords, refNorm, trigramIndex, shouldAbort, depth + 1, outAnchors
+                        )
+                    }
+                }
+            }
+            return
+        }
         outAnchors.add(mid)
         if (abs(mid.shiftSec - left.shiftSec) > OFFSET_DISAGREEMENT_SEC) {
             bisectBreak(
@@ -380,7 +437,7 @@ object DaiRetimer {
         return bestAnchor
     }
 
-    private fun buildStretches(anchors: List<AnchorMatch>, refWords: List<Word>): List<OffsetStretch> {
+    internal fun buildStretches(anchors: List<AnchorMatch>, refWords: List<Word>): List<OffsetStretch> {
         if (anchors.isEmpty() || refWords.isEmpty()) return emptyList()
         val lastRefMs = (refWords.last().end * 1000.0).toLong().coerceAtLeast(1000L)
         val firstRefMs = (refWords.first().start * 1000.0).toLong().coerceAtLeast(0L)
@@ -395,9 +452,8 @@ object DaiRetimer {
             val cur = anchors[i]
             val groupAvgShift = groupShiftSum / groupCount
             if (abs(cur.shiftSec - groupAvgShift) > OFFSET_DISAGREEMENT_SEC) {
-                // Place break at the last transcript word before the gap
-                val splitIdx = ((prev.transcriptWordIndex + cur.transcriptWordIndex) / 2)
-                    .coerceIn(0, refWords.lastIndex)
+                // Place break at the last matched transcript word before the gap
+                val splitIdx = prev.transcriptWordIndex.coerceIn(0, refWords.lastIndex)
                 val splitSrcMs = (refWords[splitIdx].end * 1000.0).toLong()
                 if (splitSrcMs > groupStartSrcMs) {
                     stretches.add(

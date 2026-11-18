@@ -340,23 +340,6 @@ fun PlayerHushCastSheet(
                                 onClick = {
                                     scope.launch(Dispatchers.IO) {
                                         settingsRepository.hushCast.setMuteActionMode(mode)
-                                        HushCastEngineBridge.defaultActionMode = mode
-                                        if (HushCastEngineBridge.currentEpisodeId == episodeId) {
-                                            val sha = analysisStatus?.fileSha256
-                                            if (!sha.isNullOrBlank()) {
-                                                val updated = autoMuteDb.dao().getMuteSegments(sha).map { seg ->
-                                                    app.hushcast.automute.dsp.MuteWindow(
-                                                        startMs = seg.startMs,
-                                                        endMs = seg.endMs,
-                                                        word = seg.word,
-                                                        ruleId = seg.ruleId,
-                                                        actionMode = mode,
-                                                        enabled = seg.enabled
-                                                    )
-                                                }
-                                                HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
-                                            }
-                                        }
                                     }
                                 },
                                 label = { Text(label) }

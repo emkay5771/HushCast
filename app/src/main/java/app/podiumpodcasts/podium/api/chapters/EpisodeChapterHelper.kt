@@ -6,15 +6,18 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Metadata
 import androidx.media3.common.Tracks
 import androidx.media3.extractor.metadata.id3.ChapterFrame
+import androidx.media3.extractor.metadata.id3.Id3Decoder
 import androidx.media3.extractor.metadata.id3.TextInformationFrame
 import androidx.media3.extractor.metadata.id3.UrlLinkFrame
 import app.hushcast.automute.storage.AutoMuteDatabase
 import app.hushcast.automute.transcript.OffsetMap
 import app.podiumpodcasts.podium.api.db.AppDatabase
 import app.podiumpodcasts.podium.api.db.model.EpisodeChapterModel
+import app.podiumpodcasts.podium.utils.rss.computeEpisodeId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
@@ -31,15 +34,24 @@ object EpisodeChapterHelper {
 
     private val json = Json { ignoreUnknownKeys = true }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun observeResolvedChapters(
         db: AppDatabase,
         autoMuteDb: AutoMuteDatabase,
         episodeId: String,
         durationMs: Long
     ): Flow<List<ResolvedChapter>> {
+        val offsetMapFlow = autoMuteDb.dao().observeStatus(episodeId).flatMapLatest { status ->
+            val sha = status?.fileSha256?.takeIf { it.isNotBlank() }
+            if (sha != null) {
+                autoMuteDb.dao().observeOffsetMap(sha)
+            } else {
+                kotlinx.coroutines.flow.flowOf(null)
+            }
+        }
         return combine(
             db.episodeChapters().observeByEpisode(episodeId),
-            autoMuteDb.dao().observeOffsetMapByEpisode(episodeId)
+            offsetMapFlow
         ) { entities, offsetEntity ->
             val offsetMap = offsetEntity?.stretchesJson?.let { raw ->
                 runCatching { json.decodeFromString<OffsetMap>(raw) }.getOrNull()
@@ -141,6 +153,7 @@ object EpisodeChapterHelper {
         }
     }
 
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
     suspend fun extractAndStoreId3FromFile(
         context: Context,
         db: AppDatabase,
@@ -148,7 +161,110 @@ object EpisodeChapterHelper {
         uri: Uri,
         durationMs: Long = 0L
     ): List<EpisodeChapterModel> = withContext(Dispatchers.IO) {
-        // ID3 ChapterFrame extraction runs live via PlaybackService onTracksChanged/onMetadata
+        val extracted = runCatching {
+            val stream = if (uri.scheme == "file" && uri.path != null) {
+                java.io.FileInputStream(uri.path!!)
+            } else {
+                context.contentResolver.openInputStream(uri)
+            }
+            stream?.use { input ->
+                val header = ByteArray(Id3Decoder.ID3_HEADER_LENGTH)
+                var headerRead = 0
+                while (headerRead < header.size) {
+                    val n = input.read(header, headerRead, header.size - headerRead)
+                    if (n <= 0) break
+                    headerRead += n
+                }
+                if (headerRead == Id3Decoder.ID3_HEADER_LENGTH &&
+                    header[0] == 'I'.code.toByte() &&
+                    header[1] == 'D'.code.toByte() &&
+                    header[2] == '3'.code.toByte()
+                ) {
+                    val tagSize = ((header[6].toInt() and 0x7F) shl 21) or
+                        ((header[7].toInt() and 0x7F) shl 14) or
+                        ((header[8].toInt() and 0x7F) shl 7) or
+                        (header[9].toInt() and 0x7F)
+                    if (tagSize in 1..(16 * 1024 * 1024)) {
+                        val total = Id3Decoder.ID3_HEADER_LENGTH + tagSize
+                        val tagBytes = ByteArray(total)
+                        System.arraycopy(header, 0, tagBytes, 0, Id3Decoder.ID3_HEADER_LENGTH)
+                        var offset = Id3Decoder.ID3_HEADER_LENGTH
+                        while (offset < total) {
+                            val n = input.read(tagBytes, offset, total - offset)
+                            if (n <= 0) break
+                            offset += n
+                        }
+                        val metadata = Id3Decoder(Id3Decoder.NO_ARTWORK_PREDICATE).decode(tagBytes, offset)
+                        val chapters = ArrayList<PodcastChapter>()
+                        if (metadata != null) {
+                            collectChaptersFromMetadata(metadata, chapters)
+                        }
+                        chapters.sortedBy { it.startTimeMs }
+                    } else {
+                        emptyList()
+                    }
+                } else {
+                    emptyList()
+                }
+            } ?: emptyList()
+        }.getOrDefault(emptyList())
+
+        if (extracted.isNotEmpty()) {
+            val entities = ChapterParser.toEntities(
+                episodeId = episodeId,
+                source = EpisodeChapterModel.SOURCE_ID3,
+                raw = extracted,
+                durationMs = durationMs,
+                forceFirstAtZero = true
+            )
+            if (entities.isNotEmpty()) {
+                db.episodeChapters().upsertPublisherChapters(episodeId, EpisodeChapterModel.SOURCE_ID3, entities)
+                return@withContext entities
+            }
+        }
         db.episodeChapters().getByEpisodeSync(episodeId)
+    }
+
+    suspend fun applyFeedExtrasOnRefresh(
+        db: AppDatabase,
+        origin: String,
+        items: List<com.prof18.rssparser.model.RssItem>,
+        extras: app.podiumpodcasts.podium.api.rss.RssPodcastExtras
+    ) = withContext(Dispatchers.IO) {
+        for (item in items) {
+            val extra = extras.lookup(item) ?: continue
+            val episodeId = item.computeEpisodeId(origin)
+            if (extra.transcriptUrl.isNotBlank() || extra.chaptersUrl.isNotBlank()) {
+                db.podcastEpisodes().updateFeedExtras(
+                    id = episodeId,
+                    transcriptUrl = extra.transcriptUrl,
+                    transcriptType = extra.transcriptType,
+                    chaptersUrl = extra.chaptersUrl,
+                    chaptersType = extra.chaptersType
+                )
+            }
+            if (extra.inlineChapters.isNotEmpty()) {
+                val entities = ChapterParser.toEntities(
+                    episodeId = episodeId,
+                    source = EpisodeChapterModel.SOURCE_PODLOVE,
+                    raw = extra.inlineChapters,
+                    durationMs = 0L,
+                    forceFirstAtZero = true
+                )
+                if (entities.isNotEmpty()) {
+                    db.episodeChapters().upsertPublisherChapters(episodeId, EpisodeChapterModel.SOURCE_PODLOVE, entities)
+                }
+            } else if (extra.chaptersUrl.isNotBlank()) {
+                val existing = db.episodeChapters().getByEpisodeSync(episodeId)
+                if (existing.none { it.isPublisher }) {
+                    fetchAndStoreFeedChapters(
+                        db = db,
+                        episodeId = episodeId,
+                        chaptersUrl = extra.chaptersUrl,
+                        chaptersType = extra.chaptersType
+                    )
+                }
+            }
+        }
     }
 }

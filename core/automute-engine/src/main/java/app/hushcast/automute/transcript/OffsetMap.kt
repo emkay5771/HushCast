@@ -96,15 +96,16 @@ data class OffsetMap(
         merged.add(cur)
 
         val gaps = ArrayList<Pair<Long, Long>>()
-        var cursor = 0L
-        for ((s, e) in merged) {
-            if (s - cursor >= minGapMs) {
-                gaps.add(cursor to s)
-            }
-            cursor = maxOf(cursor, e)
+        // Leading gap is only a DAI pre-roll if the first stretch has a measured offset shift
+        if (merged[0].first >= minGapMs && kotlin.math.abs(stretches.first().shiftMs) >= minGapMs) {
+            gaps.add(0L to merged[0].first)
         }
-        if (totalDurationMs - cursor >= minGapMs) {
-            gaps.add(cursor to totalDurationMs)
+        for (i in 0 until merged.lastIndex) {
+            val gapStart = merged[i].second
+            val gapEnd = merged[i + 1].first
+            if (gapEnd - gapStart >= minGapMs) {
+                gaps.add(gapStart to gapEnd)
+            }
         }
         return gaps
     }
