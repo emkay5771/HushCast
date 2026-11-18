@@ -200,7 +200,7 @@ fun MediaPlayerSleepTimerBottomSheet(
                 )
             }
 
-            if (endOfChapterWallMs != null) {
+            if (currentOrNextChapterEndMs != null && endOfChapterWallMs != null) {
                 ListItem(
                     colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                     headlineContent = {
@@ -208,7 +208,7 @@ fun MediaPlayerSleepTimerBottomSheet(
                     },
                     modifier = Modifier.clickable {
                         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        vm.setSleepTimer(System.currentTimeMillis() + endOfChapterWallMs)
+                        vm.setSleepTimerEndOfChapter(currentOrNextChapterEndMs, endOfChapterWallMs)
                         onDismiss()
                     }
                 )
@@ -222,7 +222,7 @@ fun MediaPlayerSleepTimerBottomSheet(
                     },
                     modifier = Modifier.clickable {
                         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        vm.setSleepTimer(System.currentTimeMillis() + endOfEpisodeWallMs)
+                        vm.setSleepTimerEndOfEpisode(endOfEpisodeWallMs)
                         onDismiss()
                     }
                 )

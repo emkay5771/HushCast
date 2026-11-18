@@ -277,6 +277,14 @@ fun Main(
                         * floatingMediaPlayerHeightAnimation.value,
                 LocalFloatingMediaPlayerShown provides floatingMediaPlayerShown.value
             ) {
+                androidx.activity.compose.BackHandler(
+                    enabled = backStack.size == 1 &&
+                        backStack.lastOrNull() != Home &&
+                        !listDetailNavigator.canNavigateBack(BackNavigationBehavior.PopUntilScaffoldValueChange)
+                ) {
+                    backStack.clear()
+                    backStack.add(Home)
+                }
                 NavigableListDetailPaneScaffold(
                     defaultBackBehavior = BackNavigationBehavior.PopLatest,
                     navigator = listDetailNavigator,

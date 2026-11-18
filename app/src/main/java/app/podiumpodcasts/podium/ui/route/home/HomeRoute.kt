@@ -142,6 +142,9 @@ fun HomeRoute(
     var showCreateFolderDialog by remember { mutableStateOf(false) }
     var showOrganizeFoldersDialog by remember { mutableStateOf(false) }
     var reorderMode by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = reorderMode) {
+        reorderMode = false
+    }
     var openFolderId by remember { mutableStateOf<String?>(null) }
     var moveToFolderTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     var contextMenuTarget by remember { mutableStateOf<app.podiumpodcasts.podium.api.db.model.PodcastSubscriptionBundle?>(null) }

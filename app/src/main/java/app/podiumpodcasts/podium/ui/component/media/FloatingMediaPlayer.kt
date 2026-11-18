@@ -56,6 +56,9 @@ import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearWavyProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.background
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -64,6 +67,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -185,48 +189,76 @@ fun FloatingMediaPlayer(
                                     animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
                                     label = "artworkCorner"
                                 )
-                                AnimatedContent(
-                                    targetState = vm.isLoading,
-                                    transitionSpec = {
-                                        (fadeIn() + scaleIn(initialScale = 0.85f))
-                                            .togetherWith(fadeOut() + scaleOut(targetScale = 0.85f))
-                                    },
-                                    label = "loadingOrArt"
-                                ) { isLoading ->
-                                    when(isLoading) {
-                                        true -> {
-                                            ContainedLoadingIndicator(
-                                                Modifier.size(48.dp)
-                                            )
-                                        }
-
-                                        false -> {
-                                            AnimatedContent(
-                                                targetState = vm.mediaMetadata,
-                                                transitionSpec = {
-                                                    (fadeIn() + scaleIn(initialScale = 0.9f))
-                                                        .togetherWith(fadeOut() + scaleOut(targetScale = 0.9f))
-                                                },
-                                                label = "artworkMetadata"
-                                            ) { mediaMetadata ->
-                                                ShimmerAsyncImage(
-                                                    modifier = Modifier
-                                                        .size(48.dp)
-                                                        .graphicsLayer {
-                                                            scaleX = artworkScale
-                                                            scaleY = artworkScale
-                                                        }
-                                                        .clip(RoundedCornerShape(artworkCorner)),
-
-                                                    model = mediaMetadata?.artworkUri,
-                                                    contentDescription = mediaMetadata?.title?.toString(),
-
-                                                    contentScale = ContentScale.Crop
-                                                )
-                                            }
+                                val isActivelyBuffering =
+                                    vm.playbackState == androidx.media3.common.Player.STATE_BUFFERING && vm.playWhenReady
+                                var showBufferingOverlay by remember { mutableStateOf(false) }
+                                LaunchedEffect(isActivelyBuffering) {
+                                    if (isActivelyBuffering) {
+                                        kotlinx.coroutines.delay(300L)
+                                        showBufferingOverlay = true
+                                    } else {
+                                        showBufferingOverlay = false
+                                    }
+                                }
+                                Box(
+                                    modifier = Modifier.size(48.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    AnimatedContent(
+                                        targetState = vm.mediaMetadata,
+                                        transitionSpec = {
+                                            (fadeIn() + scaleIn(initialScale = 0.9f))
+                                                .togetherWith(fadeOut() + scaleOut(targetScale = 0.9f))
+                                        },
+                                        label = "artworkMetadata"
+                                    ) { mediaMetadata ->
+                                        ShimmerAsyncImage(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .graphicsLayer {
+                                                    scaleX = artworkScale
+                                                    scaleY = artworkScale
+                                                }
+                                                .clip(RoundedCornerShape(artworkCorner)),
+                                            model = mediaMetadata?.artworkUri,
+                                            contentDescription = mediaMetadata?.title?.toString(),
+                                            contentScale = ContentScale.Crop
+                                        )
+                                    }
+                                    if (showBufferingOverlay) {
+                                        Box(
+                                            modifier = Modifier
+                                                .matchParentSize()
+                                                .clip(RoundedCornerShape(artworkCorner))
+                                                .background(Color.Black.copy(alpha = 0.35f)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            ContainedLoadingIndicator(Modifier.size(28.dp))
                                         }
                                     }
                                 }
+
+                                if (vm.playerError != null) {
+                                    Row(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(horizontal = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = vm.playerError.orEmpty(),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.error,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        TextButton(onClick = { vm.retry() }) {
+                                            Text("Retry")
+                                        }
+                                    }
+                                } else {
 
                                 Row(
                                     modifier = Modifier.weight(1f),
@@ -410,6 +442,7 @@ fun FloatingMediaPlayer(
                                             contentDescription = "Skip forward"
                                         )
                                     }
+                                }
                                 }
 
                                 onOpenQueue?.let { openQueue ->

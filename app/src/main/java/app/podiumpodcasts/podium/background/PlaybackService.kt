@@ -111,6 +111,8 @@ class PlaybackService : MediaLibraryService() {
     private val sleepTimerHandler: Handler = Handler(Looper.getMainLooper())
     var sleepTimerTrigger: Long? = null
         private set
+    private var sleepTimerChapterMessage: PlayerMessage? = null
+    private var sleepTimerEndOfEpisode: Boolean = false
     private val sleepTimerFadeDurationMs = 10_000L
     private val sleepTimerRunnable = Runnable {
         sleepTimerTrigger = null
@@ -935,18 +937,62 @@ class PlaybackService : MediaLibraryService() {
         sleepTimerTrigger = null
         sleepTimerHandler.removeCallbacks(sleepTimerRunnable)
         sleepTimerHandler.removeCallbacks(sleepTimerFadeRunnable)
+        sleepTimerChapterMessage?.let { runCatching { it.cancel() } }
+        sleepTimerChapterMessage = null
+        if (sleepTimerEndOfEpisode) {
+            sleepTimerEndOfEpisode = false
+            exoPlayer.pauseAtEndOfMediaItems = false
+        }
         mediaSession?.player?.volume = 1.0f
         publishSleepTimerExtra()
     }
 
     fun startSleepTimer(trigger: Long) {
+        stopSleepTimer()
         sleepTimerTrigger = trigger
         val delay = (trigger - System.currentTimeMillis()).coerceAtLeast(0L)
 
-        sleepTimerHandler.removeCallbacks(sleepTimerRunnable)
-        sleepTimerHandler.removeCallbacks(sleepTimerFadeRunnable)
         sleepTimerHandler.postDelayed(sleepTimerRunnable, delay)
         sleepTimerHandler.post(sleepTimerFadeRunnable)
+        publishSleepTimerExtra()
+    }
+
+    fun startSleepTimerEndOfEpisode(approxTrigger: Long = 0L) {
+        stopSleepTimer()
+        sleepTimerEndOfEpisode = true
+        sleepTimerTrigger = approxTrigger.takeIf { it > 0L }
+        exoPlayer.pauseAtEndOfMediaItems = true
+        exoPlayer.addListener(object : Player.Listener {
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
+                    exoPlayer.removeListener(this)
+                    stopSleepTimer()
+                }
+            }
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                exoPlayer.removeListener(this)
+                stopSleepTimer()
+            }
+        })
+        publishSleepTimerExtra()
+    }
+
+    fun startSleepTimerAtPosition(positionMs: Long, approxTrigger: Long = 0L) {
+        stopSleepTimer()
+        sleepTimerTrigger = approxTrigger.takeIf { it > 0L }
+        sleepTimerChapterMessage = exoPlayer.createMessage { _, _ ->
+            Handler(Looper.getMainLooper()).post {
+                sleepTimerChapterMessage = null
+                sleepTimerTrigger = null
+                publishSleepTimerExtra()
+                exoPlayer.pause()
+                exoPlayer.volume = 1.0f
+            }
+        }
+            .setLooper(Looper.getMainLooper())
+            .setPosition(positionMs.coerceAtLeast(0L))
+            .setDeleteAfterDelivery(true)
+            .send()
         publishSleepTimerExtra()
     }
 

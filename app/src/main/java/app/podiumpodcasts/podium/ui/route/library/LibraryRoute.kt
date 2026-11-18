@@ -56,6 +56,7 @@ import app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel
 import app.podiumpodcasts.podium.ui.vm.home.ContinuePlayingViewModel
 import app.podiumpodcasts.podium.ui.vm.home.NewEpisodesViewModel
 import app.podiumpodcasts.podium.ui.vm.library.LibraryViewModel
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -226,10 +227,24 @@ fun LibraryRoute(
         vm.showListCreateBottomSheet.value = false
     }
 
-    if (showUpNextSheet) MediaPlayerQueueBottomSheet(
-        onOpenEpisode = { _, _ -> showUpNextSheet = false },
-        onDismiss = { showUpNextSheet = false }
-    )
+    if (showUpNextSheet) {
+        val upNextDb = LocalDatabase.current
+        val upNextScope = androidx.compose.runtime.rememberCoroutineScope()
+        MediaPlayerQueueBottomSheet(
+            onOpenEpisode = { _, episodeId ->
+                showUpNextSheet = false
+                upNextScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    val bundle = upNextDb.podcastEpisodes().getSyncNullable(episodeId)
+                    if (bundle != null) {
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            onClickEpisode(bundle.episode)
+                        }
+                    }
+                }
+            },
+            onDismiss = { showUpNextSheet = false }
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

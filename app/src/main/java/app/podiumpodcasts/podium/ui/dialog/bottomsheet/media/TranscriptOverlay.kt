@@ -60,6 +60,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -88,6 +89,7 @@ fun TranscriptOverlay(
     state: TranscriptLoadState,
     episodeTitle: String,
     currentPositionMs: Long,
+    positionMsState: androidx.compose.runtime.State<Long>? = null,
     isPlaying: Boolean,
     muteWindows: List<MuteWindow>,
     onClose: () -> Unit,
@@ -170,11 +172,15 @@ fun TranscriptOverlay(
         }
     }
 
-    val activeLineIndex = remember(lines, currentPositionMs) {
-        if (lines.isEmpty()) -1
-        else lines.indexOfFirst { currentPositionMs in it.startMs..it.endMs }
-            .takeIf { it >= 0 }
-            ?: lines.indexOfLast { it.startMs > 0L && currentPositionMs >= it.startMs }
+    val posState = positionMsState ?: androidx.compose.runtime.rememberUpdatedState(currentPositionMs)
+    val activeLineIndex by remember(lines) {
+        androidx.compose.runtime.derivedStateOf {
+            val pos = posState.value
+            if (lines.isEmpty()) -1
+            else lines.indexOfFirst { pos in it.startMs..it.endMs }
+                .takeIf { it >= 0 }
+                ?: lines.indexOfLast { it.startMs > 0L && pos >= it.startMs }
+        }
     }
 
     // T3: Keep active line ~30% from top when autoFollow is enabled and not searching
@@ -432,10 +438,25 @@ fun TranscriptOverlay(
                                 }
 
                                 val firstMutableWord = line.words.firstOrNull { it.text.trim().isNotEmpty() }
+                                val firstWordMuted = firstMutableWord != null && run {
+                                    val wStartMs = (firstMutableWord.start * 1000.0).toLong()
+                                    val wEndMs = (firstMutableWord.end * 1000.0).toLong()
+                                    muteWindows.any { m -> m.enabled && wEndMs >= m.startMs && wStartMs <= m.endMs }
+                                }
                                 val rowSemantics = Modifier.semantics {
+                                    onClick(label = "Play from here") {
+                                        if (line.startMs > 0L || idx == 0) {
+                                            onSeekToMs(line.startMs)
+                                            true
+                                        } else {
+                                            false
+                                        }
+                                    }
                                     if (firstMutableWord != null) {
                                         customActions = listOf(
-                                            CustomAccessibilityAction("Mute this word") {
+                                            CustomAccessibilityAction(
+                                                if (firstWordMuted) "Unmute word" else "Mute word"
+                                            ) {
                                                 onMuteWord(firstMutableWord)
                                                 true
                                             }
@@ -504,7 +525,7 @@ fun TranscriptOverlay(
                                                 }
                                                 val wStartMs = (w.start * 1000.0).toLong()
                                                 val wEndMs = (w.end * 1000.0).toLong()
-                                                val isSpoken = isActive && currentPositionMs in wStartMs..wEndMs
+                                                val isSpoken = isActive && posState.value in wStartMs..wEndMs
                                                 val isMuted = muteWindows.any { m ->
                                                     m.enabled && wEndMs >= m.startMs && wStartMs <= m.endMs
                                                 }

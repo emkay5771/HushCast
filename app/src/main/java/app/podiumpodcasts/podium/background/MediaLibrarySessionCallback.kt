@@ -94,12 +94,30 @@ class MediaLibrarySessionCallback(
         when (customCommand.customAction) {
 
             COMMAND_SLEEP_TIMER_SET -> {
-                val trigger = customCommand.customExtras.getLong("trigger")
-
-                if (trigger != 0L) {
-                    service.startSleepTimer(trigger = trigger)
-                } else {
-                    service.stopSleepTimer()
+                val mode = customCommand.customExtras.getString("mode")
+                when (mode) {
+                    "END_OF_EPISODE" -> {
+                        service.startSleepTimerEndOfEpisode(
+                            approxTrigger = customCommand.customExtras.getLong("approxTrigger", 0L)
+                        )
+                    }
+                    "END_OF_CHAPTER" -> {
+                        val posMs = customCommand.customExtras.getLong("positionMs", -1L)
+                        if (posMs >= 0L) {
+                            service.startSleepTimerAtPosition(
+                                positionMs = posMs,
+                                approxTrigger = customCommand.customExtras.getLong("approxTrigger", 0L)
+                            )
+                        }
+                    }
+                    else -> {
+                        val trigger = customCommand.customExtras.getLong("trigger")
+                        if (trigger != 0L) {
+                            service.startSleepTimer(trigger = trigger)
+                        } else {
+                            service.stopSleepTimer()
+                        }
+                    }
                 }
 
                 return Futures.immediateFuture(

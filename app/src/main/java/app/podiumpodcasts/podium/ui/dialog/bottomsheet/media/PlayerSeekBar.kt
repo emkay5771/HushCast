@@ -42,8 +42,11 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -99,7 +102,7 @@ fun PlayerSeekBar(
     )
 
     val adColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.78f)
-    val suggestedAdColor = Color(0xFFFFB300).copy(alpha = 0.8f)
+    val suggestedAdColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.85f)
     val muteTickColor = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
     val activeTrackColor = MaterialTheme.colorScheme.primary
     val inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
@@ -265,6 +268,18 @@ fun PlayerSeekBar(
                 .height(40.dp)
                 .semantics {
                     stateDescription = stateDesc
+                    progressBarRangeInfo = ProgressBarRangeInfo(
+                        current = displayFraction,
+                        range = 0f..1f
+                    )
+                    setProgress { target ->
+                        if (durationMs > 0L) {
+                            onSeekToMs((target.coerceIn(0f, 1f) * durationMs).toLong())
+                            true
+                        } else {
+                            false
+                        }
+                    }
                     if (a11yActions.isNotEmpty()) {
                         customActions = a11yActions
                     }
