@@ -204,7 +204,9 @@ interface SwipeableItemActions {
                 if (isDownloaded) {
                     showDeleteConfirm = true
                     SwipeableItemActionResult(
-                        isDismissed = false
+                        isDismissed = false,
+                        message = "",
+                        onUndo = {}
                     )
                 } else {
                     app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
