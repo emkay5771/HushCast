@@ -1,3 +1,79 @@
+# HushCast v1.0.28-hushcast
+
+## What's New
+- **Player Sheet, Playback & Queue Overhaul**:
+  - **Modular Player Architecture**: Split the monolithic `MediaPlayerBottomSheet` into dedicated, smoother components (`PlayerScreenViewModel`, `PlayerSeekBar`, `PlayerChaptersTab`, `PlayerHushCastSheet`, `PlayerCustomizeSheet`, and `TranscriptOverlay`) with reduced recompositions and faster sheet opening.
+  - **Smoother Motion & Gestures**: Tuned `MediaPlayerBottomSheet` spring physics and swipe-to-dismiss / queue reorder responsiveness (`SwipeableItem`), plus `SleepTimer` and `PlaybackSpeed` bottom sheet polish.
+  - **Real-Time Queue & Play-Next Latency**: Fixed queue updates, Play Next / Play Last ordering, and auto-play transitions in `MediaPlayerViewModel` and `PlaybackService` (`PodcastEpisodeQueueButton`).
+  - **Chapters Tab & ID3 Fallback**: Added dedicated `PlayerChaptersTab` backed by `EpisodeChapterDao` / `EpisodeChapterHelper` — extracts embedded MP3 ID3 `CHAP` / `CTOC` chapters via Media3 and falls back to AI-generated chapters when none exist.
+  - **Transcript Search & Export**: Added inline transcript search and share/export in `TranscriptOverlay`.
+- **Home, Library, Discovery & Episode List UX**:
+  - **Pull-to-Refresh & Expandable Folders**: Added `PullToRefreshBox` on Home (`HomeRoute`) to refresh feeds via `PodcastUpdateWork`, removed the duplicate top-bar folder button, and made folders expandable inline in List layout.
+  - **Long-Press Context Menus**:
+    - **Podcast Cards** (`PodcastCard`, `SubscriptionCard`, `HomeRoute`): Long-press opens a context menu with **Open podcast**, **Mark all as listened**, **Move to folder**, and **Unsubscribe**.
+    - **Episode Rows** (`PodcastEpisodeListItem`): Long-press opens a context menu (**Play next**, **Play last**, **Download**, **Mark played / unplayed**) alongside TalkBack `CustomAccessibilityAction`s for **Play next** and **Play last**.
+  - **Mark All As Listened Safety**: Added confirmation dialog and undo/status snackbar in `PodcastDetailView` when marking all episodes as listened.
+  - **Paged Podcast Episodes**: Upgraded `PodcastDetailViewModel` to Paging 3 (`pageSize = 30, prefetchDistance = 30`) for fast scrolling on large feeds.
+  - **Faster Podcast Adding & OPML Import**: Added URI keyboard (`KeyboardType.Uri`), **Paste** button, **Import OPML file** button, and **Subscribe** label in `AddPodcastView` / `AddPodcastRoute`, and removed the 2-second artwork color-analysis gate from both `AddPodcastView` and `PodcastPreviewView`.
+  - **Smarter Discover Search**: Cancelled stale in-flight searches (`searchJob?.cancel()`), kept previous results visible beneath an inline progress bar while searching, added typed network/server error cards with **Retry**, and detected pasted RSS URLs to show an **Add this feed** card opening `AddPodcastView` in a `ModalBottomSheet`.
+  - **Navigation, Downloads & Search Polish**: Improved `NavBarScaffold` / `NavBarItems`, `NewEpisodesRoute`, `DownloadsRoute`, and `LibrarySearch` state handling.
+- **Settings Reorganization**:
+  - **Inline HushCast Settings Sub-Pages**: `SettingsPane` / `SettingsRoute` now manages HushCast sub-sections inline with `BackHandler` support and updated `SettingsHeader`, `SettingsListItem`, and `SettingsSwitchListItem`.
+  - **Cleaner Appearance Settings**: Reordered items in `SettingsAppearancePane` and replaced the inline **Startup screen** list with a single row opening a clean `AlertDialog` picker.
+- **Processing Efficiency & Cloud Worker Upgrades**:
+  - **2–4x Faster Cloud Transcription (`faster-whisper`)**: Switched default Cloud Worker ASR to `faster-whisper` (`large-v3-turbo`, `int8_float16`) with `whisper.cpp` fallback, Silero VAD pre-filtering, separate CPU web container + GPU worker (`modal.Dict` job state), and 3B JSON-mode LLM (`Qwen2.5-3B-Instruct`).
+  - **On-Device Speed & Battery Improvements**: Faster chunked analysis (`CpuTopology` `min(4, cores)` threads, `float32` audio path, `large` vs `tiny.en` model selection), battery/charging gate, and `OPUS` / reduced storage overhead.
+- **DAI Ad-Retiming Bridge**:
+  - **Cross-Download Dynamic Ad Retiming**: Added `dai_anchor` fingerprint storage on episode bundles and automatic MFCC/DTW retiming (`DaiRetimer`, `OffsetMap`) when a dynamic-ad (DAI) re-download shifts timestamps, preserving transcript, chapter, and ad-window alignment without re-transcribing.
+
+---
+
+# HushCast v1.0.27-hushcast
+
+## What's New
+- **Stability & Build Fixes**:
+  - Fixed missing Compose imports and `SwipeableItemActionResult` arguments introduced in `v1.0.26-hushcast`.
+  - Includes all Dev Mode stage reprocessing, multi-sound bleep presets, custom tab bar ordering, and UI polish from `v1.0.26-hushcast`.
+
+---
+
+# HushCast v1.0.26-hushcast
+
+## What's New
+- **Dev Mode Stage Reprocessing**:
+  - Added per-stage reprocessing controls in Developer / Diagnostics tools to re-run ad classification, chapter/summary generation, or word matching without re-transcribing.
+- **Multi-Sound Bleep Presets & Tab Customization**:
+  - Added built-in bleep/chime sound presets alongside custom sound files.
+  - Added navigation tab customization and general UI polish across the player and settings screens.
+
+---
+
+# HushCast v1.0.25-hushcast
+
+## What's New
+- **Word Mute Timing Precision Fix**:
+  - Switched `neighborBoundedWindow` boundary calculations to `roundToLong()` to eliminate sub-millisecond truncation drift when clamping mute windows against adjacent words.
+
+---
+
+# HushCast v1.0.24-hushcast
+
+## What's New
+- **Word Matcher Test Coverage**:
+  - Updated `WordMatcherTest` to cover neighbor-bounded mute padding behavior introduced in `v1.0.23`.
+
+---
+
+# HushCast v1.0.23-hushcast
+
+## What's New
+- **MMS_FA CTC Forced Alignment & Neighbor-Bounded Mute Timing**:
+  - Added `MMS_FA` CTC forced alignment on the Cloud / Desktop Worker for tighter word-level timestamps.
+  - Added neighbor-bounded mute window padding (`WordMatcher`) so bleep/mute expansion never bleeds into adjacent non-target words.
+  - Enabled Whisper DTW alignment preset and `t_dtw` token timestamp parsing.
+
+---
+
 # HushCast v1.0.22-hushcast
 
 ## What's New
