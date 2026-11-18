@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloseFullscreen
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Done
@@ -2418,7 +2419,7 @@ private fun ActivePlaybackContextBar(
                         modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
-                            imageVector = androidx.compose.material.icons.Icons.Rounded.Close,
+                            imageVector = Icons.Rounded.Close,
                             contentDescription = "Dismiss",
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
                             modifier = Modifier.size(16.dp)
@@ -2464,7 +2465,7 @@ private fun ActivePlaybackContextBar(
                         modifier = Modifier.size(28.dp)
                     ) {
                         Icon(
-                            imageVector = androidx.compose.material.icons.Icons.Rounded.Close,
+                            imageVector = Icons.Rounded.Close,
                             contentDescription = "Dismiss",
                             tint = MaterialTheme.colorScheme.onTertiaryContainer,
                             modifier = Modifier.size(16.dp)
