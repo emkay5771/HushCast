@@ -39,7 +39,7 @@ object DesktopWorkerClient {
     }
 
     private fun defaultTimeoutMs(normalizedUrl: String): Int =
-        if (normalizedUrl.startsWith("https://", ignoreCase = true)) 35_000 else 15_000
+        if (normalizedUrl.startsWith("https://", ignoreCase = true)) 60_000 else 15_000
 
     suspend fun healthCheck(
         baseUrl: String,
@@ -47,7 +47,7 @@ object DesktopWorkerClient {
         certFingerprint: String = ""
     ): DesktopHealthResponse = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl)
-        val timeout = if (normalized.startsWith("https://", ignoreCase = true)) 35_000 else 4_000
+        val timeout = if (normalized.startsWith("https://", ignoreCase = true)) 60_000 else 4_000
         val body = getText("$normalized/v1/health", token, certFingerprint, timeoutMs = timeout)
         json.decodeFromString<DesktopHealthResponse>(body)
     }

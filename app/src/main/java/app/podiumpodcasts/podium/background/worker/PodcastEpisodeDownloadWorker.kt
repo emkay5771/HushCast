@@ -45,6 +45,10 @@ class PodcastEpisodeDownloadWorker(
         } ?: app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO
         val isAuto = inputData.getBoolean(KEY_IS_AUTO, false)
         val forceReprocess = inputData.getBoolean(KEY_FORCE_REPROCESS, false)
+        android.util.Log.i(
+            "HushCastDesktop",
+            "Worker start ep=$episodeId attempt=$runAttemptCount method=$method auto=$isAuto force=$forceReprocess"
+        )
 
         return try {
             runCatching {
@@ -88,6 +92,7 @@ class PodcastEpisodeDownloadWorker(
 
             when (outcome) {
                 DownloadWorkOutcome.Success -> {
+                    android.util.Log.i("HushCastDesktop", "Worker success ep=$episodeId attempt=$runAttemptCount")
                     runCatching {
                         val resolvedTitle = lastTitle.ifBlank {
                             db.podcastEpisodes().getSyncNullable(episodeId)?.episode?.title.orEmpty()
@@ -99,19 +104,23 @@ class PodcastEpisodeDownloadWorker(
 
                 DownloadWorkOutcome.RetryableFailure -> {
                     if (!isFinalAttempt) {
+                        android.util.Log.w("HushCastDesktop", "Worker retrying ep=$episodeId attempt=$runAttemptCount")
                         Result.retry()
                     } else {
+                        android.util.Log.e("HushCastDesktop", "Worker failed (max attempts) ep=$episodeId")
                         db.podcastEpisodeDownloads().setState(episodeId, PodcastEpisodeDownloadState.FAILED.value)
                         Result.failure()
                     }
                 }
 
                 DownloadWorkOutcome.PermanentFailure -> {
+                    android.util.Log.e("HushCastDesktop", "Worker permanent failure ep=$episodeId")
                     Result.failure()
                 }
             }
         } catch (c: CancellationException) {
             val reason = if (android.os.Build.VERSION.SDK_INT >= 31) stopReason else androidx.work.WorkInfo.STOP_REASON_NOT_STOPPED
+            android.util.Log.w("HushCastDesktop", "Worker cancelled ep=$episodeId attempt=$runAttemptCount stopReason=$reason")
             val isPausedBySystem = reason == androidx.work.WorkInfo.STOP_REASON_TIMEOUT ||
                 reason == androidx.work.WorkInfo.STOP_REASON_FOREGROUND_SERVICE_TIMEOUT ||
                 reason == androidx.work.WorkInfo.STOP_REASON_QUOTA ||

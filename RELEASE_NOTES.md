@@ -1,3 +1,13 @@
+# HushCast v1.0.15-hushcast
+
+## What's New
+- **Retry Visibility & Cold-Start Resilience**:
+  - Updated `PodcastEpisodeDownloadWork` so retryable desktop/cloud worker errors persist `"Retrying worker…"` and the error message in `AutoMuteDatabase` instead of leaving stale `ANALYZING` progress with `err=none` during WorkManager backoff.
+  - Increased `DesktopWorkerClient` HTTPS request timeouts from 35s to 60s so Modal serverless GPU cold starts do not prematurely time out `submitJob` or `healthCheck`.
+  - Added `HushCastDesktop` milestone logging across `PodcastEpisodeDownloadWorker` and `PodcastEpisodeDownloadWork` so diagnostics (`HushCastPerf & Crashes`) capture worker attempts, job IDs, and cancellation reasons.
+
+---
+
 # HushCast v1.0.14-hushcast
 
 ## What's New

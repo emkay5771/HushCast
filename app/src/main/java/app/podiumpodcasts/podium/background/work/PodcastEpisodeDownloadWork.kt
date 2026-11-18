@@ -327,6 +327,10 @@ class PodcastEpisodeDownloadWork(
                         force = forceReprocess
                     )
                 )
+                Log.i(
+                    "HushCastDesktop",
+                    "submitJob ep=$episodeId job=${job.jobId} state=${job.state} pct=${job.progressPercent} force=$forceReprocess"
+                )
                 trackedJobId = job.jobId
                 app.hushcast.automute.desktop.DesktopWorkerClient.trackActiveJob(
                     episodeId = episodeId,
@@ -360,6 +364,7 @@ class PodcastEpisodeDownloadWork(
                     }
                 }
                 val sha256 = ready.fileSha256 ?: return@coroutineScope false
+                Log.i("HushCastDesktop", "Job ${job.jobId} READY ep=$episodeId sha=${sha256.take(12)}")
 
                 highestPct = maxOf(highestPct, 72)
                 statusChannel.trySend(highestPct to "Saving to phone…")
@@ -430,6 +435,20 @@ class PodcastEpisodeDownloadWork(
                                 badge = app.hushcast.automute.dsp.ReadinessBadge.NOT_PROCESSED.name,
                                 progressPercent = 0,
                                 stageLabel = "Desktop/Cloud failed",
+                                errorMessage = errMsg
+                            )
+                        )
+                    }
+                } else {
+                    runCatching {
+                        val current = autoMuteDb.dao().getStatus(episodeId)
+                        autoMuteDb.dao().upsertStatus(
+                            app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
+                                episodeId = episodeId,
+                                fileSha256 = current?.fileSha256 ?: "",
+                                badge = app.hushcast.automute.dsp.ReadinessBadge.ANALYZING.name,
+                                progressPercent = current?.progressPercent ?: 0,
+                                stageLabel = "Retrying worker…",
                                 errorMessage = errMsg
                             )
                         )
