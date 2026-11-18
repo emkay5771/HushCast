@@ -144,6 +144,10 @@ fun HomeRoute(
     var reorderMode by remember { mutableStateOf(false) }
     var openFolderId by remember { mutableStateOf<String?>(null) }
     var moveToFolderTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var contextMenuTarget by remember { mutableStateOf<app.podiumpodcasts.podium.api.db.model.PodcastSubscriptionBundle?>(null) }
+    var expandedFolderIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var isRefreshing by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
 
     val sortedSubscriptions = remember(allSubscriptions, sort) {
         when (sort) {
@@ -214,6 +218,75 @@ fun HomeRoute(
         )
     }
 
+    contextMenuTarget?.let { target ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { contextMenuTarget = null },
+            title = {
+                Text(
+                    text = target.podcast.fetchTitle(),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            contextMenuTarget = null
+                            onClickPodcast(target.podcast.origin)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Open podcast", modifier = Modifier.fillMaxWidth())
+                    }
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            contextMenuTarget = null
+                            scope.launch {
+                                db.podcastEpisodePlayStates().markAllPlayedForOrigin(target.podcast.origin)
+                                snackbarHostState.showSnackbar("Marked all episodes as listened")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Mark all as listened", modifier = Modifier.fillMaxWidth())
+                    }
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            contextMenuTarget = null
+                            moveToFolderTarget = target.podcast.origin to target.podcast.fetchTitle()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Move to folder", modifier = Modifier.fillMaxWidth())
+                    }
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            contextMenuTarget = null
+                            scope.launch {
+                                app.podiumpodcasts.podium.manager.SubscriptionManager(db)
+                                    .unsubscribe(target.podcast.origin)
+                                snackbarHostState.showSnackbar("Unsubscribed from ${target.podcast.fetchTitle()}")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = stringResource(R.string.common_action_unsubscribe),
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { contextMenuTarget = null }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+
     openFolderId?.let { fId ->
         val folder = gridOrgState.folders.find { it.id == fId }
         if (folder != null) {
@@ -266,6 +339,7 @@ fun HomeRoute(
     Scaffold(
         Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         contentWindowInsets = WindowInsets.statusBars,
+        snackbarHost = { app.podiumpodcasts.podium.ui.component.PodiumSnackbarHost(snackbarHostState) },
         topBar = {
             CenterAlignedTopAppBar(
                 scrollBehavior = scrollBehavior,
@@ -273,12 +347,6 @@ fun HomeRoute(
                     Text(stringResource(R.string.app_name))
                 },
                 actions = {
-                    IconButton(onClick = { showCreateFolderDialog = true }) {
-                        Icon(
-                            Icons.Rounded.CreateNewFolder,
-                            contentDescription = "New folder"
-                        )
-                    }
                     IconButton(onClick = { showOptionsSheet = true }) {
                         Icon(Icons.Rounded.Tune, contentDescription = "Podcasts options")
                     }
@@ -371,22 +439,172 @@ fun HomeRoute(
                     }
                 )
             } else if (allSubscriptions.isNotEmpty()) {
+                val pullState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
+                androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+                    isRefreshing = isRefreshing,
+                    state = pullState,
+                    onRefresh = {
+                        if (!isRefreshing) {
+                            scope.launch {
+                                isRefreshing = true
+                                try {
+                                    app.podiumpodcasts.podium.background.work.PodcastUpdateWork(context, db).doWork()
+                                } catch (e: kotlinx.coroutines.CancellationException) {
+                                    throw e
+                                } catch (e: Exception) {
+                                    snackbarHostState.showSnackbar(e.message ?: "Refresh failed")
+                                } finally {
+                                    isRefreshing = false
+                                }
+                            }
+                        }
+                    },
+                    indicator = {
+                        androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.LoadingIndicator(
+                            state = pullState,
+                            isRefreshing = isRefreshing,
+                            modifier = Modifier.align(Alignment.TopCenter)
+                        )
+                    },
+                    modifier = Modifier.fillMaxSize()
+                ) {
                     if(layout == SubscriptionsLayout.LIST) {
+                        val byOrigin = remember(allSubscriptions) { allSubscriptions.associateBy { it.podcast.origin } }
+                        val inFolders = remember(gridOrgState) { gridOrgState.folders.flatMap { it.origins }.toSet() }
+                        val rootListPodcasts = remember(sortedSubscriptions, inFolders) {
+                            sortedSubscriptions.filterNot { it.podcast.origin in inFolders }
+                        }
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
                             state = listState,
                             contentPadding = PaddingValues(16.dp),
                             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
                         ) {
+                            gridOrgState.folders.forEach { folder ->
+                                val folderSubs = folder.origins.mapNotNull { byOrigin[it] }
+                                val isExpanded = folder.id in expandedFolderIds
+                                val totalUnread = folderSubs.sumOf { unplayedCounts[it.podcast.origin] ?: it.subscription.newEpisodes }
+                                item(key = "list_folder:${folder.id}", contentType = "folder_row") {
+                                    Surface(
+                                        onClick = {
+                                            expandedFolderIds = if (isExpanded) expandedFolderIds - folder.id else expandedFolderIds + folder.id
+                                        },
+                                        shape = RoundedCornerShape(14.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh
+                                    ) {
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = androidx.compose.material.icons.Icons.Rounded.CreateNewFolder,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary
+                                            )
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = folder.name,
+                                                    style = Typography.titleSmall,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = "${folderSubs.size} ${if (folderSubs.size == 1) "podcast" else "podcasts"}",
+                                                    style = Typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            if (totalUnread > 0 && badgeMode != SubscriptionsBadgeMode.OFF) {
+                                                Badge(containerColor = MaterialTheme.colorScheme.primary) {
+                                                    if (badgeMode == SubscriptionsBadgeMode.UNPLAYED_COUNT) {
+                                                        Text(if (totalUnread > 99) "99+" else totalUnread.toString())
+                                                    }
+                                                }
+                                            }
+                                            Text(
+                                                text = if (isExpanded) "▾" else "▸",
+                                                style = Typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                                if (isExpanded) {
+                                    itemsIndexed(
+                                        items = folderSubs,
+                                        key = { _, b -> "folder:${folder.id}:${b.podcast.origin}" },
+                                        contentType = { _, _ -> "podcast_row" }
+                                    ) { index, bundle ->
+                                        SegmentedListItem(
+                                            modifier = Modifier.padding(start = 16.dp),
+                                            shapes = ListItemDefaults.segmentedShapes(
+                                                index = index,
+                                                count = folderSubs.size
+                                            ),
+                                            leadingContent = {
+                                                ShimmerAsyncImage(
+                                                    modifier = Modifier
+                                                        .size(44.dp)
+                                                        .clip(RoundedCornerShape(8.dp)),
+                                                    model = bundle.podcast.imageUrl,
+                                                    contentDescription = bundle.podcast.fetchTitle(),
+                                                    contentScale = ContentScale.Crop,
+                                                    targetSizePx = 128
+                                                )
+                                            },
+                                            content = {
+                                                Text(
+                                                    text = bundle.podcast.fetchTitle(),
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            },
+                                            supportingContent = {
+                                                Text(
+                                                    text = bundle.podcast.author,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            },
+                                            trailingContent = {
+                                                val badgeCount = unplayedCounts[bundle.podcast.origin] ?: bundle.subscription.newEpisodes
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    if (badgeCount > 0 && badgeMode != SubscriptionsBadgeMode.OFF) {
+                                                        Badge(containerColor = MaterialTheme.colorScheme.primary) {
+                                                            if (badgeMode == SubscriptionsBadgeMode.UNPLAYED_COUNT) {
+                                                                Text(if (badgeCount > 99) "99+" else badgeCount.toString())
+                                                            }
+                                                        }
+                                                    }
+                                                    IconButton(onClick = { contextMenuTarget = bundle }) {
+                                                        Icon(
+                                                            imageVector = Icons.Rounded.MoreVert,
+                                                            contentDescription = "Podcast options",
+                                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                }
+                                            },
+                                            onClick = { onClickPodcast(bundle.podcast.origin) }
+                                        )
+                                    }
+                                }
+                            }
                             itemsIndexed(
-                                items = sortedSubscriptions,
+                                items = rootListPodcasts,
                                 key = { _, bundle -> bundle.podcast.origin },
                                 contentType = { _, _ -> "podcast_row" }
                             ) { index, bundle ->
                                 SegmentedListItem(
                                     shapes = ListItemDefaults.segmentedShapes(
                                         index = index,
-                                        count = sortedSubscriptions.size
+                                        count = rootListPodcasts.size
                                     ),
                                     leadingContent = {
                                         ShimmerAsyncImage(
@@ -430,12 +648,12 @@ fun HomeRoute(
                                             }
                                             IconButton(
                                                 onClick = {
-                                                    moveToFolderTarget = bundle.podcast.origin to bundle.podcast.fetchTitle()
+                                                    contextMenuTarget = bundle
                                                 }
                                             ) {
                                                 Icon(
                                                     imageVector = androidx.compose.material.icons.Icons.Rounded.MoreVert,
-                                                    contentDescription = "Move to folder",
+                                                    contentDescription = "Podcast options",
                                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                             }
@@ -575,6 +793,9 @@ fun HomeRoute(
                                             fillCell = true,
                                             showTitles = showGridTitles,
                                             compact = isCompact,
+                                            onLongClick = if (!reorderMode) {
+                                                { contextMenuTarget = entryValue }
+                                            } else null,
                                             onClick = { onClickPodcast(entryValue.podcast.origin) }
                                         )
                                     }
@@ -590,6 +811,7 @@ fun HomeRoute(
                         }
                     }
                 }
+            }
             }
         }
     }

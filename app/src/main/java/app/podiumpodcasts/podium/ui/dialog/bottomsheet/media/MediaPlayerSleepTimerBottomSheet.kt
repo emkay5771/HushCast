@@ -1,10 +1,9 @@
 package app.podiumpodcasts.podium.ui.dialog.bottomsheet.media
 
-import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,188 +12,267 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import app.hushcast.automute.desktop.DesktopChapterDto
+import app.hushcast.automute.dsp.SkipAwareSeekCalculator
 import app.hushcast.automute.storage.AutoMuteDatabase
 import app.podiumpodcasts.podium.R
+import app.podiumpodcasts.podium.api.chapters.EpisodeChapterHelper
+import app.podiumpodcasts.podium.api.db.AppDatabase
+import app.podiumpodcasts.podium.background.HushCastEngineBridge
 import app.podiumpodcasts.podium.ui.theme.Typography
 import app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel
-import kotlinx.serialization.json.Json
+import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
+private fun formatTimerDuration(wallMs: Long): String {
+    val totalMin = ((wallMs + 30_000L) / 60_000L).coerceAtLeast(1L)
+    val h = totalMin / 60L
+    val m = totalMin % 60L
+    return when {
+        h > 0L && m > 0L -> "${h}h ${m}m"
+        h > 0L -> "${h}h"
+        else -> "${m}m"
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun MediaPlayerSleepTimerBottomSheet(
     onDismiss: () -> Unit
 ) {
     val vm = viewModel<MediaPlayerViewModel>()
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
+    val appDb = remember(context) { app.podiumpodcasts.podium.manager.DatabaseManager.build(context) }
     val autoMuteDb = remember(context) { AutoMuteDatabase.getInstance(context) }
     val episodeId = vm.metadataEpisodeId ?: ""
-    val insights by remember(episodeId) {
-        autoMuteDb.dao().observeInsights(episodeId)
-    }.collectAsState(initial = null)
-    val chapters = remember(insights?.chaptersJson) {
-        insights?.chaptersJson?.let { raw ->
-            runCatching {
-                Json { ignoreUnknownKeys = true }.decodeFromString<List<DesktopChapterDto>>(raw)
-                    .sortedBy { it.startMs }
-            }.getOrDefault(emptyList())
-        } ?: emptyList()
+    val durationMs = vm.currentDuration.coerceAtLeast(0L)
+
+    val chapters by remember(episodeId, durationMs) {
+        if (episodeId.isNotBlank()) {
+            EpisodeChapterHelper.observeResolvedChapters(appDb, autoMuteDb, episodeId, durationMs)
+        } else {
+            kotlinx.coroutines.flow.flowOf(emptyList())
+        }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val sleepTimerMinutes = vm.getSleepTimerState().value
+    val sleepTimerTriggerMs = vm.sleepTimerTrigger
+    val isSleepTimerEnabled = sleepTimerMinutes != null
+
+    val livePos = vm.rememberLivePositionMs()
+    val skipRanges = HushCastEngineBridge.getActiveSkipRanges()
+    val speed = vm.speed.coerceAtLeast(0.5f)
+
+    val currentOrNextChapterEndMs = remember(chapters, livePos, durationMs) {
+        if (chapters.isEmpty()) null
+        else {
+            val active = chapters.firstOrNull { livePos in it.startMs until it.endMs }
+                ?: chapters.firstOrNull { it.startMs > livePos }
+            active?.endMs ?: durationMs.takeIf { it > livePos }
+        }
     }
 
-    var isSleepTimerEnabled by remember { mutableStateOf(false) }
-    var sliderSleepTimerState by remember { mutableStateOf<Float?>(null) }
-
-    val sleepTimerState = vm.getSleepTimerState()
-
-    LaunchedEffect(sleepTimerState.value) {
-        isSleepTimerEnabled = sleepTimerState.value != null
-        sliderSleepTimerState = sleepTimerState.value?.toFloat()
+    val endOfChapterWallMs = remember(currentOrNextChapterEndMs, livePos, speed, skipRanges) {
+        currentOrNextChapterEndMs?.let { target ->
+            SkipAwareSeekCalculator.computeWallRemainingMs(livePos, target, speed, skipRanges)
+                .coerceAtLeast(1000L)
+        }
     }
+
+    val endOfEpisodeWallMs = remember(durationMs, livePos, speed, skipRanges) {
+        if (durationMs > livePos + 1000L) {
+            SkipAwareSeekCalculator.computeWallRemainingMs(livePos, durationMs, speed, skipRanges)
+                .coerceAtLeast(1000L)
+        } else null
+    }
+
+    var showCustom by remember { mutableStateOf(false) }
+    var customMinutes by remember { mutableFloatStateOf(20f) }
 
     ModalBottomSheet(
-        sheetState = rememberModalBottomSheetState(),
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         onDismissRequest = onDismiss
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .padding(horizontal = 16.dp, vertical = 12.dp)
         ) {
-            AnimatedContent(isSleepTimerEnabled) { isEnabled ->
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        modifier = Modifier.size(32.dp),
+                        modifier = Modifier.size(28.dp),
                         imageVector = Icons.Rounded.Bedtime,
                         contentDescription = stringResource(R.string.common_sleep_timer),
-                        tint = when(isEnabled) {
-                            true -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.onSurface
-                        }
+                        tint = if (isSleepTimerEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                     )
-
-                    Spacer(Modifier.width(16.dp))
-
+                    Spacer(Modifier.width(12.dp))
                     Text(
-                        text = when(isEnabled) {
-                            true -> stringResource(
-                                R.string.template_min,
-                                (sliderSleepTimerState ?: 5).toInt()
-                            )
-
-                            else -> stringResource(R.string.common_sleep_timer_off)
+                        text = if (isSleepTimerEnabled) {
+                            stringResource(R.string.template_min, sleepTimerMinutes ?: 1)
+                        } else {
+                            stringResource(R.string.common_sleep_timer_off)
                         },
-                        color = when(isEnabled) {
-                            true -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.onSurface
-                        },
-                        style = Typography.headlineMediumEmphasized
+                        color = if (isSleepTimerEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        style = Typography.headlineSmallEmphasized.copy(fontFeatureSettings = "tnum")
                     )
+                }
+
+                if (isSleepTimerEnabled) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                val base = maxOf(System.currentTimeMillis(), sleepTimerTriggerMs ?: System.currentTimeMillis())
+                                vm.setSleepTimer(base + 5L * 60_000L)
+                            }
+                        ) {
+                            Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("5 min")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                vm.setSleepTimer(null)
+                                onDismiss()
+                            }
+                        ) {
+                            Icon(Icons.Rounded.Close, contentDescription = "Turn off", modifier = Modifier.size(18.dp))
+                        }
+                    }
                 }
             }
 
-            Slider(
-                value = sliderSleepTimerState ?: 0f,
-                valueRange = 1f..90f,
-                steps = 17,
-                onValueChange = {
-                    sliderSleepTimerState = when(it) {
-                        1f -> null
-                        else -> it
-                    }
+            Spacer(Modifier.height(8.dp))
+            HorizontalDivider()
 
-                    isSleepTimerEnabled = sliderSleepTimerState != null
+            listOf(
+                15 to "15 minutes",
+                30 to "30 minutes",
+                60 to "1 hour"
+            ).forEach { (mins, label) ->
+                ListItem(
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    headlineContent = { Text(label) },
+                    modifier = Modifier.clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                        vm.setSleepTimer(System.currentTimeMillis() + mins * 60_000L)
+                        onDismiss()
+                    }
+                )
+            }
+
+            if (endOfChapterWallMs != null) {
+                ListItem(
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    headlineContent = {
+                        Text("End of chapter · ${formatTimerDuration(endOfChapterWallMs)}")
+                    },
+                    modifier = Modifier.clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                        vm.setSleepTimer(System.currentTimeMillis() + endOfChapterWallMs)
+                        onDismiss()
+                    }
+                )
+            }
+
+            if (endOfEpisodeWallMs != null) {
+                ListItem(
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    headlineContent = {
+                        Text("End of episode · ${formatTimerDuration(endOfEpisodeWallMs)}")
+                    },
+                    modifier = Modifier.clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                        vm.setSleepTimer(System.currentTimeMillis() + endOfEpisodeWallMs)
+                        onDismiss()
+                    }
+                )
+            }
+
+            ListItem(
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                headlineContent = { Text("Custom") },
+                trailingContent = {
+                    if (showCustom) {
+                        Text(
+                            text = "${customMinutes.roundToInt()} min",
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
                 },
-                onValueChangeFinished = {
-                    vm.setSleepTimer(
-                        sliderSleepTimerState?.let { value ->
-                            System.currentTimeMillis() + (value.toInt() * 60L * 1000L)
-                        }
-                    )
-                }
+                modifier = Modifier.clickable { showCustom = !showCustom }
             )
 
-            Spacer(Modifier.height(12.dp))
-
-            val livePos = vm.rememberLivePositionMs()
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                listOf(15, 30, 45).forEach { mins ->
-                    FilterChip(
-                        selected = false,
-                        onClick = {
-                            vm.setSleepTimer(System.currentTimeMillis() + mins * 60L * 1000L)
-                            onDismiss()
-                        },
-                        label = { Text("${mins}m") }
+            AnimatedVisibility(visible = showCustom) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Slider(
+                        value = customMinutes,
+                        onValueChange = { customMinutes = it.roundToInt().toFloat() },
+                        valueRange = 5f..120f,
+                        steps = 22
                     )
-                }
-                if (chapters.isNotEmpty()) {
-                    FilterChip(
-                        selected = false,
-                        onClick = {
-                            val nextChapterEnd = chapters.firstOrNull { it.startMs > livePos + 1000L }?.startMs
-                                ?: vm.currentDuration
-                            val remainingAudioMs = (nextChapterEnd - livePos).coerceAtLeast(1000L)
-                            val wallMs = (remainingAudioMs / vm.speed.coerceAtLeast(0.5f)).toLong()
-                            vm.setSleepTimer(System.currentTimeMillis() + wallMs)
-                            onDismiss()
-                        },
-                        label = { Text("End of chapter") }
-                    )
-                }
-                if (vm.currentDuration > livePos + 1000L) {
-                    FilterChip(
-                        selected = false,
-                        onClick = {
-                            val remainingAudioMs = (vm.currentDuration - livePos).coerceAtLeast(1000L)
-                            val wallMs = (remainingAudioMs / vm.speed.coerceAtLeast(0.5f)).toLong()
-                            vm.setSleepTimer(System.currentTimeMillis() + wallMs)
-                            onDismiss()
-                        },
-                        label = { Text("End of episode") }
-                    )
-                }
-                if (isSleepTimerEnabled) {
-                    FilterChip(
-                        selected = false,
-                        onClick = {
-                            vm.setSleepTimer(null)
-                            onDismiss()
-                        },
-                        label = { Text("Off") }
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                vm.setSleepTimer(System.currentTimeMillis() + customMinutes.roundToInt() * 60_000L)
+                                onDismiss()
+                            }
+                        ) {
+                            Text("Start timer")
+                        }
+                    }
                 }
             }
+
+            Spacer(Modifier.height(12.dp))
         }
     }
 }

@@ -10,6 +10,7 @@ import androidx.work.workDataOf
 import app.hushcast.automute.dsp.MuteActionMode
 import app.hushcast.automute.pipeline.AutoMuteAnalyzer
 import app.hushcast.automute.storage.AutoMuteDatabase
+import app.hushcast.automute.storage.toDomain
 
 /**
  * Re-evaluates mute rules across all cached episode word indices in the background
@@ -30,14 +31,16 @@ class RuleReevaluationWorker(
 
         val db = AutoMuteDatabase.getInstance(applicationContext)
         val analyzer = AutoMuteAnalyzer(applicationContext, db)
+        val rules = db.dao().getEnabledRules().map { it.toDomain() }
+        val compiled = app.hushcast.automute.matcher.WordMatcher.compileRules(rules, defaultActionMode)
         val refs = db.dao().getAllWordIndexRefs()
         for (ref in refs) {
-            analyzer.reevaluateMuteRules(
+            analyzer.reevaluateMuteRulesWithCompiled(
                 fileSha256 = ref.fileSha256,
                 episodeId = ref.episodeId,
                 prePadMs = prePadMs,
                 postPadMs = postPadMs,
-                defaultActionMode = defaultActionMode
+                compiled = compiled
             )
         }
         return Result.success()

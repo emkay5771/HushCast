@@ -102,10 +102,14 @@ object DesktopWorkerClient {
         baseUrl: String,
         token: String,
         jobId: String,
-        certFingerprint: String = ""
+        certFingerprint: String = "",
+        waitMs: Long = 0L,
+        sinceRev: Long = 0L
     ): DesktopJobResponse = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl)
-        val body = getText("$normalized/v1/jobs/$jobId", token, certFingerprint, timeoutMs = defaultTimeoutMs(normalized))
+        val qs = if (waitMs > 0L) "?waitMs=$waitMs&sinceRev=$sinceRev" else ""
+        val timeout = maxOf(defaultTimeoutMs(normalized), (waitMs + 10_000L).toInt())
+        val body = getText("$normalized/v1/jobs/$jobId$qs", token, certFingerprint, timeoutMs = timeout)
         json.decodeFromString<DesktopJobResponse>(body)
     }
 
@@ -126,7 +130,8 @@ object DesktopWorkerClient {
     }
 
     /**
-     * Polls job status with exponential backoff on transient network errors (E18).
+     * Polls job status with long-polling (?waitMs=&sinceRev=), HTTP 404 auto-resubmit (V2),
+     * and exponential backoff on transient network errors (E18).
      */
     suspend fun pollJobUntilReady(
         baseUrl: String,
@@ -135,25 +140,44 @@ object DesktopWorkerClient {
         pollIntervalMs: Long = 2000L,
         maxWaitMs: Long = 30 * 60 * 1000L,
         certFingerprint: String = "",
+        resubmitRequest: DesktopJobRequest? = null,
         onProgress: suspend (DesktopJobResponse) -> Unit = {}
     ): DesktopJobResponse {
         val deadline = System.currentTimeMillis() + maxWaitMs
         val maxQueuedWaitMs = 25 * 60 * 1000L
+        var currentJobId = jobId
+        var lastRev = 0L
+        var resubmitted = false
         var queuedSinceMs: Long? = null
         var consecutiveErrors = 0
-        var currentDelayMs = pollIntervalMs
         var highestReportedPct = 0
 
         while (true) {
             currentCoroutineContext().ensureActive()
             val rawStatus = try {
-                val res = getJob(baseUrl, token, jobId, certFingerprint)
+                val res = getJob(
+                    baseUrl = baseUrl,
+                    token = token,
+                    jobId = currentJobId,
+                    certFingerprint = certFingerprint,
+                    waitMs = 25_000L,
+                    sinceRev = lastRev
+                )
                 consecutiveErrors = 0
-                currentDelayMs = pollIntervalMs
+                lastRev = res.rev
                 res
             } catch (c: CancellationException) {
                 throw c
             } catch (t: Throwable) {
+                // V2: If job disappeared (HTTP 404, e.g. container restart), resubmit once if available
+                if (t.message?.contains("HTTP 404") == true && resubmitRequest != null && !resubmitted) {
+                    resubmitted = true
+                    val newJob = submitJob(baseUrl, token, resubmitRequest, certFingerprint)
+                    currentJobId = newJob.jobId
+                    lastRev = newJob.rev
+                    trackActiveJob(resubmitRequest.episodeId, baseUrl, token, currentJobId, certFingerprint)
+                    continue
+                }
                 consecutiveErrors++
                 if (consecutiveErrors >= 6 || System.currentTimeMillis() >= deadline) {
                     throw t
@@ -173,7 +197,7 @@ object DesktopWorkerClient {
             onProgress(status)
             when (status.state) {
                 "READY" -> return status
-                "CANCELLED" -> throw CancellationException("Desktop worker job cancelled: $jobId")
+                "CANCELLED" -> throw CancellationException("Desktop worker job cancelled: $currentJobId")
                 "FAILED" -> throw IllegalStateException(
                     "Desktop worker failed: ${status.errorMessage ?: status.stageLabel}"
                 )
@@ -182,7 +206,7 @@ object DesktopWorkerClient {
                     if (status.progressPercent <= 0) {
                         val firstQueued = queuedSinceMs ?: now.also { queuedSinceMs = it }
                         if (now - firstQueued >= maxQueuedWaitMs) {
-                            throw IllegalStateException("Timed out waiting in worker queue for job $jobId")
+                            throw IllegalStateException("Timed out waiting in worker queue for job $currentJobId")
                         }
                     } else {
                         queuedSinceMs = null
@@ -191,9 +215,8 @@ object DesktopWorkerClient {
                 else -> queuedSinceMs = null
             }
             if (System.currentTimeMillis() >= deadline) {
-                throw IllegalStateException("Timed out waiting for desktop worker job $jobId")
+                throw IllegalStateException("Timed out waiting for desktop worker job $currentJobId")
             }
-            delay(currentDelayMs)
         }
     }
 
@@ -238,8 +261,8 @@ object DesktopWorkerClient {
     }
 
     /**
-     * Streams the exact audio file from the desktop worker to [destFile] and verifies
-     * that its SHA-256 matches [expectedSha256]. Checks cancellation per chunk and cleans up .part on error (E18).
+     * Streams the exact audio file from the desktop worker to [destFile] with Range/If-Range resume (V5)
+     * and verifies that its SHA-256 matches [expectedSha256].
      */
     suspend fun downloadAudioAndVerifySha256(
         baseUrl: String,
@@ -251,31 +274,43 @@ object DesktopWorkerClient {
     ): Unit = withContext(Dispatchers.IO) {
         destFile.parentFile?.mkdirs()
         val tmpFile = File(destFile.parentFile, "${destFile.name}.part")
+        val existingLen = if (tmpFile.exists()) tmpFile.length() else 0L
         val conn = openConnection("${normalizeUrl(baseUrl)}/v1/episodes/$expectedSha256/audio", token, 30_000, certFingerprint)
+        if (existingLen > 0L) {
+            conn.setRequestProperty("Range", "bytes=$existingLen-")
+            conn.setRequestProperty("If-Range", "\"$expectedSha256\"")
+        }
         try {
             val code = conn.responseCode
-            if (code !in 200..299) {
+            if (code == 416 && existingLen > 0L) {
+                // Already complete on disk; verify SHA below
+            } else if (code !in 200..299) {
                 throw IllegalStateException("Desktop audio download failed: HTTP $code")
             }
-            val total = conn.contentLengthLong.coerceAtLeast(0L)
-            val digest = MessageDigest.getInstance("SHA-256")
-            var received = 0L
-            conn.inputStream.use { input ->
-                tmpFile.outputStream().use { output ->
-                    val buf = ByteArray(65536)
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val read = input.read(buf)
-                        if (read < 0) break
-                        output.write(buf, 0, read)
-                        digest.update(buf, 0, read)
-                        received += read
-                        onProgress(received, total)
+            val isPartial = code == 206
+            val baseOffset = if (isPartial) existingLen else 0L
+            val contentLen = conn.contentLengthLong.coerceAtLeast(0L)
+            val total = if (contentLen > 0L) baseOffset + contentLen else 0L
+
+            if (code != 416) {
+                var received = baseOffset
+                conn.inputStream.use { input ->
+                    java.io.FileOutputStream(tmpFile, isPartial).use { output ->
+                        val buf = ByteArray(65536)
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val read = input.read(buf)
+                            if (read < 0) break
+                            output.write(buf, 0, read)
+                            received += read
+                            onProgress(received, total)
+                        }
                     }
                 }
             }
-            val actualSha = digest.digest().joinToString("") { "%02x".format(it) }
+            val actualSha = app.hushcast.automute.hash.StreamingSha256.hashFile(tmpFile)
             if (!actualSha.equals(expectedSha256, ignoreCase = true)) {
+                tmpFile.delete()
                 throw IllegalStateException(
                     "SHA-256 mismatch from desktop worker: expected=$expectedSha256 actual=$actualSha"
                 )
@@ -285,9 +320,6 @@ object DesktopWorkerClient {
                 tmpFile.copyTo(destFile, overwrite = true)
                 tmpFile.delete()
             }
-        } catch (t: Throwable) {
-            tmpFile.delete()
-            throw t
         } finally {
             conn.disconnect()
         }
@@ -359,6 +391,7 @@ object DesktopWorkerClient {
                 )
             }
         )
+        dao.clearAnalysisForOtherHashes(episodeId, sha)
 
         if (!bundle.summary.isNullOrBlank() || bundle.chapters.isNotEmpty()) {
             dao.upsertInsights(
@@ -379,7 +412,8 @@ object DesktopWorkerClient {
                 progressPercent = 100,
                 stageLabel = "Ready (Desktop ${bundle.workerAccelerator.uppercase()})",
                 peakRssMb = 0,
-                analysisDurationMs = bundle.analysisDurationMs
+                analysisDurationMs = bundle.analysisDurationMs,
+                pipelineVersion = app.hushcast.automute.pipeline.AutoMuteAnalyzer.CURRENT_PIPELINE_VERSION
             )
         )
     }

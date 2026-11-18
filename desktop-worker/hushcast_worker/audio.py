@@ -4,7 +4,9 @@ import asyncio
 import hashlib
 import ipaddress
 import logging
+import shutil
 import socket
+import subprocess
 import time
 from pathlib import Path
 from typing import Callable, Optional
@@ -140,12 +142,61 @@ async def download_audio_streaming_sha256(
         raise ValueError(f"Too many redirects (>{MAX_REDIRECTS})")
 
 
+def _decode_ffmpeg_f32le(
+    audio_path: Path,
+    *,
+    sample_rate: int,
+    channels: int,
+    max_seconds: float,
+) -> Optional[np.ndarray]:
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return None
+    max_bytes = int(max_seconds * sample_rate * channels * 4)
+    cmd = [
+        ffmpeg,
+        "-nostdin",
+        "-v",
+        "error",
+        "-i",
+        str(audio_path),
+        "-vn",
+        "-ac",
+        str(channels),
+        "-ar",
+        str(sample_rate),
+        "-f",
+        "f32le",
+        "pipe:1",
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=300, check=False)
+        if proc.returncode != 0 or not proc.stdout:
+            return None
+        if len(proc.stdout) > max_bytes:
+            raise ValueError(f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit")
+        usable = len(proc.stdout) - (len(proc.stdout) % (4 * channels))
+        arr = np.frombuffer(proc.stdout[:usable], dtype=np.float32).copy()
+        if channels > 1:
+            arr = arr.reshape(-1, channels)
+        return arr
+    except ValueError:
+        raise
+    except Exception:
+        logger.debug("ffmpeg pipe decode failed; falling back to PyAV", exc_info=True)
+        return None
+
+
 def decode_audio_16k_mono(
     audio_path: Path,
     *,
     max_seconds: float = MAX_DECODED_SECONDS,
 ) -> tuple[np.ndarray, float]:
-    """Decodes audio_path to 16 kHz mono float32 PCM using a preallocated buffer when duration is known."""
+    """Decodes audio_path to 16 kHz mono float32 PCM (ffmpeg pipe with PyAV fallback)."""
+    pcm_ff = _decode_ffmpeg_f32le(audio_path, sample_rate=16000, channels=1, max_seconds=max_seconds)
+    if pcm_ff is not None:
+        return pcm_ff, float(len(pcm_ff) / 16000.0)
+
     import av
 
     max_samples = int(max_seconds * 16000)
@@ -210,6 +261,113 @@ def decode_audio_16k_mono(
         container.close()
 
     return pcm, float(len(pcm) / 16000.0)
+
+
+def decode_audio_streams(
+    audio_path: Path,
+    *,
+    max_seconds: float = MAX_DECODED_SECONDS,
+) -> tuple[np.ndarray, np.ndarray, Optional[np.ndarray], float]:
+    """
+    Single-pass decode producing both:
+      - 16 kHz mono float32 PCM (for Whisper & MMS_FA)
+      - 24 kHz mid = (L+R)/2 and optional side = (L-R)/2 float32 PCM (for FrameExtractor A3)
+    Returns (pcm_16k, pcm_24k_mid, pcm_24k_side_or_none, duration_sec).
+    """
+    import av
+
+    max_16k = int(max_seconds * 16000)
+    max_24k = int(max_seconds * 24000)
+    container = av.open(str(audio_path))
+    try:
+        audio_stream = container.streams.audio[0] if container.streams.audio else None
+        is_stereo = bool(audio_stream and getattr(audio_stream.channels, "__int__", lambda: 1)() >= 2)
+        if audio_stream is not None:
+            try:
+                is_stereo = int(audio_stream.channels) >= 2
+            except Exception:
+                is_stereo = False
+
+        resampler_16k = av.AudioResampler(format="flt", layout="mono", rate=16000)
+        resampler_24k = av.AudioResampler(
+            format="flt",
+            layout="stereo" if is_stereo else "mono",
+            rate=24000,
+        )
+
+        chunks_16k: list[np.ndarray] = []
+        chunks_24k_mid: list[np.ndarray] = []
+        chunks_24k_side: list[np.ndarray] = []
+        total_16k = 0
+        total_24k = 0
+
+        def _handle_24k(resampled) -> None:
+            nonlocal total_24k
+            arr = resampled.to_ndarray()
+            # PyAV 'flt' planar vs packed: (channels, samples) or (1, samples*channels)
+            if arr.ndim == 2 and arr.shape[0] >= 2:
+                left = arr[0]
+                right = arr[1]
+                mid = (left + right) * np.float32(0.5)
+                side = (left - right) * np.float32(0.5)
+                n_s = len(mid)
+                total_24k += n_s
+                if total_24k > max_24k:
+                    raise ValueError(f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit")
+                chunks_24k_mid.append(mid)
+                chunks_24k_side.append(side)
+            else:
+                flat = arr.reshape(-1)
+                if is_stereo and len(flat) >= 2 and arr.ndim == 2 and arr.shape[0] == 1:
+                    # Packed stereo fallback if ever returned
+                    lr = flat.reshape(-1, 2)
+                    mid = (lr[:, 0] + lr[:, 1]) * np.float32(0.5)
+                    side = (lr[:, 0] - lr[:, 1]) * np.float32(0.5)
+                    total_24k += len(mid)
+                    if total_24k > max_24k:
+                        raise ValueError(f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit")
+                    chunks_24k_mid.append(mid)
+                    chunks_24k_side.append(side)
+                else:
+                    total_24k += len(flat)
+                    if total_24k > max_24k:
+                        raise ValueError(f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit")
+                    chunks_24k_mid.append(flat)
+
+        for frame in container.decode(audio=0):
+            for r16 in resampler_16k.resample(frame):
+                a16 = r16.to_ndarray().reshape(-1)
+                total_16k += len(a16)
+                if total_16k > max_16k:
+                    raise ValueError(f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit")
+                chunks_16k.append(a16)
+            for r24 in resampler_24k.resample(frame):
+                _handle_24k(r24)
+
+        for r16 in resampler_16k.resample(None):
+            a16 = r16.to_ndarray().reshape(-1)
+            total_16k += len(a16)
+            if total_16k > max_16k:
+                raise ValueError(f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit")
+            chunks_16k.append(a16)
+        for r24 in resampler_24k.resample(None):
+            _handle_24k(r24)
+
+        pcm_16k = np.concatenate(chunks_16k).astype(np.float32) if chunks_16k else np.zeros(0, dtype=np.float32)
+        pcm_24k_mid = (
+            np.concatenate(chunks_24k_mid).astype(np.float32)
+            if chunks_24k_mid
+            else np.zeros(0, dtype=np.float32)
+        )
+        pcm_24k_side = (
+            np.concatenate(chunks_24k_side).astype(np.float32)
+            if (is_stereo and chunks_24k_side and len(chunks_24k_side) == len(chunks_24k_mid))
+            else None
+        )
+    finally:
+        container.close()
+
+    return pcm_16k, pcm_24k_mid, pcm_24k_side, float(len(pcm_16k) / 16000.0)
 
 
 def estimate_pitch_hz(chunk: np.ndarray, sr: int = 16000) -> float:

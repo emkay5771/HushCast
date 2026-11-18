@@ -1,6 +1,7 @@
 package app.podiumpodcasts.podium.ui.component.model
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -24,7 +25,7 @@ import app.podiumpodcasts.podium.api.db.model.PodcastModel
 import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
 import app.podiumpodcasts.podium.ui.theme.Typography
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun PodcastCard(
     modifier: Modifier = Modifier,
@@ -33,6 +34,7 @@ fun PodcastCard(
     showTitles: Boolean = true,
     compact: Boolean = false,
     badge: @Composable () -> Unit = { },
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     Box(
@@ -46,7 +48,10 @@ fun PodcastCard(
                 modifier = Modifier
                     .then(if (fillCell) Modifier.fillMaxWidth() else Modifier.width(112.dp))
                     .clip(RoundedCornerShape(10.dp))
-                    .clickable { onClick() }
+                    .combinedClickable(
+                        onClick = onClick,
+                        onLongClick = onLongClick
+                    )
                     .padding(if (compact) 2.dp else 4.dp)
             ) {
                 ShimmerAsyncImage(

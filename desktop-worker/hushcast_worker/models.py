@@ -39,7 +39,7 @@ class DesktopChapterDto(BaseModel):
     source: str = "auto"  # "podcast" (ID3/MP4/RSS) or "auto" (HushCast AI)
 
 
-PIPELINE_VERSION = 4
+PIPELINE_VERSION = 5
 
 
 class DesktopAnalysisBundle(BaseModel):
@@ -67,12 +67,31 @@ class JobState(str, Enum):
     CANCELLED = "CANCELLED"
 
 
+class JobStage(str, Enum):
+    QUEUED = "QUEUED"
+    DOWNLOADING = "DOWNLOADING"
+    DECODING = "DECODING"
+    TRANSCRIBING = "TRANSCRIBING"
+    ALIGNING = "ALIGNING"
+    SPEAKER_ID = "SPEAKER_ID"
+    EMBEDDING = "EMBEDDING"
+    TAGGING = "TAGGING"
+    SUMMARIZING = "SUMMARIZING"
+    READY = "READY"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
 class DesktopJobRequest(BaseModel):
     episodeId: str
     audioUrl: str
     title: str = ""
+    language: Optional[str] = None
     feedTranscriptRaw: Optional[str] = None
     feedTranscriptMime: str = ""
+    feedTranscriptUrl: Optional[str] = None
+    feedChaptersUrl: Optional[str] = None
+    feedChaptersType: str = ""
     force: bool = False
     reprocessStage: Optional[str] = None
 
@@ -83,8 +102,15 @@ class DesktopJobResponse(BaseModel):
     state: JobState
     progressPercent: int = 0
     stageLabel: str = "Queued"
+    stage: Optional[JobStage] = None
+    stageProgress: Optional[int] = None
     fileSha256: Optional[str] = None
     errorMessage: Optional[str] = None
+    errorCode: Optional[str] = None
+    retryable: Optional[bool] = None
+    queuePosition: Optional[int] = None
+    etaSec: Optional[int] = None
+    rev: int = 0
 
 
 class DesktopReadyEpisode(BaseModel):
@@ -101,12 +127,21 @@ class DesktopReadyEpisode(BaseModel):
 class DesktopHealthResponse(BaseModel):
     status: str = "ok"
     version: str
+    apiVersion: int = 2
+    pipelineVersion: int = PIPELINE_VERSION
     hostname: str
     accelerator: str
+    deployment: str = "local"
+    gpuName: Optional[str] = None
     modelsReady: bool
+    modelsLoaded: bool = False
     whisperModel: str = ""
     chatModelReady: bool = False
     cachedEpisodes: int = Field(default=0)
+    queueDepth: int = 0
+    activeJob: Optional[str] = None
+    cacheBytes: int = 0
+    diskFreeBytes: int = 0
 
 
 class DesktopSearchRequest(BaseModel):

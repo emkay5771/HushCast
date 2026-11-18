@@ -75,9 +75,29 @@ fun SettingsPane(
         }
 
         is SettingsHushCastKey -> {
+            val activeSection = androidx.compose.runtime.remember(contentKey) {
+                androidx.compose.runtime.mutableStateOf(contentKey.section)
+            }
+            androidx.activity.compose.BackHandler(
+                enabled = activeSection.value != app.podiumpodcasts.podium.ui.route.settings.pane.HushCastSettingsSection.HUB
+            ) {
+                activeSection.value = app.podiumpodcasts.podium.ui.route.settings.pane.HushCastSettingsSection.HUB
+            }
             SettingsHushCastPane(
+                section = activeSection.value,
                 navigationIcon = {
-                    NavigationIcon()
+                    if (activeSection.value != app.podiumpodcasts.podium.ui.route.settings.pane.HushCastSettingsSection.HUB) {
+                        BackButton {
+                            activeSection.value = app.podiumpodcasts.podium.ui.route.settings.pane.HushCastSettingsSection.HUB
+                        }
+                    } else {
+                        NavigationIcon()
+                    }
+                },
+                onNavigate = { key ->
+                    (key as? SettingsHushCastKey)?.section?.let {
+                        activeSection.value = it
+                    }
                 }
             )
         }

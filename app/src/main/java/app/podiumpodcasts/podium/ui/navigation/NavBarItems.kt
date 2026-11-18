@@ -1,13 +1,13 @@
 package app.podiumpodcasts.podium.ui.navigation
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CollectionsBookmark
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.NewReleases
 import androidx.compose.material.icons.rounded.Pause
-import androidx.compose.material.icons.rounded.School
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation3.runtime.NavKey
 import app.podiumpodcasts.podium.R
@@ -22,7 +22,7 @@ enum class NavBarItems(
 ) {
     HOME(R.string.route_home, Icons.Rounded.Home, Home, "Podcasts"),
     DISCOVER(R.string.route_discover, Icons.Rounded.Explore, Discover, "Discover"),
-    LIBRARY(R.string.route_library, Icons.Rounded.School, Library, "Library"),
+    LIBRARY(R.string.route_library, Icons.Rounded.CollectionsBookmark, Library, "Library"),
     NEW_EPISODES(R.string.route_new_episodes, Icons.Rounded.NewReleases, NewEpisodes, "New Releases"),
     CONTINUE_PLAYING(R.string.route_continue_playing, Icons.Rounded.Pause, ContinuePlaying, "In Progress"),
     DOWNLOADS(R.string.route_downloads, Icons.Rounded.Download, Downloads, "Downloads"),

@@ -89,3 +89,51 @@ endfunction()
 
 jni_library(hushcast_llama llama_jni.cpp llama_ext ${LLAMA_PREFIX} "${LLAMA_LIBS}")
 jni_library(hushcast_whisper whisper_jni.cpp whisper_ext ${WHISPER_PREFIX} "${WHISPER_LIBS}")
+
+if(ANDROID AND ANDROID_ABI STREQUAL "arm64-v8a")
+    set(DP_COMMON_ARGS
+        -DCMAKE_BUILD_TYPE=Release
+        -DBUILD_SHARED_LIBS=OFF
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DCMAKE_INSTALL_LIBDIR=lib
+        -DGGML_OPENMP=OFF
+        -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
+        -DANDROID_ABI=${ANDROID_ABI}
+        -DANDROID_PLATFORM=${ANDROID_PLATFORM}
+        -DANDROID_STL=${ANDROID_STL}
+        -DGGML_NATIVE=OFF
+        -DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod)
+    if(CMAKE_MAKE_PROGRAM)
+        list(APPEND DP_COMMON_ARGS -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM})
+    endif()
+
+    set(LLAMA_DP_PREFIX ${CMAKE_BINARY_DIR}/llama-dp-install)
+    set(LLAMA_DP_LIBS ${LLAMA_DP_PREFIX}/lib/libllama.a)
+    foreach(l ${GGML_LIBS})
+        list(APPEND LLAMA_DP_LIBS ${LLAMA_DP_PREFIX}/lib/${l})
+    endforeach()
+    ExternalProject_Add(llama_ext_dp
+        URL https://github.com/ggml-org/llama.cpp/archive/refs/tags/${LLAMA_TAG}.tar.gz
+        URL_HASH SHA256=dbbbf2509a404ff5479bce0507360fb0e1ff655811974fe5e79e4312a2902c52
+        ${EXTRACT_TS}
+        CMAKE_ARGS ${DP_COMMON_ARGS} -DCMAKE_INSTALL_PREFIX=${LLAMA_DP_PREFIX}
+            -DLLAMA_BUILD_COMMON=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_TOOLS=OFF
+            -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_APP=OFF -DLLAMA_OPENSSL=OFF
+        BUILD_BYPRODUCTS ${LLAMA_DP_LIBS})
+
+    set(WHISPER_DP_PREFIX ${CMAKE_BINARY_DIR}/whisper-dp-install)
+    set(WHISPER_DP_LIBS ${WHISPER_DP_PREFIX}/lib/libwhisper.a)
+    foreach(l ${GGML_LIBS})
+        list(APPEND WHISPER_DP_LIBS ${WHISPER_DP_PREFIX}/lib/${l})
+    endforeach()
+    ExternalProject_Add(whisper_ext_dp
+        URL https://github.com/ggml-org/whisper.cpp/archive/refs/tags/${WHISPER_TAG}.tar.gz
+        URL_HASH SHA256=ff1a9053feb509ff9d7729703355541ae9690073a6b1c40eb692c962e0dc1720
+        ${EXTRACT_TS}
+        CMAKE_ARGS ${DP_COMMON_ARGS} -DCMAKE_INSTALL_PREFIX=${WHISPER_DP_PREFIX}
+            -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=OFF -DWHISPER_BUILD_SERVER=OFF
+        BUILD_BYPRODUCTS ${WHISPER_DP_LIBS})
+
+    jni_library(hushcast_llama_dp llama_jni.cpp llama_ext_dp ${LLAMA_DP_PREFIX} "${LLAMA_DP_LIBS}")
+    jni_library(hushcast_whisper_dp whisper_jni.cpp whisper_ext_dp ${WHISPER_DP_PREFIX} "${WHISPER_DP_LIBS}")
+endif()

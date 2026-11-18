@@ -8,6 +8,7 @@ import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
@@ -48,6 +49,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.launch
@@ -161,8 +163,14 @@ class PlaybackService : MediaLibraryService() {
         val extractorsFactory = DefaultExtractorsFactory()
             .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)
 
+        val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
+            .setBufferDurationsMs(15_000, 60_000, 1_500, 3_000)
+            .build()
+
         exoPlayer = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(DefaultMediaSourceFactory(this, extractorsFactory))
+            .setLoadControl(loadControl)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .setSeekBackIncrementMs(currentSeekBackIncrementMs)
             .setSeekForwardIncrementMs(currentSeekForwardIncrementMs)
             .setAudioAttributes(
@@ -234,33 +242,32 @@ class PlaybackService : MediaLibraryService() {
         }
 
         scope.launch {
-            settingsRepository.behavior.trimSilence.collect { exoPlayer.skipSilenceEnabled = it }
+            settingsRepository.behavior.trimSilence.distinctUntilChanged().collect { exoPlayer.skipSilenceEnabled = it }
         }
         scope.launch {
-            settingsRepository.behavior.volumeBoost.collect { HushCastEngineBridge.volumeBoostEnabled = it }
+            settingsRepository.behavior.volumeBoost.distinctUntilChanged().collect { HushCastEngineBridge.volumeBoostEnabled = it }
         }
         scope.launch {
-            settingsRepository.hushCast.sponsorSkipSoundEnabled.collect {
+            settingsRepository.hushCast.sponsorSkipSoundEnabled.distinctUntilChanged().collect {
                 HushCastEngineBridge.sponsorSkipSoundEnabled = it
             }
         }
         scope.launch {
-            settingsRepository.hushCast.sponsorSkipSoundUri.collect {
+            settingsRepository.hushCast.sponsorSkipSoundUri.distinctUntilChanged().collect {
                 HushCastEngineBridge.sponsorSkipSoundUri = it
             }
         }
         scope.launch {
-            settingsRepository.hushCast.muteCustomSoundUri.collect {
+            settingsRepository.hushCast.muteCustomSoundUri.distinctUntilChanged().collect {
                 HushCastEngineBridge.loadCustomMuteSound(this@PlaybackService, it)
             }
         }
         scope.launch {
-            settingsRepository.hushCast.muteActionMode.collect { mode ->
+            settingsRepository.hushCast.muteActionMode.distinctUntilChanged().collect { mode ->
                 HushCastEngineBridge.defaultActionMode = mode
                 val activeEpId = exoPlayer.currentMediaItem?.getEpisodeId() ?: HushCastEngineBridge.currentEpisodeId
                 if (!activeEpId.isNullOrBlank()) {
                     withContext(Dispatchers.IO) {
-                        autoMuteDb.dao().updateAllMuteSegmentsActionMode(mode.name)
                         val updated = autoMuteDb.dao()
                             .observeMuteSegmentsByEpisode(activeEpId)
                             .first()
@@ -271,7 +278,7 @@ class PlaybackService : MediaLibraryService() {
             }
         }
         scope.launch {
-            settingsRepository.hushCast.wordMutingEnabled.collect { enabled ->
+            settingsRepository.hushCast.wordMutingEnabled.distinctUntilChanged().collect { enabled ->
                 HushCastEngineBridge.wordMutingEnabled = enabled
                 val origin = getOrigin()
                 val podcastOverride = if (origin != null) {
@@ -283,7 +290,7 @@ class PlaybackService : MediaLibraryService() {
             }
         }
         scope.launch {
-            settingsRepository.hushCast.adPolicyMode.collect { mode ->
+            settingsRepository.hushCast.adPolicyMode.distinctUntilChanged().collect { mode ->
                 HushCastEngineBridge.defaultAdPolicy = mode
                 val origin = getOrigin()
                 val podcastOverride = if (origin != null) {
@@ -300,16 +307,16 @@ class PlaybackService : MediaLibraryService() {
         }
 
         scope.launch {
-            settingsRepository.behavior.speedPresets.collect { speedPresets = it }
+            settingsRepository.behavior.speedPresets.distinctUntilChanged().collect { speedPresets = it }
         }
         scope.launch {
-            settingsRepository.behavior.headsetNextAction.collect { headsetNextAction = it }
+            settingsRepository.behavior.headsetNextAction.distinctUntilChanged().collect { headsetNextAction = it }
         }
         scope.launch {
-            settingsRepository.behavior.headsetPrevAction.collect { headsetPrevAction = it }
+            settingsRepository.behavior.headsetPrevAction.distinctUntilChanged().collect { headsetPrevAction = it }
         }
         scope.launch {
-            settingsRepository.behavior.intelligentPlaybackResumption.collect {
+            settingsRepository.behavior.intelligentPlaybackResumption.distinctUntilChanged().collect {
                 intelligentPlaybackResumptionEnabled = it
             }
         }
@@ -408,32 +415,68 @@ class PlaybackService : MediaLibraryService() {
                 val policy = policyStr?.let {
                     runCatching { AdPolicyMode.valueOf(it) }.getOrNull()
                 } ?: HushCastEngineBridge.defaultAdPolicy
-                HushCastEngineBridge.autoMuteProcessor.encoderDelayOffsetMs = status.encoderDelayMs.toLong()
                 HushCastEngineBridge.autoMuteProcessor.updateWindows(mutes)
                 HushCastEngineBridge.adSkipObserver.setEpisodeAds(ads, policy)
             } else {
-                HushCastEngineBridge.autoMuteProcessor.encoderDelayOffsetMs = 0L
                 HushCastEngineBridge.autoMuteProcessor.updateWindows(emptyList())
                 HushCastEngineBridge.adSkipObserver.clear()
             }
 
+            val epBundle = db.podcastEpisodes().getSyncNullable(episodeId)
+            val episodeDurationMs = (epBundle?.episode?.duration ?: 0) * 1000L
+
+            // C1: fetch feed chapters if not yet stored
+            val chaptersUrl = epBundle?.episode?.chaptersUrl.orEmpty()
+            val chaptersType = epBundle?.episode?.chaptersType.orEmpty()
+            if (chaptersUrl.isNotBlank()) {
+                val existing = db.episodeChapters().getByEpisodeSync(episodeId)
+                if (existing.none { it.isPublisher }) {
+                    app.podiumpodcasts.podium.api.chapters.EpisodeChapterHelper.fetchAndStoreFeedChapters(
+                        db = db,
+                        episodeId = episodeId,
+                        chaptersUrl = chaptersUrl,
+                        chaptersType = chaptersType,
+                        durationMs = episodeDurationMs
+                    )
+                }
+            }
+
+            // Backfill generated chapters from insights if no publisher chapters exist
             val insights = autoMuteDb.dao().getInsights(episodeId)
-            val chapters = insights?.chaptersJson?.let { raw ->
+            val generatedDtos = insights?.chaptersJson?.let { raw ->
                 runCatching {
                     kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
                         .decodeFromString<List<app.hushcast.automute.desktop.DesktopChapterDto>>(raw)
                         .sortedBy { it.startMs }
                 }.getOrDefault(emptyList())
             } ?: emptyList()
-            val episodeDurationMs = (db.podcastEpisodes().getSyncNullable(episodeId)?.episode?.duration ?: 0) * 1000L
+            if (generatedDtos.isNotEmpty()) {
+                val generatedEntities = generatedDtos.map { dto ->
+                    app.podiumpodcasts.podium.api.db.model.EpisodeChapterModel(
+                        episodeId = episodeId,
+                        source = app.podiumpodcasts.podium.api.db.model.EpisodeChapterModel.SOURCE_GENERATED,
+                        startMs = dto.startMs,
+                        title = dto.title
+                    )
+                }
+                db.episodeChapters().upsertGeneratedChaptersIfNoPublisher(episodeId, generatedEntities)
+            }
 
-            db.chapterSkips().observe(episodeId).collect { skipModel ->
-                val skippedStarts = skipModel?.skippedStartsSet() ?: emptySet()
-                HushCastEngineBridge.updateSkippedChapterRanges(
+            kotlinx.coroutines.flow.combine(
+                app.podiumpodcasts.podium.api.chapters.EpisodeChapterHelper.observeResolvedChapters(
+                    db = db,
+                    autoMuteDb = autoMuteDb,
                     episodeId = episodeId,
-                    chapters = chapters,
-                    skippedStarts = skippedStarts,
                     durationMs = episodeDurationMs
+                ),
+                db.chapterSkips().observe(episodeId)
+            ) { resolvedChapters, skipModel ->
+                resolvedChapters to (skipModel?.skippedStartsSet() ?: emptySet())
+            }.collect { (resolvedChapters, skippedStarts) ->
+                HushCastEngineBridge.updateSkippedChapterRangesResolved(
+                    episodeId = episodeId,
+                    chapters = resolvedChapters,
+                    skippedStarts = skippedStarts
                 )
                 withContext(Dispatchers.Main) {
                     checkActiveSkipsNow()
@@ -441,6 +484,17 @@ class PlaybackService : MediaLibraryService() {
                 }
             }
         }
+    }
+
+    fun jumpToNextChapter(): Boolean {
+        val player = mediaSession?.player ?: return false
+        val chapters = HushCastEngineBridge.currentResolvedChapters
+        if (chapters.isEmpty()) return false
+        val pos = player.currentPosition
+        val skipped = HushCastEngineBridge.getSkippedChapterRanges().map { it.startMs }.toHashSet()
+        val next = chapters.firstOrNull { it.startMs > pos + 500L && it.startMs !in skipped } ?: return false
+        player.seekTo(next.startMs)
+        return true
     }
 
     private fun checkActiveSkipsNow() {
@@ -811,6 +865,62 @@ class PlaybackService : MediaLibraryService() {
                 scope.launch { settingsRepository.behavior.setPlayerPlaybackSpeed(playbackParameters.speed) }
                 mediaSession?.setCustomLayout(buildMediaButtons(exoPlayer))
                 super.onPlaybackParametersChanged(playbackParameters)
+            }
+
+            override fun onPlayerError(error: PlaybackException) {
+                android.util.Log.e("PlaybackService", "Player error: ${error.errorCodeName} (${error.message})", error)
+                updatePlayStateHandler.removeCallbacks(updatePlayStateRunnable)
+                super.onPlayerError(error)
+            }
+
+            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                val epId = getEpisodeId() ?: return
+                val id3 = app.podiumpodcasts.podium.api.chapters.EpisodeChapterHelper.extractId3ChaptersFromTracks(tracks)
+                if (id3.isNotEmpty()) {
+                    val dur = exoPlayer.duration.takeIf { it > 0L } ?: 0L
+                    val entities = app.podiumpodcasts.podium.api.chapters.ChapterParser.toEntities(
+                        episodeId = epId,
+                        source = app.podiumpodcasts.podium.api.db.model.EpisodeChapterModel.SOURCE_ID3,
+                        raw = id3,
+                        durationMs = dur,
+                        forceFirstAtZero = true
+                    )
+                    if (entities.isNotEmpty()) {
+                        scope.launch(Dispatchers.IO) {
+                            db.episodeChapters().upsertPublisherChapters(
+                                epId,
+                                app.podiumpodcasts.podium.api.db.model.EpisodeChapterModel.SOURCE_ID3,
+                                entities
+                            )
+                        }
+                    }
+                }
+                super.onTracksChanged(tracks)
+            }
+
+            override fun onMetadata(metadata: androidx.media3.common.Metadata) {
+                val epId = getEpisodeId() ?: return
+                val id3 = app.podiumpodcasts.podium.api.chapters.EpisodeChapterHelper.extractId3ChaptersFromMetadata(metadata)
+                if (id3.isNotEmpty()) {
+                    val dur = exoPlayer.duration.takeIf { it > 0L } ?: 0L
+                    val entities = app.podiumpodcasts.podium.api.chapters.ChapterParser.toEntities(
+                        episodeId = epId,
+                        source = app.podiumpodcasts.podium.api.db.model.EpisodeChapterModel.SOURCE_ID3,
+                        raw = id3,
+                        durationMs = dur,
+                        forceFirstAtZero = true
+                    )
+                    if (entities.isNotEmpty()) {
+                        scope.launch(Dispatchers.IO) {
+                            db.episodeChapters().upsertPublisherChapters(
+                                epId,
+                                app.podiumpodcasts.podium.api.db.model.EpisodeChapterModel.SOURCE_ID3,
+                                entities
+                            )
+                        }
+                    }
+                }
+                super.onMetadata(metadata)
             }
         })
     }

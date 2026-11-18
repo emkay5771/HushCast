@@ -34,9 +34,8 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_load(
     const char * path = env->GetStringUTFChars(jpath, nullptr);
     whisper_context_params cp = whisper_context_default_params();
     cp.use_gpu = false;
-    if (useFlashAttn) {
-        cp.flash_attn = true;
-    } else if (useDtw) {
+    cp.flash_attn = useFlashAttn ? true : false;
+    if (!useFlashAttn && useDtw) {
         cp.dtw_token_timestamps = true;
         cp.dtw_aheads_preset = isTiny ? WHISPER_AHEADS_TINY_EN : WHISPER_AHEADS_BASE_EN;
     }
@@ -229,9 +228,13 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_transcribeRange(
             if (d.id >= eot) continue;
             const char * text = whisper_full_get_token_text(ctx, s, t);
             if (!text || !*text) continue;
-            // Prefer DTW timestamp when available (t_dtw >= 0), otherwise token t0/t1
-            const float tok_t0 = (d.t_dtw >= 0) ? (d.t_dtw / 100.0f) : (d.t0 / 100.0f);
-            const float tok_t1 = (d.t1 >= d.t0) ? (d.t1 / 100.0f) : tok_t0 + 0.05f;
+            // Use whisper_full_get_token_t0/t1 to map back to original audio timeline (A1),
+            // and shift DTW timestamp by the same VAD offset so DTW stays aligned (A2).
+            const int64_t mapped_t0 = whisper_full_get_token_t0(ctx, s, t);
+            const int64_t mapped_t1 = whisper_full_get_token_t1(ctx, s, t);
+            const int64_t vad_shift = mapped_t0 - d.t0;
+            const float tok_t0 = (d.t_dtw >= 0) ? ((d.t_dtw + vad_shift) / 100.0f) : (mapped_t0 / 100.0f);
+            const float tok_t1 = (mapped_t1 >= mapped_t0) ? (mapped_t1 / 100.0f) : tok_t0 + 0.05f;
             if (text[0] == ' ' || cur.empty()) {
                 if (!cur.empty()) {
                     times.insert(times.end(), {(float) s, offset_sec + t0, offset_sec + t1});

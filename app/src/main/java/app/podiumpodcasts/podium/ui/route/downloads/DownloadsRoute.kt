@@ -23,7 +23,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
@@ -60,9 +62,48 @@ fun DownloadsRoute(
     val pager = remember { vm.downloads }.collectAsLazyPagingItems()
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var showRemovePlayedConfirm by remember { androidx.compose.runtime.mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    val playedDownloads = pager.itemSnapshotList.items.mapNotNull { item ->
+        val ep = item.episode ?: return@mapNotNull null
+        if (item.download.state == PodcastEpisodeDownloadState.DOWNLOADED.value &&
+            item.playState?.played == true
+        ) ep else null
+    }
+
+    if (showRemovePlayedConfirm) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showRemovePlayedConfirm = false },
+            title = { Text("Remove ${playedDownloads.size} played download(s)?") },
+            text = { Text("Downloaded audio files for listened episodes will be deleted from this device.") },
+            confirmButton = {
+                androidx.compose.material3.Button(onClick = {
+                    showRemovePlayedConfirm = false
+                    val count = playedDownloads.size
+                    scope.launch {
+                        playedDownloads.forEach { ep ->
+                            app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
+                                context = context,
+                                db = db,
+                                episode = ep
+                            )
+                        }
+                        snackbarHostState.showSnackbar("Removed $count played download(s)")
+                    }
+                }) { Text("Remove") }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showRemovePlayedConfirm = false }) { Text("Cancel") }
+            }
+        )
+    }
 
     Scaffold(
         Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        snackbarHost = { app.podiumpodcasts.podium.ui.component.PodiumSnackbarHost(snackbarHostState) },
         topBar = {
             CenterAlignedTopAppBar(
                 scrollBehavior = scrollBehavior,
@@ -75,7 +116,6 @@ fun DownloadsRoute(
                 actions = {
                     if(pager.itemCount > 0) {
                         val playerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
-                        val context = androidx.compose.ui.platform.LocalContext.current
                         app.podiumpodcasts.podium.ui.component.common.BubbleButton(
                             icon = androidx.compose.material.icons.Icons.Rounded.PlayArrow,
                             contentDescription = "Play all"
@@ -105,32 +145,12 @@ fun DownloadsRoute(
                                     playerVm.enqueue(context, it)
                                 }
                         }
-                        val playedDownloads = pager.itemSnapshotList.items.mapNotNull { item ->
-                            val ep = item.episode ?: return@mapNotNull null
-                            if (item.download.state == PodcastEpisodeDownloadState.DOWNLOADED.value &&
-                                item.playState?.played == true
-                            ) ep else null
-                        }
                         if (playedDownloads.isNotEmpty()) {
-                            val scope = androidx.compose.runtime.rememberCoroutineScope()
                             app.podiumpodcasts.podium.ui.component.common.BubbleButton(
                                 icon = androidx.compose.material.icons.Icons.Rounded.Delete,
                                 contentDescription = "Remove played downloads"
                             ) {
-                                scope.launch {
-                                    playedDownloads.forEach { ep ->
-                                        app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
-                                            context = context,
-                                            db = db,
-                                            episode = ep
-                                        )
-                                    }
-                                    android.widget.Toast.makeText(
-                                        context,
-                                        "Removed ${playedDownloads.size} played download(s)",
-                                        android.widget.Toast.LENGTH_SHORT
-                                    ).show()
-                                }
+                                showRemovePlayedConfirm = true
                             }
                         }
                     }

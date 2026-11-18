@@ -45,8 +45,9 @@ import app.podiumpodcasts.podium.api.db.model.statistics.UpdatePodcastRunModel
 
         SyncActionModel::class,
         QueueItemModel::class,
-        ChapterSkipModel::class
-    ], version = 18, exportSchema = true
+        ChapterSkipModel::class,
+        app.podiumpodcasts.podium.api.db.model.EpisodeChapterModel::class
+    ], version = 20, exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun podcasts(): PodcastDao
@@ -64,6 +65,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun syncActions(): SyncActionDao
     abstract fun playbackQueue(): QueueDao
     abstract fun chapterSkips(): ChapterSkipDao
+    abstract fun episodeChapters(): app.podiumpodcasts.podium.api.db.dao.EpisodeChapterDao
 }
 
 val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -347,6 +349,36 @@ val MIGRATION_17_18 = object : Migration(17, 18) {
     }
 }
 
+val MIGRATION_18_19 = object : Migration(18, 19) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `podcastEpisode` ADD COLUMN `transcriptUrl` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `podcastEpisode` ADD COLUMN `transcriptType` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `podcastEpisode` ADD COLUMN `chaptersUrl` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `podcastEpisode` ADD COLUMN `chaptersType` TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+val MIGRATION_19_20 = object : Migration(19, 20) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `episodeChapter` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `episodeId` TEXT NOT NULL,
+                `source` TEXT NOT NULL,
+                `startMs` INTEGER NOT NULL,
+                `endMs` INTEGER,
+                `title` TEXT NOT NULL,
+                `imageUrl` TEXT,
+                `linkUrl` TEXT,
+                FOREIGN KEY(`episodeId`) REFERENCES `podcastEpisode`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_episodeChapter_episodeId` ON `episodeChapter` (`episodeId`)")
+    }
+}
+
 val ALL_MIGRATIONS = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
@@ -364,5 +396,7 @@ val ALL_MIGRATIONS = arrayOf(
     MIGRATION_14_15,
     MIGRATION_15_16,
     MIGRATION_16_17,
-    MIGRATION_17_18
+    MIGRATION_17_18,
+    MIGRATION_18_19,
+    MIGRATION_19_20
 )

@@ -24,6 +24,9 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.Podium">
+        <profileable
+            android:shell="true"
+            tools:targetApi="29" />
         <activity
             android:name=".AppActivity"
             android:exported="true"

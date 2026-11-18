@@ -2,18 +2,22 @@ package app.podiumpodcasts.podium
 
 import android.app.Application
 import android.content.Context
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import app.podiumpodcasts.podium.background.worker.NightlyWorker
 import app.podiumpodcasts.podium.background.worker.PeriodicPodcastUpdateWorker
 import app.podiumpodcasts.podium.background.worker.sync.PartialSynchronizationWorker
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.request.crossfade
-import coil3.util.DebugLogger
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class App : Application(), SingletonImageLoader.Factory {
+    private var foregroundSyncScheduled = false
+
     override fun onCreate() {
         super.onCreate()
 
@@ -22,25 +26,32 @@ class App : Application(), SingletonImageLoader.Factory {
         MainScope().launch {
             app.podiumpodcasts.podium.background.HushCastEngineBridge.loadFromSettings(settingsRepository)
             PodcastGridOrganization.init(this@App)
-
-            if(settingsRepository.sync.enable.first()) {
-                val syncInterval = settingsRepository.sync.intervalMinutes.first().toLong()
-                PartialSynchronizationWorker.schedule(
-                    context = this@App,
-                    repeatIntervalMinutes = syncInterval
-                )
-
-                PartialSynchronizationWorker.enqueue(
-                    context = this@App
-                )
-            }
-
-            PeriodicPodcastUpdateWorker.enqueueWorker(
-                context = this@App,
-                settingsRepository = settingsRepository,
-                replace = false
-            )
         }
+
+        ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onStart(owner: LifecycleOwner) {
+                if (foregroundSyncScheduled) return
+                foregroundSyncScheduled = true
+                MainScope().launch {
+                    if (settingsRepository.sync.enable.first()) {
+                        val syncInterval = settingsRepository.sync.intervalMinutes.first().toLong()
+                        PartialSynchronizationWorker.schedule(
+                            context = this@App,
+                            repeatIntervalMinutes = syncInterval
+                        )
+                        PartialSynchronizationWorker.enqueue(
+                            context = this@App
+                        )
+                    }
+
+                    PeriodicPodcastUpdateWorker.enqueueWorker(
+                        context = this@App,
+                        settingsRepository = settingsRepository,
+                        replace = false
+                    )
+                }
+            }
+        })
 
         NightlyWorker.scheduleNightlyWork(this)
     }

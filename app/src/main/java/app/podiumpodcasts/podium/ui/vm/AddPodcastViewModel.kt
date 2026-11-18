@@ -64,9 +64,9 @@ class AddPodcastViewModel(
                 if(response !is FetchPodcastClientResult.Success)
                     throw Exception(response.toString())
 
-                val podcast = response.rssChannel.toPodcast(origin, response.fileSize, null)
+                val podcast = response.rssChannel.toPodcast(origin, response.fileSize, null, response.extras.language)
                 val episodes =
-                    response.rssChannel.items.map { it.toPodcastEpisode(podcast = podcast) }
+                    response.rssChannel.items.map { it.toPodcastEpisode(podcast = podcast, extras = response.extras) }
 
                 seedColor = null
                 state = AddPodcastState.Preview(

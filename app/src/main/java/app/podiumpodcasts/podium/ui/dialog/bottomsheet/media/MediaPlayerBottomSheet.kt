@@ -1,28 +1,33 @@
 package app.podiumpodcasts.podium.ui.dialog.bottomsheet.media
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import kotlinx.coroutines.flow.first
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,273 +35,193 @@ import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.rounded.AutoAwesome
-import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.CloseFullscreen
-import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadForOffline
 import androidx.compose.material.icons.rounded.Forward10
-import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.Forward30
 import androidx.compose.material.icons.rounded.Forward5
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
-import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.MoreHoriz
-import androidx.compose.material.icons.rounded.OpenInFull
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Podcasts
 import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.Replay10
+import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.Replay30
 import androidx.compose.material.icons.rounded.Replay5
 import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.material.icons.rounded.Tune
-import app.podiumpodcasts.podium.PlayerToolbarAction
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.BottomSheetDefaults
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ButtonGroup
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ContainedLoadingIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledIconToggleButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.IconButtonDefaults.IconButtonWidthOption
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.PrimaryTabRow
-import androidx.compose.material3.Slider
+import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.fromHtml
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.compose.material.icons.rounded.Subtitles
-import androidx.compose.ui.platform.LocalContext
-import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeBundle
+import app.hushcast.automute.dsp.AdPolicyMode
+import app.hushcast.automute.dsp.MuteActionMode
 import app.hushcast.automute.dsp.ReadinessBadge
+import app.hushcast.automute.dsp.SkipAwareSeekCalculator
+import app.hushcast.automute.engine.DownloadAnalysisMethod
+import app.hushcast.automute.engine.Word
 import app.hushcast.automute.storage.AutoMuteDatabase
-import app.hushcast.automute.storage.BlobCodec
-import app.hushcast.automute.storage.MuteRuleEntity
-import app.hushcast.automute.storage.WordIndexBlob
+import app.hushcast.automute.storage.EpisodeAnalysisStatusEntity
 import app.hushcast.automute.storage.toDomain
 import app.hushcast.automute.worker.EpisodeAnalysisWorker
+import app.podiumpodcasts.podium.PlayerTabConfig
+import app.podiumpodcasts.podium.PlayerToolbarAction
 import app.podiumpodcasts.podium.R
+import app.podiumpodcasts.podium.api.chapters.ResolvedChapter
 import app.podiumpodcasts.podium.background.HushCastEngineBridge
+import app.podiumpodcasts.podium.manager.DownloadManager
 import app.podiumpodcasts.podium.ui.component.common.SwitchableDynamicMaterialExpressiveTheme
-import app.podiumpodcasts.podium.ui.component.media.AnnotatedScrubberOverlay
 import app.podiumpodcasts.podium.ui.component.media.CastingBypassNoticeBanner
-import app.podiumpodcasts.podium.ui.component.media.EpisodeReadinessBadge
 import app.podiumpodcasts.podium.ui.component.media.OneTapUndoAdSkipBanner
-import app.podiumpodcasts.podium.ui.component.media.SyncedTranscriptCard
-import app.podiumpodcasts.podium.ui.component.settings.SettingsListItem
-import app.podiumpodcasts.podium.ui.custom.icons.Forward
 import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
-import app.podiumpodcasts.podium.ui.formatPlayerTime
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 import app.podiumpodcasts.podium.ui.theme.Typography
 import app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel
 import app.podiumpodcasts.podium.ui.vm.SourceTypeState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.util.Locale
 
 private enum class MediaPlayerTab(val label: String) {
     PLAYER("Playing"),
     NOTES("Details"),
-    CHAPTERS("Chapters"),
-    TRANSCRIPT("Transcript")
+    CHAPTERS("Chapters")
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun MediaPlayerBottomSheet(
-    onOpenEpisode: (
-        origin: String,
-        id: String
-    ) -> Unit,
+    onOpenEpisode: (origin: String, id: String) -> Unit,
     onOpenPodcast: ((origin: String) -> Unit)? = null,
     onDismiss: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val haptic = LocalHapticFeedback.current
     val windowSizeClass = currentWindowAdaptiveInfo().windowSizeClass
-
     val compactLayout = !windowSizeClass.isHeightAtLeastBreakpoint(500)
 
     val settingsRepository = LocalSettingsRepository.current
+    val appDb = LocalDatabase.current
     val vm = viewModel<MediaPlayerViewModel>()
+    val playerVm = viewModel<PlayerScreenViewModel>()
 
-    val enableArtworkColors = settingsRepository.appearance.enableArtworkColors.collectAsState(true)
+    val episodeId = vm.metadataEpisodeId ?: ""
+    LaunchedEffect(episodeId, vm.currentDuration) {
+        playerVm.bindEpisode(episodeId, vm.currentDuration)
+    }
 
     LaunchedEffect(vm.isPlayerVisible) {
-        if(vm.isPlayerVisible) return@LaunchedEffect
-        onDismiss()
+        if (!vm.isPlayerVisible) onDismiss()
     }
 
-    val sleepTimerState = vm.getSleepTimerState()
-
-    val context = LocalContext.current
-    val appDb = LocalDatabase.current
-    val autoMuteDb = remember(context) { AutoMuteDatabase.getInstance(context) }
-    val episodeId = vm.metadataEpisodeId ?: ""
-
-    val analysisStatus by autoMuteDb.dao().observeStatus(episodeId).collectAsState(initial = null)
-    val muteEntities by autoMuteDb.dao().observeMuteSegmentsByEpisode(episodeId).collectAsState(initial = emptyList())
-    val adEntities by autoMuteDb.dao().observeAdSegmentsByEpisode(episodeId).collectAsState(initial = emptyList())
-    val pendingUndo by HushCastEngineBridge.pendingUndoEvent.collectAsState()
-    val isCastingExternal by HushCastEngineBridge.isCastingExternal.collectAsState()
-
-    var selectedTab by remember { mutableStateOf(MediaPlayerTab.PLAYER) }
-    val currentEpisodeBundle by remember(episodeId) {
-        if (episodeId.isNotBlank()) appDb.podcastEpisodes().get(episodeId)
-        else kotlinx.coroutines.flow.flowOf(null)
-    }.collectAsState(initial = null)
-    var showMoreSheet by remember { mutableStateOf(false) }
-    var showNotDownloadedDialog by remember { mutableStateOf(false) }
-    var showHushCastSheet by remember { mutableStateOf(false) }
-    var showSetupSheet by remember { mutableStateOf(false) }
-    var pendingWordMute by remember { mutableStateOf<Pair<app.hushcast.automute.engine.Word, Boolean>?>(null) }
-    var transcriptBlob by remember(episodeId) { mutableStateOf<WordIndexBlob?>(null) }
-    var hadTranscript by remember(episodeId) { mutableStateOf(false) }
-
-    fun triggerAnalyzeNow() {
-        if (episodeId.isBlank()) return
-        showNotDownloadedDialog = true
-    }
-
-    var episodeSummary by remember { mutableStateOf<String?>(null) }
-    var episodeChapters by remember {
-        mutableStateOf<List<app.hushcast.automute.desktop.DesktopChapterDto>>(emptyList())
-    }
-
-    LaunchedEffect(episodeId, analysisStatus?.badge, analysisStatus?.stageLabel) {
-        if (episodeId.isBlank()) return@LaunchedEffect
-        val idx = autoMuteDb.dao().getWordIndexByEpisode(episodeId)
-        val insights = autoMuteDb.dao().getInsights(episodeId)
-        val (decodedBlob, decodedChapters) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
-            val blob = idx?.let { runCatching { BlobCodec.decompress(it.compressedBlob) }.getOrNull() }
-            val chapters = insights?.chaptersJson?.let { raw ->
-                runCatching {
-                    kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-                        .decodeFromString<List<app.hushcast.automute.desktop.DesktopChapterDto>>(raw)
-                        .sortedBy { it.startMs }
-                }.getOrDefault(emptyList())
-            } ?: emptyList()
-            blob to chapters
-        }
-        if (decodedBlob != null && !hadTranscript && transcriptBlob == null && analysisStatus?.badge != null) {
-            hadTranscript = true
-        }
-        transcriptBlob = decodedBlob
-        episodeSummary = insights?.summary
-        episodeChapters = decodedChapters
-    }
-
-    val playerTabsConfig by settingsRepository.behavior.playerTabsConfig.collectAsState(
-        initial = listOf(
-            app.podiumpodcasts.podium.PlayerTabConfig("PLAYER", true),
-            app.podiumpodcasts.podium.PlayerTabConfig("NOTES", true),
-            app.podiumpodcasts.podium.PlayerTabConfig("CHAPTERS", true),
-            app.podiumpodcasts.podium.PlayerTabConfig("TRANSCRIPT", true)
-        )
+    val enableArtworkColors by settingsRepository.appearance.enableArtworkColors.collectAsStateWithLifecycle(initialValue = true)
+    val remainingTimeDisplay by settingsRepository.behavior.remainingTimeDisplay.collectAsStateWithLifecycle(
+        initialValue = app.podiumpodcasts.podium.RemainingTimeDisplayMode.BOTH
     )
-    val devMode by settingsRepository.hushCast.devMode.collectAsState(initial = false)
-    var showCustomizeTabsDialog by remember { mutableStateOf(false) }
-    var showDeleteDownloadConfirm by remember { mutableStateOf(false) }
-    var downloadBannerDismissedForEp by remember(episodeId) { mutableStateOf(false) }
+    val adjustRemainingForSpeed = remainingTimeDisplay != app.podiumpodcasts.podium.RemainingTimeDisplayMode.RAW
+    val setupCompleted by settingsRepository.hushCast.setupCompleted.collectAsStateWithLifecycle(initialValue = false)
+    val devMode by settingsRepository.hushCast.devMode.collectAsStateWithLifecycle(initialValue = false)
+    val wordMutingGlobal by settingsRepository.hushCast.wordMutingEnabled.collectAsStateWithLifecycle(initialValue = true)
+    val adPolicyGlobal by settingsRepository.hushCast.adPolicyMode.collectAsStateWithLifecycle(initialValue = AdPolicyMode.AUTO_SKIP)
 
-    val visibleTabs = remember(playerTabsConfig, episodeChapters.isNotEmpty(), transcriptBlob != null) {
-        val mapped = playerTabsConfig
-            .filter { it.visible }
-            .mapNotNull { cfg ->
-                when (cfg.id) {
-                    "PLAYER" -> MediaPlayerTab.PLAYER
-                    "NOTES" -> MediaPlayerTab.NOTES
-                    "CHAPTERS" -> if (episodeChapters.isNotEmpty()) MediaPlayerTab.CHAPTERS else null
-                    "TRANSCRIPT" -> if (transcriptBlob != null) MediaPlayerTab.TRANSCRIPT else null
-                    else -> null
-                }
-            }
-        mapped.ifEmpty { listOf(MediaPlayerTab.PLAYER) }
-    }
-    LaunchedEffect(visibleTabs) {
-        if (selectedTab !in visibleTabs) selectedTab = visibleTabs.first()
-    }
+    val currentEpisodeBundle by playerVm.episodeBundle.collectAsStateWithLifecycle()
+    val analysisStatus by playerVm.analysisStatus.collectAsStateWithLifecycle()
+    val muteEntities by playerVm.muteSegments.collectAsStateWithLifecycle()
+    val adEntities by playerVm.adSegments.collectAsStateWithLifecycle()
+    val resolvedChapters by playerVm.resolvedChapters.collectAsStateWithLifecycle()
+    val skippedChapterStarts by playerVm.skippedChapterStarts.collectAsStateWithLifecycle()
+    val isFavorite by playerVm.isFavorite.collectAsStateWithLifecycle()
+    val transcriptState by playerVm.transcriptState.collectAsStateWithLifecycle()
+    val episodeSummary by playerVm.episodeSummary.collectAsStateWithLifecycle()
+    val wordIndexBlob by playerVm.wordIndexBlob.collectAsStateWithLifecycle()
 
-    val chapterSkipModel by remember(episodeId) {
-        if (episodeId.isNotBlank()) appDb.chapterSkips().observe(episodeId)
-        else kotlinx.coroutines.flow.flowOf(null)
-    }.collectAsState(initial = null)
-    val skippedChapterStarts = remember(chapterSkipModel) {
-        chapterSkipModel?.skippedStartsSet() ?: emptySet()
-    }
+    val pendingUndo by HushCastEngineBridge.pendingUndoEvent.collectAsStateWithLifecycle()
+    val isCastingExternal by HushCastEngineBridge.isCastingExternal.collectAsStateWithLifecycle()
+    val sleepTimerMinutes = vm.getSleepTimerState().value
 
-    fun toggleSkippedChapter(startMs: Long, skip: Boolean) {
-        if (episodeId.isBlank()) return
-        val next = if (skip) skippedChapterStarts + startMs else skippedChapterStarts - startMs
-        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            if (next.isEmpty()) {
-                appDb.chapterSkips().delete(episodeId)
-            } else {
-                appDb.chapterSkips().upsert(
-                    app.podiumpodcasts.podium.api.db.model.ChapterSkipModel(
-                        episodeId = episodeId,
-                        skippedStartsCsv = next.sorted().joinToString(",")
-                    )
-                )
-            }
-        }
-    }
+    val muteWindows = remember(muteEntities) { muteEntities.map { it.toDomain() } }
+    val adWindows = remember(adEntities) { adEntities.map { it.toDomain() } }
 
-    LaunchedEffect(episodeId, episodeChapters, skippedChapterStarts, vm.currentDuration) {
-        if (episodeId.isNotBlank()) {
-            HushCastEngineBridge.updateSkippedChapterRanges(
-                episodeId = episodeId,
-                chapters = episodeChapters,
-                skippedStarts = skippedChapterStarts,
-                durationMs = vm.currentDuration
-            )
-        }
+    val shieldBadge = remember(analysisStatus?.badge) {
+        runCatching { analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) } }.getOrNull()
+            ?: ReadinessBadge.NOT_PROCESSED
+    }
+    val isProcessed = shieldBadge == ReadinessBadge.READY || shieldBadge == ReadinessBadge.WORD_MUTE_READY
+    val protectionActive = wordMutingGlobal || adPolicyGlobal == AdPolicyMode.AUTO_SKIP
+
+    val isDownloaded = remember(episodeId, currentEpisodeBundle) {
+        currentEpisodeBundle?.episode?.craftDownloadFile(context)?.exists() == true
     }
 
     LaunchedEffect(pendingUndo) {
@@ -306,114 +231,160 @@ fun MediaPlayerBottomSheet(
         }
     }
 
+    val playerTabsConfig by settingsRepository.behavior.playerTabsConfig.collectAsStateWithLifecycle(
+        initialValue = listOf(
+            PlayerTabConfig("PLAYER", true),
+            PlayerTabConfig("NOTES", true),
+            PlayerTabConfig("CHAPTERS", true)
+        )
+    )
+
+    val visibleTabs = remember(playerTabsConfig, resolvedChapters.isNotEmpty()) {
+        val mapped = playerTabsConfig
+            .filter { it.visible }
+            .mapNotNull { cfg ->
+                when (cfg.id) {
+                    "PLAYER" -> MediaPlayerTab.PLAYER
+                    "NOTES" -> MediaPlayerTab.NOTES
+                    "CHAPTERS" -> if (resolvedChapters.isNotEmpty()) MediaPlayerTab.CHAPTERS else null
+                    else -> null
+                }
+            }
+        val withPlayer = if (MediaPlayerTab.PLAYER in mapped) mapped else listOf(MediaPlayerTab.PLAYER) + mapped
+        withPlayer
+    }
+
+    var selectedTab by remember { mutableStateOf(MediaPlayerTab.PLAYER) }
+    var showTranscriptOverlay by remember { mutableStateOf(false) }
+
+    val pagerState = rememberPagerState(
+        initialPage = visibleTabs.indexOf(selectedTab).coerceAtLeast(0)
+    ) { visibleTabs.size }
+
+    LaunchedEffect(pagerState.settledPage, visibleTabs) {
+        val tab = visibleTabs.getOrNull(pagerState.settledPage)
+        if (tab != null && tab != selectedTab) {
+            selectedTab = tab
+        }
+    }
+    LaunchedEffect(selectedTab, visibleTabs) {
+        val targetIdx = visibleTabs.indexOf(selectedTab)
+        if (targetIdx >= 0 && pagerState.currentPage != targetIdx && !pagerState.isScrollInProgress) {
+            pagerState.animateScrollToPage(targetIdx)
+        }
+    }
+    LaunchedEffect(selectedTab) {
+        if (selectedTab != MediaPlayerTab.PLAYER && showTranscriptOverlay) {
+            showTranscriptOverlay = false
+        }
+    }
+
+    var showMoreMenu by remember { mutableStateOf(false) }
+    var showCustomizeSheet by remember { mutableStateOf(false) }
+    var showHushCastSheet by remember { mutableStateOf(false) }
     var showSleepTimerBottomSheet by remember { mutableStateOf(false) }
     var showSpeedBottomSheet by remember { mutableStateOf(false) }
     var showQueueBottomSheet by remember { mutableStateOf(false) }
+    var showNotDownloadedDialog by remember { mutableStateOf(false) }
+    var showDeleteDownloadConfirm by remember { mutableStateOf(false) }
+    var transcriptPromptState by remember { mutableStateOf<TranscriptLoadState?>(null) }
+    var pendingWordMute by remember { mutableStateOf<Word?>(null) }
+    var downloadBannerDismissedForEp by remember(episodeId) { mutableStateOf(false) }
 
-    val sheetState = rememberModalBottomSheetState(
-        skipPartiallyExpanded = true
-    )
-
-    fun dismissGracefully(
-        after: () -> Unit
-    ) = scope.launch {
-        sheetState.hide()
-
-        after()
-        onDismiss()
-    }
-
-    val setupCompleted by settingsRepository.hushCast.setupCompleted.collectAsState(initial = false)
-    val shieldBadge = remember(analysisStatus?.badge) {
-        runCatching { analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) } }.getOrNull()
-            ?: ReadinessBadge.NOT_PROCESSED
-    }
-    val isFavorite by remember(episodeId) {
-        if (episodeId.isNotBlank()) appDb.listItems().isFavorite(episodeId)
-        else kotlinx.coroutines.flow.flowOf(false)
-    }.collectAsState(initial = false)
-    val isDownloaded = remember(episodeId, currentEpisodeBundle, currentEpisodeBundle?.download) {
-        currentEpisodeBundle?.episode?.craftDownloadFile(context)?.exists() == true
-    }
-
-    var showRearrangeActionsSheet by remember { mutableStateOf(false) }
     val availablePlayerActions = remember {
         listOf(
             PlayerToolbarAction.HUSHCAST,
             PlayerToolbarAction.SPEED,
             PlayerToolbarAction.SLEEP,
+            PlayerToolbarAction.TRANSCRIPT,
             PlayerToolbarAction.FAVORITE,
             PlayerToolbarAction.DOWNLOAD,
             PlayerToolbarAction.GO_TO_PODCAST,
-            PlayerToolbarAction.EPISODE_DETAILS,
             PlayerToolbarAction.MARK_PLAYED
         )
     }
-    val configuredToolbarActions by settingsRepository.behavior.playerToolbarActions.collectAsState(
-        initial = listOf(
+
+    val configuredToolbarActions by settingsRepository.behavior.playerToolbarActions.collectAsStateWithLifecycle(
+        initialValue = listOf(
             PlayerToolbarAction.HUSHCAST,
             PlayerToolbarAction.SPEED,
             PlayerToolbarAction.SLEEP,
-            PlayerToolbarAction.FAVORITE
+            PlayerToolbarAction.TRANSCRIPT
         )
     )
-    val shortcutActions = remember(configuredToolbarActions) {
-        configuredToolbarActions
+
+    val orderedAllActions = remember(configuredToolbarActions) {
+        val mapped = configuredToolbarActions
             .map { if (it == PlayerToolbarAction.ANALYZE) PlayerToolbarAction.HUSHCAST else it }
-            .distinct()
             .filter { it in availablePlayerActions }
-            .take(4)
-            .ifEmpty {
-                listOf(
-                    PlayerToolbarAction.HUSHCAST,
-                    PlayerToolbarAction.SPEED,
-                    PlayerToolbarAction.SLEEP,
-                    PlayerToolbarAction.FAVORITE
+        (mapped + availablePlayerActions.filter { it !in mapped }).distinct()
+    }
+    val shortcutActions = remember(orderedAllActions) { orderedAllActions.take(4) }
+    val overflowActions = remember(orderedAllActions) { orderedAllActions.drop(4) }
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    fun dismissGracefully(after: () -> Unit = {}) = scope.launch {
+        sheetState.hide()
+        after()
+        onDismiss()
+    }
+
+    fun triggerAnalyzeNow() {
+        if (episodeId.isBlank()) return
+        val localFile = currentEpisodeBundle?.episode?.craftDownloadFile(context)
+        if (isDownloaded && localFile != null && localFile.exists()) {
+            scope.launch(Dispatchers.IO) {
+                val autoMuteDb = AutoMuteDatabase.getInstance(context)
+                autoMuteDb.dao().upsertStatus(
+                    EpisodeAnalysisStatusEntity(
+                        episodeId = episodeId,
+                        badge = ReadinessBadge.ANALYZING.name,
+                        progressPercent = 0,
+                        stageLabel = "Queued for AI analysis…"
+                    )
+                )
+                EpisodeAnalysisWorker.enqueueAnalyzeNow(
+                    context = context,
+                    episodeId = episodeId,
+                    audioPath = localFile.absolutePath,
+                    actionMode = HushCastEngineBridge.defaultActionMode,
+                    episodeTitle = currentEpisodeBundle?.episode?.title
                 )
             }
+        } else {
+            showNotDownloadedDialog = true
+        }
+    }
+
+    fun triggerDownloadNow() {
+        if (episodeId.isBlank()) return
+        scope.launch(Dispatchers.IO) {
+            DownloadManager.downloadEpisode(
+                context = context,
+                db = appDb,
+                episodeId = episodeId
+            )
+        }
     }
 
     fun performToolbarAction(action: PlayerToolbarAction) {
         when (action) {
-            PlayerToolbarAction.HUSHCAST, PlayerToolbarAction.ANALYZE -> {
-                if (!setupCompleted) showSetupSheet = true
-                else showHushCastSheet = true
-            }
+            PlayerToolbarAction.HUSHCAST, PlayerToolbarAction.ANALYZE -> showHushCastSheet = true
             PlayerToolbarAction.SPEED -> showSpeedBottomSheet = true
             PlayerToolbarAction.SLEEP -> showSleepTimerBottomSheet = true
-            PlayerToolbarAction.FAVORITE -> {
-                if (episodeId.isNotBlank()) {
-                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                        appDb.lists().createFavorites()
-                        if (isFavorite) {
-                            appDb.listItems().get(-2, episodeId)?.let { item ->
-                                appDb.listItems().deleteAndReindex(-2, item.id, item.position)
-                            }
-                        } else {
-                            val pos = appDb.listItems().getNextPosition(-2) ?: 0
-                            appDb.listItems().addListItemAndRefreshItemCount(
-                                listId = -2,
-                                contentId = episodeId,
-                                isPodcast = false,
-                                position = pos
-                            )
-                        }
+            PlayerToolbarAction.TRANSCRIPT -> {
+                when (val ts = transcriptState) {
+                    is TranscriptLoadState.Ready -> showTranscriptOverlay = true
+                    is TranscriptLoadState.NotProcessed,
+                    is TranscriptLoadState.Transcribing -> {
+                        transcriptPromptState = ts
                     }
+                    else -> showTranscriptOverlay = true
                 }
             }
+            PlayerToolbarAction.FAVORITE -> playerVm.toggleFavorite(isFavorite)
             PlayerToolbarAction.DOWNLOAD -> {
-                val ep = currentEpisodeBundle?.episode ?: return
-                if (isDownloaded) {
-                    showDeleteDownloadConfirm = true
-                } else {
-                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                        app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
-                            context = context,
-                            db = appDb,
-                            episodeId = ep.id
-                        )
-                    }
-                }
+                if (isDownloaded) showDeleteDownloadConfirm = true else triggerDownloadNow()
             }
             PlayerToolbarAction.GO_TO_PODCAST -> {
                 val origin = vm.metadataOrigin
@@ -430,2323 +401,1083 @@ fun MediaPlayerBottomSheet(
             }
             PlayerToolbarAction.MARK_PLAYED -> {
                 if (episodeId.isNotBlank()) {
-                    scope.launch {
-                        appDb.podcastEpisodePlayStates().savePlayed(episodeId, true)
-                    }
+                    scope.launch { appDb.podcastEpisodePlayStates().savePlayed(episodeId, true) }
                     vm.removeEpisodeFromPlaybackAndQueue(episodeId)
                 }
             }
         }
     }
 
-    var isFullScreen by remember { mutableStateOf(true) }
-    val pagerState = androidx.compose.foundation.pager.rememberPagerState(
-        initialPage = visibleTabs.indexOf(selectedTab).coerceAtLeast(0)
-    ) { visibleTabs.size }
+    val livePosMs = if (showTranscriptOverlay) {
+        vm.rememberLivePositionMs(100L)
+    } else {
+        vm.rememberLivePositionMs(500L)
+    }
+    val durationMs = vm.currentDuration.coerceAtLeast(0L)
 
-    LaunchedEffect(pagerState.settledPage, visibleTabs) {
-        val tab = visibleTabs.getOrNull(pagerState.settledPage)
-        if (tab != null && tab != selectedTab) {
-            selectedTab = tab
-        }
+    val currentChapterIndex = remember(resolvedChapters, livePosMs) {
+        if (resolvedChapters.isEmpty()) -1
+        else resolvedChapters.indexOfFirst { livePosMs in it.startMs until it.endMs }
     }
-    LaunchedEffect(visibleTabs.size) {
-        if (visibleTabs.isNotEmpty() && pagerState.currentPage >= visibleTabs.size) {
-            pagerState.scrollToPage(visibleTabs.lastIndex)
-        }
-    }
-    LaunchedEffect(selectedTab, visibleTabs) {
-        val targetIdx = visibleTabs.indexOf(selectedTab)
-        if (targetIdx >= 0 && pagerState.currentPage != targetIdx && !pagerState.isScrollInProgress) {
-            pagerState.animateScrollToPage(targetIdx)
-        }
-    }
+    val currentChapter = resolvedChapters.getOrNull(currentChapterIndex)
 
     SwitchableDynamicMaterialExpressiveTheme(
-        enable = enableArtworkColors.value,
+        enable = enableArtworkColors,
         seedColor = Color(vm.metadataImageSeedColor ?: 1)
     ) {
         ModalBottomSheet(
             sheetState = sheetState,
-            sheetMaxWidth = if (isFullScreen) androidx.compose.ui.unit.Dp.Infinity else BottomSheetDefaults.SheetMaxWidth,
+            sheetMaxWidth = androidx.compose.ui.unit.Dp.Infinity,
             onDismissRequest = onDismiss
         ) {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .then(if (isFullScreen) Modifier.fillMaxHeight() else Modifier)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .pointerInput(isFullScreen) {
-                            val thresholdPx = 60.dp.toPx()
-                            awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false)
-                                var totalDrag = 0f
-                                var triggered = false
-                                var pointerId = down.id
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull { it.id == pointerId } ?: break
-                                    if (!change.pressed) break
-                                    val dy = change.position.y - change.previousPosition.y
-                                    totalDrag += dy
-                                    if (!triggered) {
-                                        if (totalDrag < -thresholdPx) {
-                                            triggered = true
-                                            change.consume()
-                                            if (!isFullScreen) isFullScreen = true
-                                            else showQueueBottomSheet = true
-                                        } else if (totalDrag > thresholdPx && isFullScreen) {
-                                            triggered = true
-                                            change.consume()
-                                            isFullScreen = false
-                                        } else if (dy < 0f || isFullScreen) {
-                                            change.consume()
-                                        }
-                                    }
-                                }
-                            }
-                        },
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        modifier = Modifier.padding(start = 4.dp),
-                        onClick = { dismissGracefully { } }
-                    ) {
-                        Icon(
-                            imageVector = androidx.compose.material.icons.Icons.Rounded.KeyboardArrowDown,
-                            contentDescription = "Collapse player"
-                        )
-                    }
+            val spatialSpec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+            val fastEffects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+            val transcriptTransition = updateTransition(targetState = showTranscriptOverlay, label = "transcriptOverlay")
 
-                    val activeTabIndex = pagerState.currentPage.coerceIn(0, (visibleTabs.size - 1).coerceAtLeast(0))
-                    androidx.compose.material3.PrimaryScrollableTabRow(
-                        modifier = Modifier.weight(1f),
-                        selectedTabIndex = activeTabIndex,
-                        edgePadding = 0.dp,
-                        minTabWidth = 0.dp,
-                        containerColor = Color.Transparent,
-                        divider = { }
+            val chromeAlpha by transcriptTransition.animateFloat(
+                transitionSpec = { fastEffects },
+                label = "chromeAlpha"
+            ) { open -> if (open) 0f else 1f }
+
+            val transportScale by transcriptTransition.animateFloat(
+                transitionSpec = { spatialSpec },
+                label = "transportScale"
+            ) { open -> if (open) 0.80f else 1f }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight()
+            ) {
+                // Top row: Collapse, Tabs, Up Next (hidden cleanly during transcript overlay, Tune icon removed per I9)
+                if (!showTranscriptOverlay) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer { alpha = chromeAlpha },
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        visibleTabs.forEachIndexed { idx, tab ->
-                            Tab(
-                                selected = activeTabIndex == idx,
-                                onClick = {
-                                    selectedTab = tab
-                                    scope.launch {
-                                        pagerState.animateScrollToPage(idx)
-                                    }
-                                },
-                                text = {
-                                    Text(
-                                        text = tab.label,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        style = MaterialTheme.typography.labelLarge
-                                    )
-                                }
+                        IconButton(
+                            modifier = Modifier
+                                .padding(start = 4.dp)
+                                .size(48.dp),
+                            onClick = { dismissGracefully() }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.KeyboardArrowDown,
+                                contentDescription = "Collapse player"
                             )
                         }
-                    }
 
-                    IconButton(
-                        onClick = { showCustomizeTabsDialog = true }
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Tune,
-                            contentDescription = "Customize tabs",
-                            modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    IconButton(
-                        modifier = Modifier.padding(end = 4.dp),
-                        onClick = { showQueueBottomSheet = true }
-                    ) {
-                        androidx.compose.material3.BadgedBox(
-                            badge = {
-                                if (vm.queue.isNotEmpty()) {
-                                    androidx.compose.material3.Badge(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary
-                                    ) {
-                                        Text(if (vm.queue.size > 99) "99+" else vm.queue.size.toString())
-                                    }
+                        if (visibleTabs.size > 1) {
+                            val selectedIdx = visibleTabs.indexOf(selectedTab).coerceAtLeast(0)
+                            SecondaryTabRow(
+                                selectedTabIndex = selectedIdx,
+                                modifier = Modifier.weight(1f),
+                                containerColor = Color.Transparent,
+                                divider = {},
+                                indicator = {
+                                    TabRowDefaults.SecondaryIndicator(
+                                        modifier = Modifier.tabIndicatorOffset(selectedIdx, matchContentSize = false)
+                                    )
+                                }
+                            ) {
+                                visibleTabs.forEach { tab ->
+                                    Tab(
+                                        selected = selectedTab == tab,
+                                        onClick = { selectedTab = tab },
+                                        text = {
+                                            Text(
+                                                text = tab.label,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    )
                                 }
                             }
+                        } else {
+                            Spacer(Modifier.weight(1f))
+                        }
+
+                        IconButton(
+                            modifier = Modifier
+                                .padding(end = 4.dp)
+                                .size(48.dp),
+                            onClick = { showQueueBottomSheet = true }
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
-                                contentDescription = stringResource(R.string.common_queue)
+                                contentDescription = "Up Next (${vm.queue.size})"
                             )
                         }
                     }
                 }
 
-                androidx.compose.foundation.pager.HorizontalPager(
-                    state = pagerState,
+                // Main content area: Pager (or TranscriptOverlay when open on Playing page)
+                Box(
                     modifier = Modifier
+                        .weight(1f)
                         .fillMaxWidth()
-                        .then(if (isFullScreen) Modifier.weight(1f) else Modifier),
-                    beyondViewportPageCount = 1
-                ) { pageIndex ->
-                val pageTab = visibleTabs.getOrNull(pageIndex) ?: MediaPlayerTab.PLAYER
-                when (pageTab) {
-                    MediaPlayerTab.CHAPTERS -> {
-                        LiveChaptersTabContent(
-                            vm = vm,
-                            chapters = episodeChapters,
-                            skippedChapterStarts = skippedChapterStarts,
-                            onSeekToMs = { ms -> vm.seek(ms) },
-                            onToggleSkipChapter = { ch, skip -> toggleSkippedChapter(ch.startMs, skip) },
-                            onAnalyzeNowClick = { triggerAnalyzeNow() },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .then(
-                                    if (isFullScreen) Modifier.fillMaxSize()
-                                    else Modifier.heightIn(min = 320.dp, max = 520.dp)
-                                )
-                                .padding(horizontal = 16.dp, vertical = 12.dp)
-                        )
-                    }
-
-                    MediaPlayerTab.NOTES -> {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .then(
-                                    if (isFullScreen) Modifier.fillMaxSize()
-                                    else Modifier.heightIn(min = 320.dp, max = 520.dp)
-                                )
-                                .verticalScroll(rememberScrollState())
-                                .padding(horizontal = 20.dp, vertical = 16.dp)
-                        ) {
-                            Text(
-                                text = currentEpisodeBundle?.episode?.title
-                                    ?: vm.mediaMetadata?.title?.toString()
-                                    ?: "",
-                                style = Typography.titleLargeEmphasized
-                            )
-                            val sub = currentEpisodeBundle?.episode?.podcastTitle
-                                ?: vm.mediaMetadata?.subtitle?.toString()
-                                ?: ""
-                            if (sub.isNotBlank()) {
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = sub,
-                                    style = Typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Spacer(Modifier.height(16.dp))
-                            if (!episodeSummary.isNullOrBlank()) {
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
+                ) {
+                    HorizontalPager(
+                        state = pagerState,
+                        userScrollEnabled = !showTranscriptOverlay,
+                        beyondViewportPageCount = 1,
+                        modifier = Modifier.fillMaxSize()
+                    ) { pageIndex ->
+                        when (visibleTabs.getOrNull(pageIndex) ?: MediaPlayerTab.PLAYER) {
+                            MediaPlayerTab.PLAYER -> {
+                                Box(modifier = Modifier.fillMaxSize()) {
                                     Column(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .padding(horizontal = 24.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Text(
-                                            text = "AI Summary",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                                        )
-                                        SelectionContainer {
-                                            Text(
-                                                text = episodeSummary!!,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                                            )
-                                        }
-                                    }
-                                }
-                                Spacer(Modifier.height(16.dp))
-                            }
-                            val desc = currentEpisodeBundle?.episode?.description.orEmpty()
-                            if (desc.isBlank()) {
-                                Text(
-                                    text = "No show notes available for this episode.",
-                                    style = Typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            } else {
-                                val parsedNotes = remember(episodeId, desc) {
-                                    AnnotatedString.fromHtml(
-                                        htmlString = desc.replace("\n", "<br>")
-                                    )
-                                }
-                                SelectionContainer {
-                                    Text(
-                                        text = parsedNotes,
-                                        style = Typography.bodyMedium
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    MediaPlayerTab.TRANSCRIPT -> {
-                        val muteWindows = remember(muteEntities) { muteEntities.map { it.toDomain() } }
-                        val adWindows = remember(adEntities) { adEntities.map { it.toDomain() } }
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .then(
-                                    if (isFullScreen) Modifier.fillMaxSize()
-                                    else Modifier.heightIn(min = 320.dp, max = 520.dp)
-                                )
-                                .padding(horizontal = 16.dp, vertical = 12.dp)
-                        ) {
-                            if (transcriptBlob == null) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 32.dp, horizontal = 16.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Subtitles,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(40.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Text(
-                                        text = "Transcript not generated yet",
-                                        style = Typography.titleMediumEmphasized
-                                    )
-                                    Text(
-                                        text = "Analyze this episode with HushCast AI to view a synced, tappable transcript.",
-                                        style = Typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                    )
-                                    Button(onClick = { triggerAnalyzeNow() }) {
-                                        Icon(Icons.Rounded.AutoAwesome, contentDescription = null)
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Analyze with HushCast AI")
-                                    }
-                                }
-                            } else {
-                                LiveSyncedTranscriptCard(
-                                    modifier = Modifier.weight(1f),
-                                    vm = vm,
-                                    segments = transcriptBlob?.segments ?: emptyList(),
-                                    words = transcriptBlob?.words ?: emptyList(),
-                                    muteWindows = muteWindows,
-                                    adWindows = adWindows,
-                                    onSeekToMs = { ms -> vm.seek(ms) },
-                                    summary = episodeSummary,
-                                    chapters = episodeChapters,
-                                    onPlayAdSegment = { ad, startMs ->
-                                        HushCastEngineBridge.adSkipObserver.bypassAd(ad.startMs)
-                                        vm.seek(startMs)
-                                        if (!vm.isPlaying) vm.play()
-                                    },
-                                    onCopyReport = if (app.podiumpodcasts.podium.BuildConfig.DEBUG) {
-                                        {
-                                            val title = currentEpisodeBundle?.episode?.title
-                                                ?: vm.mediaMetadata?.title?.toString()
-                                                ?: episodeId
-                                            val report = buildString {
-                                                appendLine("HushCast Transcript & Ad Report")
-                                                appendLine("Episode: $title")
-                                                appendLine("Ad Windows (${adWindows.size}):")
-                                                adWindows.forEach { ad ->
-                                                    appendLine("  - ${formatPlayerTime(ad.startMs)}..${formatPlayerTime(ad.endMs)} [${ad.label}]")
-                                                }
-                                                appendLine("Mute Windows (${muteWindows.size}):")
-                                                muteWindows.take(50).forEach { m ->
-                                                    appendLine("  - ${formatPlayerTime(m.startMs)}..${formatPlayerTime(m.endMs)} (${m.word}, enabled=${m.enabled})")
-                                                }
-                                                appendLine("--- Transcript (${transcriptBlob?.segments?.size ?: 0} segments) ---")
-                                                transcriptBlob?.segments?.forEach { seg ->
-                                                    val ms = (seg.start * 1000.0).toLong()
-                                                    appendLine("[${formatPlayerTime(ms)}] ${seg.text.trim()}")
-                                                }
+                                        // Banners & Artwork + Titles (fades out when transcript opens)
+                                        Column(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxWidth()
+                                                .graphicsLayer { alpha = chromeAlpha },
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.Center
+                                        ) {
+                                            AnimatedVisibility(visible = isCastingExternal) {
+                                                CastingBypassNoticeBanner(modifier = Modifier.padding(bottom = 8.dp))
                                             }
-                                            val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("HushCast Transcript Report", report))
-                                            android.widget.Toast.makeText(context, "Transcript & Ad Report copied", android.widget.Toast.LENGTH_SHORT).show()
-                                        }
-                                    } else null,
-                                    onToggleWordMute = { word, mute ->
-                                        val clean = word.text.trim().trim('.', ',', '!', '?', '"', '\'')
-                                        if (clean.isNotEmpty() && episodeId.isNotBlank()) {
-                                            pendingWordMute = word to mute
-                                        }
-                                    }
-                                )
-                            }
-                        }
-                    }
 
-                    MediaPlayerTab.PLAYER -> {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .fillMaxHeight()
-                                .pointerInput(Unit) {
-                                    val thresholdPx = 72.dp.toPx()
-                                    awaitEachGesture {
-                                        val down = awaitFirstDown(requireUnconsumed = false)
-                                        var totalDrag = 0f
-                                        var triggered = false
-                                        val pointerId = down.id
-                                        while (true) {
-                                            val event = awaitPointerEvent()
-                                            val change = event.changes.firstOrNull { it.id == pointerId } ?: break
-                                            if (!change.pressed) break
-                                            val dy = change.position.y - change.previousPosition.y
-                                            totalDrag += dy
-                                            if (!triggered && totalDrag < -thresholdPx) {
-                                                triggered = true
-                                                change.consume()
-                                                showQueueBottomSheet = true
-                                            }
-                                        }
-                                    }
-                                }
-                        ) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 20.dp, vertical = 8.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
-                            ) {
-                                Column(
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .weight(1f, fill = true)
-                                        .verticalScroll(rememberScrollState()),
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = if (isFullScreen && !compactLayout) Arrangement.Center else Arrangement.Top
-                                ) {
-                                    Column(
-                                        Modifier
-                                            .clip(RoundedCornerShape(20.dp))
-                                            .clickable {
-                                                dismissGracefully {
-                                                    onOpenEpisode(
-                                                        vm.metadataOrigin!!,
-                                                        vm.metadataEpisodeId!!
-                                                    )
-                                                }
-                                            }
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally
-                                    ) {
-                                        if(!compactLayout) {
-                                            Image(
-                                                mediaPlayerViewModel = vm,
-                                                compactLayout = false,
-                                                isFullScreen = isFullScreen
-                                            )
-
-                                            Spacer(Modifier.height(if (isFullScreen) 24.dp else 16.dp))
-                                        }
-
-                                        AnimatedContent(vm.mediaMetadata) { mediaMetadata ->
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                if(compactLayout) {
-                                                    Image(
-                                                        mediaPlayerViewModel = vm,
-                                                        compactLayout = true,
-                                                        isFullScreen = isFullScreen
-                                                    )
-
-                                                    Spacer(Modifier.width(24.dp))
-                                                }
-
-                                                Column(
-                                                    Modifier.fillMaxWidth(),
-                                                    horizontalAlignment = if(compactLayout) Alignment.Start else Alignment.CenterHorizontally
-                                                ) {
-                                                    Text(
-                                                        text = mediaMetadata?.title.toString(),
-                                                        maxLines = 2,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                        textAlign = if(compactLayout) androidx.compose.ui.text.style.TextAlign.Start else androidx.compose.ui.text.style.TextAlign.Center,
-                                                        style = Typography.titleLargeEmphasized
-                                                    )
-
-                                                    Spacer(Modifier.height(4.dp))
-
-                                                    Text(
-                                                        text = mediaMetadata?.subtitle.toString(),
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                        textAlign = if(compactLayout) androidx.compose.ui.text.style.TextAlign.Start else androidx.compose.ui.text.style.TextAlign.Center,
-                                                        color = if(onOpenPodcast != null && vm.metadataOrigin != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        style = Typography.bodyMedium,
-                                                        modifier = if(onOpenPodcast != null && vm.metadataOrigin != null) {
-                                                            Modifier.clickable {
-                                                                dismissGracefully {
-                                                                    onOpenPodcast(vm.metadataOrigin!!)
+                                            // Artwork with chapter image cross-fade & link button (C3) + swipe-up for Up Next (M4)
+                                            Box(
+                                                modifier = Modifier
+                                                    .pointerInput(Unit) {
+                                                        val thresholdPx = 64.dp.toPx()
+                                                        awaitEachGesture {
+                                                            val down = awaitFirstDown(requireUnconsumed = true)
+                                                            var totalDy = 0f
+                                                            var triggered = false
+                                                            while (true) {
+                                                                val event = awaitPointerEvent()
+                                                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                                                if (!change.pressed) break
+                                                                totalDy += (change.position.y - change.previousPosition.y)
+                                                                if (!triggered && totalDy < -thresholdPx) {
+                                                                    triggered = true
+                                                                    change.consume()
+                                                                    showQueueBottomSheet = true
                                                                 }
                                                             }
-                                                        } else Modifier
-                                                    )
+                                                        }
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                val artSize = if (compactLayout) 112.dp else 248.dp
+                                                val artUri = currentChapter?.imageUrl?.takeIf { it.isNotBlank() }
+                                                    ?: vm.mediaMetadata?.artworkUri?.toString()
 
-                                                    if (episodeChapters.isNotEmpty()) {
-                                                        Spacer(Modifier.height(10.dp))
-                                                        ActiveChapterPill(
-                                                            vm = vm,
-                                                            chapters = episodeChapters,
-                                                            onClick = { selectedTab = MediaPlayerTab.CHAPTERS }
+                                                AnimatedContent(
+                                                    targetState = vm.isLoading to artUri,
+                                                    label = "playerArtwork"
+                                                ) { (loading, uri) ->
+                                                    if (loading) {
+                                                        Box(
+                                                            modifier = Modifier.size(artSize),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            ContainedLoadingIndicator(Modifier.size(artSize / 2))
+                                                        }
+                                                    } else {
+                                                        ShimmerAsyncImage(
+                                                            modifier = Modifier
+                                                                .size(artSize)
+                                                                .clip(RoundedCornerShape(if (compactLayout) 16.dp else 24.dp)),
+                                                            model = uri,
+                                                            contentDescription = null,
+                                                            contentScale = ContentScale.Crop
                                                         )
                                                     }
                                                 }
-                                            }
-                                        }
-                                    }
-                                }
 
-                                // Fixed bottom controls (never pushed into scrolling area by toasts/banners)
-                                Column(
-                                    Modifier.padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    val muteWindows = remember(muteEntities) { muteEntities.map { it.toDomain() } }
-                                    val adWindows = remember(adEntities) { adEntities.map { it.toDomain() } }
-
-                                    PlayerSeekBarSection(
-                                        vm = vm,
-                                        muteWindows = muteWindows,
-                                        adWindows = adWindows,
-                                        pendingUndo = pendingUndo,
-                                        onSkipAd = { ad ->
-                                            vm.seek(ad.endMs)
-                                            HushCastEngineBridge.playSponsorSkipIndicator(context)
-                                        },
-                                        onUndoSkip = { undoEvent ->
-                                            HushCastEngineBridge.adSkipObserver.bypassAd(undoEvent.adWindow.startMs)
-                                            vm.seek(undoEvent.jumpedFromMs)
-                                            HushCastEngineBridge.clearPendingUndo()
-                                        },
-                                        onDismissUndo = {
-                                            HushCastEngineBridge.clearPendingUndo()
-                                        }
-                                    )
-
-                                    Spacer(Modifier.height(16.dp))
-
-                                    ButtonGroup(
-                                        horizontalArrangement = Arrangement.Center
-                                    ) {
-                                        Row(
-                                            Modifier.padding(horizontal = 8.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(if (isFullScreen) 16.dp else 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            FilledTonalIconButton(
-                                                modifier = Modifier
-                                                    .size(IconButtonDefaults.largeContainerSize()),
-                                                shapes = IconButtonDefaults.shapes(
-                                                    shape = IconButtonDefaults.largeSquareShape,
-                                                    pressedShape = IconButtonDefaults.largePressedShape
-                                                ),
-                                                onClick = {
-                                                    vm.seekBack()
-                                                }
-                                            ) {
-                                                Icon(
-                                                    imageVector = when(vm.seekBackIncrement) {
-                                                        5000L -> Icons.Rounded.Replay5
-                                                        10000L -> Icons.Rounded.Replay10
-                                                        30000L -> Icons.Rounded.Replay30
-                                                        else -> Icons.Rounded.Replay
-                                                    },
-                                                    contentDescription = stringResource(R.string.common_action_seek_back),
-                                                    modifier = Modifier.size(IconButtonDefaults.largeIconSize),
-                                                )
-                                            }
-
-                                            val targetSizeWidth by animateDpAsState(
-                                                targetValue = if(vm.isPlaying) {
-                                                    IconButtonDefaults.largeContainerSize(IconButtonWidthOption.Uniform).width
-                                                } else {
-                                                    IconButtonDefaults.largeContainerSize(IconButtonWidthOption.Wide).width
-                                                },
-                                                animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
-                                            )
-
-                                            FilledIconButton(
-                                                modifier = Modifier
-                                                    .height(
-                                                        IconButtonDefaults
-                                                            .largeContainerSize(IconButtonWidthOption.Narrow)
-                                                            .height
-                                                    )
-                                                    .width(targetSizeWidth),
-                                                colors = IconButtonDefaults.filledIconButtonColors(
-                                                    containerColor = MaterialTheme.colorScheme.primary,
-                                                    contentColor = MaterialTheme.colorScheme.onPrimary
-                                                ),
-                                                shapes = IconButtonDefaults.shapes(
-                                                    shape = IconButtonDefaults.largeSquareShape,
-                                                    pressedShape = IconButtonDefaults.largePressedShape
-                                                ),
-                                                onClick = {
-                                                    if(vm.isPlaying) {
-                                                        vm.pause()
-                                                    } else {
-                                                        vm.play()
-                                                    }
-                                                }
-                                            ) {
-                                                AnimatedContent(vm.isPlaying) {
-                                                    Icon(
-                                                        imageVector = when(it) {
-                                                            true -> Icons.Rounded.Pause
-                                                            false -> Icons.Rounded.PlayArrow
-                                                        },
-                                                        contentDescription = when(it) {
-                                                            true -> stringResource(R.string.common_action_pause)
-                                                            false -> stringResource(R.string.common_action_play)
-                                                        },
-                                                        modifier = Modifier.size(IconButtonDefaults.largeIconSize),
-                                                    )
-                                                }
-                                            }
-
-                                            FilledTonalIconButton(
-                                                modifier = Modifier
-                                                    .size(IconButtonDefaults.largeContainerSize()),
-                                                shapes = IconButtonDefaults.shapes(
-                                                    shape = IconButtonDefaults.largeSquareShape,
-                                                    pressedShape = IconButtonDefaults.largePressedShape
-                                                ),
-                                                onClick = {
-                                                    vm.seekForward()
-                                                }
-                                            ) {
-                                                Icon(
-                                                    imageVector = when(vm.seekForwardIncrement) {
-                                                        5000L -> Icons.Rounded.Forward5
-                                                        10000L -> Icons.Rounded.Forward10
-                                                        30000L -> Icons.Rounded.Forward30
-                                                        else -> Icons.Rounded.Forward
-                                                    },
-                                                    contentDescription = stringResource(R.string.common_action_seek_forward),
-                                                    modifier = Modifier.size(IconButtonDefaults.largeIconSize),
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Floating overlay for banners & toasts so play buttons never move
-                            Column(
-                                modifier = Modifier
-                                    .align(Alignment.TopCenter)
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                if (isCastingExternal) {
-                                    CastingBypassNoticeBanner()
-                                }
-
-                                val cloudProcessingConfigured = remember(episodeId) {
-                                    app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) &&
-                                        app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
-                                }
-                                if (vm.mediaSourceType is SourceTypeState.Streaming &&
-                                    !cloudProcessingConfigured &&
-                                    !downloadBannerDismissedForEp &&
-                                    analysisStatus?.badge != ReadinessBadge.READY.name &&
-                                    analysisStatus?.badge != ReadinessBadge.WORD_MUTE_READY.name &&
-                                    episodeId.isNotBlank()
-                                ) {
-                                    val dismissState = androidx.compose.material3.rememberSwipeToDismissBoxState(
-                                        confirmValueChange = { value ->
-                                            if (value != androidx.compose.material3.SwipeToDismissBoxValue.Settled) {
-                                                downloadBannerDismissedForEp = true
-                                                true
-                                            } else false
-                                        }
-                                    )
-                                    androidx.compose.material3.SwipeToDismissBox(
-                                        state = dismissState,
-                                        backgroundContent = {}
-                                    ) {
-                                        Surface(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            shape = RoundedCornerShape(14.dp),
-                                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                            shadowElevation = 4.dp
-                                        ) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.SpaceBetween
-                                            ) {
-                                                Text(
-                                                    text = "Download to enable HushCast muting & sponsor skipping",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                androidx.compose.material3.TextButton(
-                                                    onClick = { triggerAnalyzeNow() }
-                                                ) {
-                                                    Text("Download")
-                                                }
-                                                IconButton(
-                                                    onClick = { downloadBannerDismissedForEp = true },
-                                                    modifier = Modifier.size(28.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Rounded.Close,
-                                                        contentDescription = "Dismiss",
-                                                        modifier = Modifier.size(16.dp),
-                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                }
-
-                if (selectedTab != MediaPlayerTab.PLAYER) {
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            val livePos = vm.rememberLivePositionMs()
-                            val remainingMs = (vm.currentDuration - livePos).coerceAtLeast(0L)
-                            Text(
-                                text = "-${formatPlayerTime(remainingMs)}",
-                                style = Typography.labelMediumEmphasized,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                IconButton(onClick = { vm.seekBack() }) {
-                                    Icon(
-                                        imageVector = when(vm.seekBackIncrement) {
-                                            5000L -> Icons.Rounded.Replay5
-                                            10000L -> Icons.Rounded.Replay10
-                                            30000L -> Icons.Rounded.Replay30
-                                            else -> Icons.Rounded.Replay
-                                        },
-                                        contentDescription = stringResource(R.string.common_action_seek_back)
-                                    )
-                                }
-                                FilledIconButton(
-                                    colors = IconButtonDefaults.filledIconButtonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary,
-                                        contentColor = MaterialTheme.colorScheme.onPrimary
-                                    ),
-                                    shapes = IconButtonDefaults.shapes(),
-                                    onClick = { if (vm.isPlaying) vm.pause() else vm.play() }
-                                ) {
-                                    Icon(
-                                        imageVector = if (vm.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                        contentDescription = if (vm.isPlaying) "Pause" else "Play"
-                                    )
-                                }
-                                IconButton(onClick = { vm.seekForward() }) {
-                                    Icon(
-                                        imageVector = when(vm.seekForwardIncrement) {
-                                            5000L -> Icons.Rounded.Forward5
-                                            10000L -> Icons.Rounded.Forward10
-                                            30000L -> Icons.Rounded.Forward30
-                                            else -> Icons.Rounded.FastForward
-                                        },
-                                        contentDescription = stringResource(R.string.common_action_seek_forward)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        shortcutActions.forEach { action ->
-                            when (action) {
-                                PlayerToolbarAction.HUSHCAST -> {
-                                    IconButton(onClick = { performToolbarAction(action) }) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            when {
-                                                !setupCompleted -> {
-                                                    Icon(
-                                                        imageVector = androidx.compose.material.icons.Icons.Outlined.Shield,
-                                                        contentDescription = "Set up HushCast",
-                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
-                                                shieldBadge == ReadinessBadge.ANALYZING -> {
-                                                    androidx.compose.material3.CircularProgressIndicator(
-                                                        progress = { (analysisStatus?.progressPercent ?: 0) / 100f },
-                                                        modifier = Modifier.size(28.dp),
-                                                        strokeWidth = 2.dp
-                                                    )
-                                                    Icon(
-                                                        imageVector = androidx.compose.material.icons.Icons.Outlined.Shield,
-                                                        contentDescription = "Processing with HushCast",
-                                                        tint = MaterialTheme.colorScheme.primary,
-                                                        modifier = Modifier.size(18.dp)
-                                                    )
-                                                }
-                                                shieldBadge == ReadinessBadge.READY || shieldBadge == ReadinessBadge.WORD_MUTE_READY -> {
-                                                    Icon(
-                                                        imageVector = androidx.compose.material.icons.Icons.Rounded.Shield,
-                                                        contentDescription = "HushCast active",
-                                                        tint = MaterialTheme.colorScheme.primary
-                                                    )
-                                                }
-                                                else -> {
-                                                    androidx.compose.material3.BadgedBox(
-                                                        badge = {
-                                                            androidx.compose.material3.Badge(
-                                                                containerColor = MaterialTheme.colorScheme.primary
-                                                            )
-                                                        }
+                                                val chapterUrl = currentChapter?.linkUrl
+                                                if (!chapterUrl.isNullOrBlank()) {
+                                                    FilledTonalIconButton(
+                                                        onClick = { runCatching { uriHandler.openUri(chapterUrl) } },
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomEnd)
+                                                            .padding(8.dp)
+                                                            .size(48.dp)
                                                     ) {
                                                         Icon(
-                                                            imageVector = androidx.compose.material.icons.Icons.Outlined.Shield,
-                                                            contentDescription = "Process episode with HushCast",
-                                                            tint = MaterialTheme.colorScheme.onSurface
+                                                            imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+                                                            contentDescription = "Open chapter link"
                                                         )
                                                     }
                                                 }
                                             }
-                                        }
-                                    }
-                                }
-                                PlayerToolbarAction.SPEED -> {
-                                    androidx.compose.material3.TextButton(onClick = { performToolbarAction(action) }) {
-                                        Text(
-                                            text = String.format(Locale.getDefault(), "%.1f×", vm.speed),
-                                            style = Typography.labelLargeEmphasized,
-                                            color = if (vm.speed != 1f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                }
-                                PlayerToolbarAction.SLEEP -> {
-                                    IconButton(onClick = { performToolbarAction(action) }) {
-                                        Icon(
-                                            imageVector = Icons.Filled.Bedtime,
-                                            contentDescription = stringResource(R.string.common_sleep_timer),
-                                            tint = if (sleepTimerState.value != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                }
-                                PlayerToolbarAction.FAVORITE -> {
-                                    IconButton(onClick = { performToolbarAction(action) }) {
-                                        Icon(
-                                            imageVector = if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder,
-                                            contentDescription = "Favorite",
-                                            tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                }
-                                PlayerToolbarAction.DOWNLOAD -> {
-                                    IconButton(onClick = { performToolbarAction(action) }) {
-                                        Icon(
-                                            imageVector = if (isDownloaded) Icons.Rounded.DownloadForOffline else Icons.Rounded.Download,
-                                            contentDescription = if (isDownloaded) "Downloaded (tap to remove)" else "Download episode",
-                                            tint = if (isDownloaded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                }
-                                PlayerToolbarAction.GO_TO_PODCAST -> {
-                                    IconButton(
-                                        enabled = onOpenPodcast != null && vm.metadataOrigin != null,
-                                        onClick = { performToolbarAction(action) }
-                                    ) {
-                                        Icon(Icons.Rounded.Podcasts, contentDescription = "Go to Podcast")
-                                    }
-                                }
-                                PlayerToolbarAction.EPISODE_DETAILS -> {
-                                    IconButton(onClick = { performToolbarAction(action) }) {
-                                        Icon(Icons.Rounded.Info, contentDescription = "Episode Details & Notes")
-                                    }
-                                }
-                                PlayerToolbarAction.MARK_PLAYED -> {
-                                    IconButton(onClick = { performToolbarAction(action) }) {
-                                        Icon(Icons.Rounded.Done, contentDescription = "Mark as Played")
-                                    }
-                                }
-                                else -> Unit
-                            }
-                        }
 
-                        // Pinned More button
-                        IconButton(onClick = { showMoreSheet = true }) {
-                            Icon(
-                                imageVector = Icons.Rounded.MoreHoriz,
-                                contentDescription = "More"
-                            )
-                        }
-                    }
-                }
-            }
-        }
+                                            Spacer(Modifier.height(if (compactLayout) 8.dp else 16.dp))
 
+                                            // Episode title
+                                            Text(
+                                                text = vm.mediaMetadata?.title?.toString() ?: "",
+                                                style = if (compactLayout) Typography.titleMediumEmphasized else Typography.titleLargeEmphasized,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
 
-        if (showMoreSheet) {
-            val overflowActions = availablePlayerActions.filter { action ->
-                action !in shortcutActions &&
-                    (action != PlayerToolbarAction.GO_TO_PODCAST || (onOpenPodcast != null && vm.metadataOrigin != null))
-            }
-            val totalRows = overflowActions.size + 1
-            ModalBottomSheet(
-                onDismissRequest = { showMoreSheet = false }
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
-                ) {
-                    Text(
-                        text = "Player Actions",
-                        style = Typography.titleLargeEmphasized,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-                    overflowActions.forEachIndexed { idx, action ->
-                        val label = when (action) {
-                            PlayerToolbarAction.DOWNLOAD -> if (isDownloaded) "Remove Downloaded File" else "Download Episode"
-                            PlayerToolbarAction.FAVORITE -> if (isFavorite) "Remove from Favorites" else "Star Episode"
-                            PlayerToolbarAction.SPEED -> "Playback Speed (${String.format(Locale.getDefault(), "%.1f×", vm.speed)})"
-                            else -> action.label
-                        }
-                        val description = when (action) {
-                            PlayerToolbarAction.GO_TO_PODCAST -> vm.mediaMetadata?.subtitle?.toString() ?: ""
-                            PlayerToolbarAction.HUSHCAST -> "Process episode, mute words, and skip sponsors"
-                            else -> null
-                        }
-                        val iconVec = when (action) {
-                            PlayerToolbarAction.HUSHCAST -> Icons.Rounded.Shield
-                            PlayerToolbarAction.SPEED -> Icons.Filled.Speed
-                            PlayerToolbarAction.SLEEP -> Icons.Filled.Bedtime
-                            PlayerToolbarAction.FAVORITE -> if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder
-                            PlayerToolbarAction.DOWNLOAD -> if (isDownloaded) Icons.Rounded.DownloadForOffline else Icons.Rounded.Download
-                            PlayerToolbarAction.GO_TO_PODCAST -> Icons.Rounded.Podcasts
-                            PlayerToolbarAction.EPISODE_DETAILS -> Icons.Rounded.Info
-                            PlayerToolbarAction.MARK_PLAYED -> Icons.Rounded.Done
-                            else -> Icons.Rounded.MoreHoriz
-                        }
-                        SettingsListItem(
-                            icon = { Icon(iconVec, contentDescription = label) },
-                            label = label,
-                            description = description,
-                            index = idx,
-                            count = totalRows,
-                            onClick = {
-                                showMoreSheet = false
-                                performToolbarAction(action)
-                            }
-                        )
-                    }
-                    SettingsListItem(
-                        icon = { Icon(Icons.Rounded.Tune, contentDescription = "Rearrange Actions") },
-                        label = "Rearrange Actions",
-                        description = "Customize shortcuts on the player action bar",
-                        index = overflowActions.size,
-                        count = totalRows,
-                        onClick = {
-                            showMoreSheet = false
-                            showRearrangeActionsSheet = true
-                        }
-                    )
-                }
-            }
-        }
+                                            Spacer(Modifier.height(4.dp))
 
-        if (showRearrangeActionsSheet) {
-            val morePool = availablePlayerActions.filter { it !in shortcutActions }
-            ModalBottomSheet(
-                onDismissRequest = { showRearrangeActionsSheet = false }
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "Rearrange Actions",
-                        style = Typography.titleLargeEmphasized
-                    )
-                    Text(
-                        text = "Shortcut on player (up to 4)",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                    shortcutActions.forEachIndexed { idx, action ->
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = action.label,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    IconButton(
-                                        enabled = idx > 0,
-                                        onClick = {
-                                            val updated = shortcutActions.toMutableList()
-                                            val item = updated.removeAt(idx)
-                                            updated.add(idx - 1, item)
-                                            scope.launch {
-                                                settingsRepository.behavior.setPlayerToolbarActions(updated)
-                                            }
-                                        }
-                                    ) {
-                                        Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move up")
-                                    }
-                                    IconButton(
-                                        enabled = idx < shortcutActions.lastIndex,
-                                        onClick = {
-                                            val updated = shortcutActions.toMutableList()
-                                            val item = updated.removeAt(idx)
-                                            updated.add(idx + 1, item)
-                                            scope.launch {
-                                                settingsRepository.behavior.setPlayerToolbarActions(updated)
-                                            }
-                                        }
-                                    ) {
-                                        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move down")
-                                    }
-                                    if (shortcutActions.size > 1) {
-                                        androidx.compose.material3.TextButton(
-                                            onClick = {
-                                                val updated = shortcutActions.toMutableList().apply { removeAt(idx) }
-                                                scope.launch {
-                                                    settingsRepository.behavior.setPlayerToolbarActions(updated)
+                                            // Podcast name + single-line streaming notice (I11)
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.Center,
+                                                modifier = Modifier
+                                                    .clickable(enabled = onOpenPodcast != null && vm.metadataOrigin != null) {
+                                                        val origin = vm.metadataOrigin
+                                                        if (onOpenPodcast != null && origin != null) {
+                                                            dismissGracefully { onOpenPodcast(origin) }
+                                                        }
+                                                    }
+                                            ) {
+                                                Text(
+                                                    text = vm.mediaMetadata?.artist?.toString() ?: "",
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                if (vm.mediaSourceType is SourceTypeState.Streaming && !downloadBannerDismissedForEp) {
+                                                    Text(
+                                                        text = " · Streaming",
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                        maxLines = 1,
+                                                        modifier = Modifier.clickable {
+                                                            triggerDownloadNow()
+                                                            downloadBannerDismissedForEp = true
+                                                        }
+                                                    )
                                                 }
                                             }
+
+                                            // C2: Chapter line ‹ Chapter title · 3 of 12 › + 28dp progress ring + time left
+                                            if (currentChapter != null && resolvedChapters.isNotEmpty()) {
+                                                Spacer(Modifier.height(6.dp))
+                                                ChapterNavigationLine(
+                                                    chapters = resolvedChapters,
+                                                    currentChapter = currentChapter,
+                                                    currentIndex = currentChapterIndex,
+                                                    skippedStarts = skippedChapterStarts,
+                                                    positionMs = livePosMs,
+                                                    speed = vm.speed,
+                                                    adjustForSpeed = adjustRemainingForSpeed,
+                                                    onSeekToMs = { vm.seek(it) },
+                                                    onOpenChaptersTab = {
+                                                        if (MediaPlayerTab.CHAPTERS in visibleTabs) {
+                                                            selectedTab = MediaPlayerTab.CHAPTERS
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                        }
+
+                                        // Fixed-height skip/undo pill slot (M7, D1)
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(48.dp)
+                                                .graphicsLayer { alpha = chromeAlpha }
+                                                .semantics { liveRegion = LiveRegionMode.Polite },
+                                            contentAlignment = Alignment.Center
                                         ) {
-                                            Text("Hide")
+                                            val activeAd = remember(livePosMs, adWindows) {
+                                                adWindows.firstOrNull { livePosMs in it.startMs..it.endMs }
+                                            }
+                                            val undo = pendingUndo
+                                            when {
+                                                undo != null -> {
+                                                    OneTapUndoAdSkipBanner(
+                                                        event = undo,
+                                                        onUndo = {
+                                                            HushCastEngineBridge.adSkipObserver.bypassAd(undo.adWindow.startMs)
+                                                            vm.seek(undo.adWindow.startMs)
+                                                            HushCastEngineBridge.clearPendingUndo()
+                                                        },
+                                                        onDismiss = { HushCastEngineBridge.clearPendingUndo() }
+                                                    )
+                                                }
+                                                activeAd != null -> {
+                                                    FilledTonalButton(
+                                                        onClick = {
+                                                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                                            vm.seek(activeAd.endMs)
+                                                        },
+                                                        modifier = Modifier.height(40.dp)
+                                                    ) {
+                                                        Icon(Icons.Rounded.SkipNext, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                        Spacer(Modifier.width(6.dp))
+                                                        Text("Skip sponsor")
+                                                    }
+                                                }
+                                            }
                                         }
+
+                                        // Seek bar & Transport (stay pinned when TranscriptOverlay is open, scaled 80% in graphicsLayer per T2)
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .graphicsLayer {
+                                                    scaleX = transportScale
+                                                    scaleY = transportScale
+                                                },
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            PlayerSeekBar(
+                                                positionMs = livePosMs,
+                                                durationMs = durationMs,
+                                                playbackSpeed = vm.speed,
+                                                adjustRemainingForSpeed = adjustRemainingForSpeed,
+                                                muteWindows = muteWindows,
+                                                adWindows = adWindows,
+                                                onSeekToMs = { vm.seek(it) },
+                                                onSkipAd = { ad -> vm.seek(ad.endMs) },
+                                                compact = showTranscriptOverlay
+                                            )
+
+                                            Spacer(Modifier.height(if (showTranscriptOverlay) 4.dp else 8.dp))
+
+                                            PlayerTransportControls(
+                                                isPlaying = vm.isPlaying,
+                                                seekBackMs = vm.seekBackIncrement,
+                                                seekForwardMs = vm.seekForwardIncrement,
+                                                onSeekBack = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                                    val target = SkipAwareSeekCalculator.computeBackTargetMs(
+                                                        fromMs = vm.livePositionNowMs(),
+                                                        incrementMs = vm.seekBackIncrement,
+                                                        skipRanges = HushCastEngineBridge.getActiveSkipRanges()
+                                                    )
+                                                    vm.seek(target)
+                                                },
+                                                onTogglePlay = {
+                                                    haptic.performHapticFeedback(
+                                                        if (vm.isPlaying) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn
+                                                    )
+                                                    if (vm.isPlaying) vm.pause() else vm.play()
+                                                },
+                                                onSeekForward = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                                    val target = SkipAwareSeekCalculator.computeForwardTargetMs(
+                                                        fromMs = vm.livePositionNowMs(),
+                                                        incrementMs = vm.seekForwardIncrement,
+                                                        durationMs = vm.currentDuration,
+                                                        skipRanges = HushCastEngineBridge.getActiveSkipRanges()
+                                                    )
+                                                    vm.seek(target)
+                                                }
+                                            )
+                                        }
+
+                                        Spacer(Modifier.height(8.dp))
+                                    }
+
+                                    // T2: TranscriptOverlay slides up over Playing page, leaving pinned seek bar & transport at bottom
+                                    androidx.compose.animation.AnimatedVisibility(
+                                        visible = showTranscriptOverlay,
+                                        enter = slideInVertically(
+                                            animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                                        ) { it / 6 } + fadeIn(
+                                            animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
+                                        ),
+                                        exit = slideOutVertically(
+                                            animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                                        ) { it / 6 } + fadeOut(
+                                            animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
+                                        )
+                                    ) {
+                                        TranscriptOverlay(
+                                            state = transcriptState,
+                                            episodeTitle = vm.mediaMetadata?.title?.toString() ?: "",
+                                            currentPositionMs = livePosMs,
+                                            isPlaying = vm.isPlaying,
+                                            muteWindows = muteWindows,
+                                            onClose = { showTranscriptOverlay = false },
+                                            onSeekToMs = { vm.seek(it) },
+                                            onMuteWord = { word -> pendingWordMute = word },
+                                            onShareTxt = { lines ->
+                                                playerVm.shareTranscriptTxt(
+                                                    context = context,
+                                                    episodeTitle = vm.mediaMetadata?.title?.toString() ?: "Episode",
+                                                    lines = lines
+                                                )
+                                            },
+                                            onRetry = { playerVm.retryPublisherTranscript() },
+                                            onProcessNow = {
+                                                showTranscriptOverlay = false
+                                                triggerAnalyzeNow()
+                                            },
+                                            onDownloadNow = {
+                                                showTranscriptOverlay = false
+                                                triggerDownloadNow()
+                                            },
+                                            bottomControlsPadding = 148.dp
+                                        )
                                     }
                                 }
                             }
-                        }
-                    }
 
-                    Text(
-                        text = "More actions",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
-                    morePool.forEach { action ->
-                        Surface(
-                            shape = RoundedCornerShape(14.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerLow,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = action.label,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                androidx.compose.material3.TextButton(
-                                    onClick = {
-                                        val updated = shortcutActions.toMutableList()
-                                        if (updated.size >= 4) {
-                                            updated[updated.lastIndex] = action
-                                        } else {
-                                            updated.add(action)
-                                        }
-                                        scope.launch {
-                                            settingsRepository.behavior.setPlayerToolbarActions(updated)
-                                        }
-                                    }
+                            MediaPlayerTab.NOTES -> {
+                                val desc = currentEpisodeBundle?.episode?.description
+                                    ?: vm.mediaMetadata?.description?.toString()
+                                    ?: ""
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(horizontal = 24.dp, vertical = 12.dp)
                                 ) {
-                                    Text(if (shortcutActions.size >= 4) "Swap in" else "Add")
+                                    if (!episodeSummary.isNullOrBlank()) {
+                                        Surface(
+                                            shape = RoundedCornerShape(16.dp),
+                                            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(bottom = 12.dp)
+                                        ) {
+                                            Column(Modifier.padding(14.dp)) {
+                                                Text(
+                                                    text = "AI Summary",
+                                                    style = MaterialTheme.typography.labelLarge,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                                Spacer(Modifier.height(4.dp))
+                                                Text(
+                                                    text = episodeSummary!!,
+                                                    style = MaterialTheme.typography.bodyMedium
+                                                )
+                                            }
+                                        }
+                                    }
+
+                                    SelectionContainer {
+                                        Text(
+                                            text = AnnotatedString.fromHtml(desc),
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                    }
+
+                                    Spacer(Modifier.height(16.dp))
+                                    FilledTonalButton(
+                                        onClick = {
+                                            val origin = vm.metadataOrigin
+                                            val id = vm.metadataEpisodeId
+                                            if (origin != null && id != null) {
+                                                dismissGracefully { onOpenEpisode(origin, id) }
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Open full episode page")
+                                    }
+                                    Spacer(Modifier.height(16.dp))
                                 }
                             }
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                }
-            }
-        }
 
-        if (showNotDownloadedDialog) {
-            val isAlreadyDownloaded = remember(episodeId, currentEpisodeBundle) {
-                currentEpisodeBundle?.episode?.craftDownloadFile(context)?.exists() == true
-            }
-            app.podiumpodcasts.podium.ui.component.media.HushCastAnalyzeDialog(
-                episodeTitle = currentEpisodeBundle?.episode?.title
-                    ?: vm.mediaMetadata?.title?.toString()
-                    ?: "this episode",
-                isDownloaded = isAlreadyDownloaded,
-                onDismiss = { showNotDownloadedDialog = false },
-                onAnalyzeDesktop = {
-                    if (episodeId.isNotBlank()) {
-                        scope.launch {
-                            app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
-                                context = context,
-                                db = appDb,
-                                episodeId = episodeId,
-                                downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP,
-                                forceReprocess = isAlreadyDownloaded
-                            )
-                        }
-                    }
-                },
-                onAnalyzeOnDevice = {
-                    if (episodeId.isNotBlank()) {
-                        scope.launch {
-                            val localFile = currentEpisodeBundle?.episode?.craftDownloadFile(context)
-                            if (isAlreadyDownloaded && localFile != null && localFile.exists()) {
-                                autoMuteDb.dao().upsertStatus(
-                                    app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
-                                        episodeId = episodeId,
-                                        badge = ReadinessBadge.ANALYZING.name,
-                                        progressPercent = 0,
-                                        stageLabel = "Queued for AI analysis…"
-                                    )
-                                )
-                                EpisodeAnalysisWorker.enqueueAnalyzeNow(
-                                    context = context,
-                                    episodeId = episodeId,
-                                    audioPath = localFile.absolutePath,
-                                    actionMode = HushCastEngineBridge.defaultActionMode,
-                                    episodeTitle = currentEpisodeBundle?.episode?.title
-                                )
-                            } else {
-                                app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
-                                    context = context,
-                                    db = appDb,
-                                    episodeId = episodeId,
-                                    downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
+                            MediaPlayerTab.CHAPTERS -> {
+                                PlayerChaptersTab(
+                                    chapters = resolvedChapters,
+                                    skippedPublishedStarts = skippedChapterStarts,
+                                    currentPositionMs = livePosMs,
+                                    onToggleSkip = { pubStart, skip ->
+                                        playerVm.toggleSkippedChapter(pubStart, skip)
+                                    },
+                                    onSelectChapter = { ch, isCurrent ->
+                                        if (isCurrent) {
+                                            selectedTab = MediaPlayerTab.PLAYER
+                                        } else {
+                                            vm.seek(ch.startMs)
+                                            if (!vm.isPlaying) vm.play()
+                                        }
+                                    },
+                                    contentBottomPadding = 16.dp
                                 )
                             }
                         }
                     }
-                },
-                onDownloadAudioOnly = {
-                    if (episodeId.isNotBlank()) {
-                        scope.launch {
-                            app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
-                                context = context,
-                                db = appDb,
-                                episodeId = episodeId,
-                                downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS
-                            )
-                        }
-                    }
                 }
-            )
-        }
 
-        if (showDeleteDownloadConfirm) {
-            val ep = currentEpisodeBundle?.episode
-            if (ep != null) {
-                app.podiumpodcasts.podium.ui.dialog.DeleteConfirmationDialog(
-                    onDismiss = { showDeleteDownloadConfirm = false },
-                    itemName = ep.title,
-                    additionalText = "This will delete the downloaded audio file from your device.",
-                    onConfirm = {
-                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
-                                context = context,
-                                db = appDb,
-                                episode = ep
+                // M5: Single AnimatedContent bottom slot switching toolbar (Playing) <-> mini playback strip (other tabs)
+                if (!showTranscriptOverlay) {
+                    val bottomSlotFadeSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+                    AnimatedContent(
+                        targetState = selectedTab == MediaPlayerTab.PLAYER,
+                        transitionSpec = {
+                            fadeIn(animationSpec = bottomSlotFadeSpec) togetherWith
+                                fadeOut(animationSpec = bottomSlotFadeSpec)
+                        },
+                        label = "playerBottomSlot"
+                    ) { isPlayingTab ->
+                        if (isPlayingTab) {
+                            PlayerActionToolbar(
+                                shortcutActions = shortcutActions,
+                                overflowActions = overflowActions,
+                                isProcessed = isProcessed,
+                                protectionActive = protectionActive,
+                                speed = vm.speed,
+                                sleepTimerMinutes = sleepTimerMinutes,
+                                isFavorite = isFavorite,
+                                isDownloaded = isDownloaded,
+                                transcriptState = transcriptState,
+                                showMoreMenu = showMoreMenu,
+                                onToggleMoreMenu = { showMoreMenu = it },
+                                onPerformAction = ::performToolbarAction,
+                                onOpenCustomize = {
+                                    showMoreMenu = false
+                                    showCustomizeSheet = true
+                                }
                             )
-                        }
-                    }
-                )
-            } else {
-                showDeleteDownloadConfirm = false
-            }
-        }
-
-        if (showCustomizeTabsDialog) {
-            var editableTabs by remember(playerTabsConfig) { mutableStateOf(playerTabsConfig) }
-            AlertDialog(
-                onDismissRequest = { showCustomizeTabsDialog = false },
-                title = { Text("Customize Player Tabs") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = "Reorder or hide tabs in the player.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        editableTabs.forEachIndexed { idx, tabCfg ->
-                            val label = when (tabCfg.id) {
-                                "PLAYER" -> MediaPlayerTab.PLAYER.label
-                                "NOTES" -> MediaPlayerTab.NOTES.label
-                                "CHAPTERS" -> MediaPlayerTab.CHAPTERS.label
-                                "TRANSCRIPT" -> MediaPlayerTab.TRANSCRIPT.label
-                                else -> tabCfg.id
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                        } else {
+                            // Mini playback strip for Details / Chapters tabs
+                            Surface(
+                                tonalElevation = 2.dp,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
                                 Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.weight(1f)
+                                    horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    androidx.compose.material3.Checkbox(
-                                        checked = tabCfg.visible,
-                                        onCheckedChange = { checked ->
-                                            val visibleCount = editableTabs.count { it.visible }
-                                            if (!checked && visibleCount <= 1) return@Checkbox
-                                            editableTabs = editableTabs.toMutableList().also {
-                                                it[idx] = tabCfg.copy(visible = checked)
-                                            }
-                                        }
-                                    )
-                                    Text(label, style = MaterialTheme.typography.bodyMedium)
-                                }
-                                Row {
-                                    IconButton(
-                                        enabled = idx > 0,
-                                        onClick = {
-                                            if (idx > 0) {
-                                                val copy = editableTabs.toMutableList()
-                                                val item = copy.removeAt(idx)
-                                                copy.add(idx - 1, item)
-                                                editableTabs = copy
-                                            }
-                                        }
+                                    Column(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { selectedTab = MediaPlayerTab.PLAYER }
                                     ) {
-                                        Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move up")
+                                        Text(
+                                            text = vm.mediaMetadata?.title?.toString() ?: "",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = currentChapter?.title ?: (vm.mediaMetadata?.artist?.toString() ?: ""),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
                                     }
-                                    IconButton(
-                                        enabled = idx < editableTabs.lastIndex,
-                                        onClick = {
-                                            if (idx < editableTabs.lastIndex) {
-                                                val copy = editableTabs.toMutableList()
-                                                val item = copy.removeAt(idx)
-                                                copy.add(idx + 1, item)
-                                                editableTabs = copy
-                                            }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(
+                                            onClick = { vm.seekBack() },
+                                            modifier = Modifier.size(48.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.Replay10, contentDescription = "Seek back")
                                         }
-                                    ) {
-                                        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move down")
+                                        FilledIconToggleButton(
+                                            checked = vm.isPlaying,
+                                            onCheckedChange = {
+                                                if (vm.isPlaying) vm.pause() else vm.play()
+                                            },
+                                            shapes = IconButtonDefaults.toggleableShapes(),
+                                            modifier = Modifier.size(48.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (vm.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                                contentDescription = if (vm.isPlaying) "Pause" else "Play"
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = { vm.seekForward() },
+                                            modifier = Modifier.size(48.dp)
+                                        ) {
+                                            Icon(Icons.Rounded.Forward10, contentDescription = "Seek forward")
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                settingsRepository.behavior.setPlayerTabsConfig(editableTabs)
-                            }
-                            showCustomizeTabsDialog = false
-                        }
-                    ) {
-                        Text("Save")
+                }
+            }
+        }
+    }
+
+    // Bottom sheets & dialogs
+    if (showSleepTimerBottomSheet) {
+        MediaPlayerSleepTimerBottomSheet { showSleepTimerBottomSheet = false }
+    }
+    if (showSpeedBottomSheet) {
+        MediaPlayerSpeedBottomSheet { showSpeedBottomSheet = false }
+    }
+    if (showQueueBottomSheet) {
+        MediaPlayerQueueBottomSheet(
+            onOpenEpisode = { origin, id -> dismissGracefully { onOpenEpisode(origin, id) } },
+            onDismiss = { showQueueBottomSheet = false }
+        )
+    }
+    if (showCustomizeSheet) {
+        PlayerCustomizeSheet(
+            tabsConfig = playerTabsConfig,
+            onUpdateTabs = { updated ->
+                scope.launch { settingsRepository.behavior.setPlayerTabsConfig(updated) }
+            },
+            actionsOrder = orderedAllActions,
+            availableActions = availablePlayerActions,
+            onUpdateActions = { updated ->
+                scope.launch { settingsRepository.behavior.setPlayerToolbarActions(updated) }
+            },
+            onDismiss = { showCustomizeSheet = false }
+        )
+    }
+    if (showHushCastSheet) {
+        PlayerHushCastSheet(
+            episodeId = episodeId,
+            episodeTitle = vm.mediaMetadata?.title?.toString() ?: "",
+            origin = vm.metadataOrigin ?: "",
+            isDownloaded = isDownloaded,
+            analysisStatus = analysisStatus,
+            muteSegments = muteEntities,
+            adSegments = adEntities,
+            chapters = resolvedChapters,
+            transcriptBlob = wordIndexBlob,
+            settingsRepository = settingsRepository,
+            devMode = devMode,
+            onProcessNow = {
+                showHushCastSheet = false
+                triggerAnalyzeNow()
+            },
+            onCancelProcessing = {
+                EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
+            },
+            onDismiss = { showHushCastSheet = false }
+        )
+    }
+
+    transcriptPromptState?.let { ts ->
+        AlertDialog(
+            onDismissRequest = { transcriptPromptState = null },
+            title = {
+                Text(
+                    when (ts) {
+                        is TranscriptLoadState.Transcribing -> "Transcribing… ${ts.progressPercent}%"
+                        is TranscriptLoadState.NotProcessed -> if (ts.isDownloaded) "No transcript yet" else "Download to get a transcript"
+                        else -> "Transcript"
                     }
-                },
-                dismissButton = {
-                    androidx.compose.material3.TextButton(onClick = { showCustomizeTabsDialog = false }) {
+                )
+            },
+            text = {
+                Text(
+                    when (ts) {
+                        is TranscriptLoadState.Transcribing -> "HushCast is currently transcribing this episode."
+                        is TranscriptLoadState.NotProcessed -> if (ts.isDownloaded) {
+                            "Process this episode with HushCast to generate a synced transcript."
+                        } else {
+                            "Download this episode to generate a synced transcript."
+                        }
+                        else -> ""
+                    }
+                )
+            },
+            confirmButton = {
+                when (ts) {
+                    is TranscriptLoadState.NotProcessed -> {
+                        Button(
+                            onClick = {
+                                transcriptPromptState = null
+                                if (ts.isDownloaded) triggerAnalyzeNow() else triggerDownloadNow()
+                            }
+                        ) {
+                            Text(if (ts.isDownloaded) "Process" else "Download")
+                        }
+                    }
+                    else -> {
+                        TextButton(onClick = { transcriptPromptState = null }) {
+                            Text("OK")
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                if (ts is TranscriptLoadState.NotProcessed) {
+                    TextButton(onClick = { transcriptPromptState = null }) {
                         Text("Cancel")
                     }
                 }
-            )
-        }
-
-        if(showSleepTimerBottomSheet) MediaPlayerSleepTimerBottomSheet {
-            showSleepTimerBottomSheet = false
-        }
-
-        if(showSpeedBottomSheet) MediaPlayerSpeedBottomSheet {
-            showSpeedBottomSheet = false
-        }
-
-        if(showQueueBottomSheet) MediaPlayerQueueBottomSheet(
-            onOpenEpisode = { origin, id ->
-                dismissGracefully {
-                    onOpenEpisode(origin, id)
-                }
             }
-        ) {
-            showQueueBottomSheet = false
-        }
-
-        pendingWordMute?.let { (word, mute) ->
-            val cleanWord = word.text.trim().trim('.', ',', '!', '?', '"', '\'')
-            androidx.compose.material3.AlertDialog(
-                onDismissRequest = { pendingWordMute = null },
-                title = {
-                    Text(if (mute) "Mute \"$cleanWord\"?" else "Unmute \"$cleanWord\"?")
-                },
-                text = {
-                    Text(
-                        if (mute) "Apply word muting to this episode only, or add \"$cleanWord\" to your global mute list for all episodes?"
-                        else "Unmute \"$cleanWord\" in this episode only, or disable it across all episodes?"
-                    )
-                },
-                confirmButton = {
-                    androidx.compose.material3.TextButton(
-                        onClick = {
-                            pendingWordMute = null
-                            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                val targetWord = cleanWord.lowercase()
-                                if (mute) {
-                                    autoMuteDb.dao().upsertRuleIfNew(
-                                        MuteRuleEntity(
-                                            pattern = targetWord,
-                                            isRegex = false,
-                                            category = "CUSTOM",
-                                            enabled = true
-                                        )
-                                    )
-                                    val sha = analysisStatus?.fileSha256 ?: ""
-                                    val matches = (transcriptBlob?.words ?: listOf(word)).filter {
-                                        it.text.trim().trim('.', ',', '!', '?', '"', '\'').equals(targetWord, ignoreCase = true)
-                                    }
-                                    val newSegments = matches.map { w ->
-                                        app.hushcast.automute.storage.MuteSegmentEntity(
-                                            fileSha256 = sha,
-                                            episodeId = episodeId,
-                                            startMs = (w.start * 1000.0).toLong(),
-                                            endMs = (w.end * 1000.0).toLong(),
-                                            word = targetWord,
-                                            ruleId = -1L,
-                                            actionMode = HushCastEngineBridge.defaultActionMode.name,
-                                            enabled = true
-                                        )
-                                    }
-                                    if (newSegments.isNotEmpty()) {
-                                        autoMuteDb.dao().insertMuteSegments(newSegments)
-                                    }
-                                } else {
-                                    autoMuteDb.dao().getAllRules()
-                                        .filter { it.pattern.equals(targetWord, ignoreCase = true) }
-                                        .forEach { autoMuteDb.dao().setRuleEnabled(it.id, false) }
-                                    muteEntities
-                                        .filter { it.word.equals(targetWord, ignoreCase = true) }
-                                        .forEach { autoMuteDb.dao().setMuteSegmentEnabled(it.id, false) }
-                                }
-                                val updatedMutes = autoMuteDb.dao().observeMuteSegmentsByEpisode(episodeId).first().map { it.toDomain() }
-                                HushCastEngineBridge.autoMuteProcessor.updateWindows(updatedMutes)
-                            }
-                        }
-                    ) {
-                        Text("All episodes")
-                    }
-                },
-                dismissButton = {
-                    androidx.compose.material3.TextButton(
-                        onClick = {
-                            pendingWordMute = null
-                            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                val targetWord = cleanWord.lowercase()
-                                if (mute) {
-                                    val sha = analysisStatus?.fileSha256 ?: ""
-                                    val matches = (transcriptBlob?.words ?: listOf(word)).filter {
-                                        it.text.trim().trim('.', ',', '!', '?', '"', '\'').equals(targetWord, ignoreCase = true)
-                                    }
-                                    val newSegments = matches.map { w ->
-                                        app.hushcast.automute.storage.MuteSegmentEntity(
-                                            fileSha256 = sha,
-                                            episodeId = episodeId,
-                                            startMs = (w.start * 1000.0).toLong(),
-                                            endMs = (w.end * 1000.0).toLong(),
-                                            word = targetWord,
-                                            ruleId = -1L,
-                                            actionMode = HushCastEngineBridge.defaultActionMode.name,
-                                            enabled = true
-                                        )
-                                    }
-                                    if (newSegments.isNotEmpty()) {
-                                        autoMuteDb.dao().insertMuteSegments(newSegments)
-                                    }
-                                } else {
-                                    muteEntities
-                                        .filter { it.word.equals(targetWord, ignoreCase = true) }
-                                        .forEach { autoMuteDb.dao().setMuteSegmentEnabled(it.id, false) }
-                                }
-                                val updatedMutes = autoMuteDb.dao().observeMuteSegmentsByEpisode(episodeId).first().map { it.toDomain() }
-                                HushCastEngineBridge.autoMuteProcessor.updateWindows(updatedMutes)
-                            }
-                        }
-                    ) {
-                        Text("This episode")
-                    }
-                }
-            )
-        }
-
-        if (showHushCastSheet) {
-            val wordMutingEnabled by settingsRepository.hushCast.wordMutingEnabled.collectAsState(initial = true)
-            val muteActionMode by settingsRepository.hushCast.muteActionMode.collectAsState(
-                initial = app.hushcast.automute.dsp.MuteActionMode.HARD_SILENCE
-            )
-            val adPolicyMode by settingsRepository.hushCast.adPolicyMode.collectAsState(
-                initial = app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP
-            )
-            val adAutoSkipScope by settingsRepository.hushCast.adAutoSkipScope.collectAsState(
-                initial = app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY
-            )
-            val sponsorSkipSoundEnabled by settingsRepository.hushCast.sponsorSkipSoundEnabled.collectAsState(initial = true)
-            val sheetBadge = runCatching {
-                analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) }
-            }.getOrNull() ?: ReadinessBadge.NOT_PROCESSED
-            val isDownloaded = remember(episodeId, currentEpisodeBundle) {
-                currentEpisodeBundle?.episode?.craftDownloadFile(context)?.exists() == true
-            }
-
-            ModalBottomSheet(onDismissRequest = { showHushCastSheet = false }) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 20.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Shield,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                            Text(
-                                text = "HushCast",
-                                style = Typography.titleLargeEmphasized
-                            )
-                        }
-                        val statusChipText = when (sheetBadge) {
-                            ReadinessBadge.ANALYZING -> "Analyzing ${analysisStatus?.progressPercent ?: 0}%"
-                            ReadinessBadge.READY -> "Ready"
-                            ReadinessBadge.WORD_MUTE_READY -> "Word-Mute Ready"
-                            else -> "Not Analyzed"
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(999.dp),
-                            color = when (sheetBadge) {
-                                ReadinessBadge.READY, ReadinessBadge.WORD_MUTE_READY -> MaterialTheme.colorScheme.primaryContainer
-                                ReadinessBadge.ANALYZING -> MaterialTheme.colorScheme.secondaryContainer
-                                else -> MaterialTheme.colorScheme.surfaceContainerHighest
-                            }
-                        ) {
-                            Text(
-                                text = statusChipText,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = when (sheetBadge) {
-                                    ReadinessBadge.READY, ReadinessBadge.WORD_MUTE_READY -> MaterialTheme.colorScheme.onPrimaryContainer
-                                    ReadinessBadge.ANALYZING -> MaterialTheme.colorScheme.onSecondaryContainer
-                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-
-                    // 1. AI Analysis Card
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            when (sheetBadge) {
-                                ReadinessBadge.ANALYZING -> {
-                                    Text(
-                                        text = analysisStatus?.stageLabel?.takeIf { it.isNotBlank() } ?: "Processing audio…",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    androidx.compose.material3.LinearProgressIndicator(
-                                        progress = { (analysisStatus?.progressPercent ?: 0) / 100f },
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                    androidx.compose.material3.OutlinedButton(
-                                        onClick = {
-                                            if (episodeId.isNotBlank()) {
-                                                EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
-                                                app.podiumpodcasts.podium.background.worker.PodcastEpisodeDownloadWorker.stopDownload(
-                                                    context,
-                                                    episodeId
-                                                )
-                                                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                                    val existing = autoMuteDb.dao().getStatus(episodeId)
-                                                    if (existing != null) {
-                                                        autoMuteDb.dao().upsertStatus(
-                                                            existing.copy(
-                                                                badge = ReadinessBadge.NOT_PROCESSED.name,
-                                                                progressPercent = 0,
-                                                                stageLabel = "Cancelled"
-                                                            )
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                            showHushCastSheet = false
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text("Cancel processing")
-                                    }
-                                }
-                                ReadinessBadge.READY, ReadinessBadge.WORD_MUTE_READY -> {
-                                    val savedSec = adEntities.sumOf { (it.endMs - it.startMs).coerceAtLeast(0L) } / 1000L
-                                    val activeMuteCount = muteEntities.count { it.enabled }
-                                    Text(
-                                        text = "${adEntities.size} sponsor segments (${savedSec}s) · $activeMuteCount muted words",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    androidx.compose.material3.FilledTonalButton(
-                                        onClick = {
-                                            showHushCastSheet = false
-                                            triggerAnalyzeNow()
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.AutoAwesome,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Refresh AI Analysis")
-                                    }
-                                    if (devMode) {
-                                        val desktopConfigured = app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) &&
-                                            app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
-                                        if (desktopConfigured && episodeId.isNotBlank()) {
-                                            Text(
-                                                text = "Dev: Reprocess Specific Stage (Cloud)",
-                                                style = MaterialTheme.typography.labelMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-                                            androidx.compose.foundation.layout.FlowRow(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                                verticalArrangement = Arrangement.spacedBy(4.dp)
-                                            ) {
-                                                listOf(
-                                                    "SUMMARY_CHAPTERS" to "Summary & Chapters",
-                                                    "ADS_AND_SUMMARY" to "Ads & Summary",
-                                                    "ALIGN_WORDS" to "Align Words"
-                                                ).forEach { (stageKey, stageTitle) ->
-                                                    androidx.compose.material3.OutlinedButton(
-                                                        onClick = {
-                                                            showHushCastSheet = false
-                                                            scope.launch {
-                                                                app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
-                                                                    context = context,
-                                                                    db = appDb,
-                                                                    episodeId = episodeId,
-                                                                    downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP,
-                                                                    forceReprocess = true,
-                                                                    reprocessStage = stageKey
-                                                                )
-                                                            }
-                                                        }
-                                                    ) {
-                                                        Text(stageTitle, style = MaterialTheme.typography.labelSmall)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        androidx.compose.material3.OutlinedButton(
-                                        onClick = {
-                                            scope.launch {
-                                                val shareUri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                                    val root = org.json.JSONObject().apply {
-                                                        put("episodeId", episodeId)
-                                                        put("episodeTitle", currentEpisodeBundle?.episode?.title ?: "")
-                                                        put("podcastTitle", currentEpisodeBundle?.episode?.podcastTitle ?: "")
-                                                        put("stageLabel", analysisStatus?.stageLabel ?: "")
-                                                        put("summary", episodeSummary ?: "")
-                                                        put(
-                                                            "adSegments",
-                                                            org.json.JSONArray().apply {
-                                                                adEntities.sortedBy { it.startMs }.forEach { ad ->
-                                                                    put(
-                                                                        org.json.JSONObject().apply {
-                                                                            put("startMs", ad.startMs)
-                                                                            put("endMs", ad.endMs)
-                                                                            put("confidence", ad.confidence.toDouble())
-                                                                            put("isHighConfidence", ad.isHighConfidence)
-                                                                            put("label", ad.label)
-                                                                            put("adClass", ad.adClass)
-                                                                        }
-                                                                    )
-                                                                }
-                                                            }
-                                                        )
-                                                        put(
-                                                            "muteWindows",
-                                                            org.json.JSONArray().apply {
-                                                                muteEntities.sortedBy { it.startMs }.forEach { m ->
-                                                                    put(
-                                                                        org.json.JSONObject().apply {
-                                                                            put("startMs", m.startMs)
-                                                                            put("endMs", m.endMs)
-                                                                            put("word", m.word)
-                                                                            put("actionMode", m.actionMode)
-                                                                            put("enabled", m.enabled)
-                                                                        }
-                                                                    )
-                                                                }
-                                                            }
-                                                        )
-                                                        put(
-                                                            "chapters",
-                                                            org.json.JSONArray().apply {
-                                                                episodeChapters.forEach { ch ->
-                                                                    put(
-                                                                        org.json.JSONObject().apply {
-                                                                            put("startMs", ch.startMs)
-                                                                            put("title", ch.title)
-                                                                            put("source", ch.source)
-                                                                        }
-                                                                    )
-                                                                }
-                                                            }
-                                                        )
-                                                        put(
-                                                            "transcriptSegments",
-                                                            org.json.JSONArray().apply {
-                                                                transcriptBlob?.segments.orEmpty().forEach { seg ->
-                                                                    put(
-                                                                        org.json.JSONObject().apply {
-                                                                            put("startMs", (seg.start * 1000.0).toLong())
-                                                                            put("endMs", (seg.end * 1000.0).toLong())
-                                                                            put("speaker", seg.speaker ?: "")
-                                                                            put("text", seg.text)
-                                                                        }
-                                                                    )
-                                                                }
-                                                            }
-                                                        )
-                                                    }
-                                                    val exportDir = java.io.File(context.cacheDir, "export").apply { mkdirs() }
-                                                    val safeTitle = (currentEpisodeBundle?.episode?.title ?: "episode")
-                                                        .replace(Regex("[^A-Za-z0-9._-]+"), "_")
-                                                        .take(40)
-                                                    val outFile = java.io.File(exportDir, "hushcast_timeline_${safeTitle}.json")
-                                                    outFile.writeText(root.toString(2))
-                                                    androidx.core.content.FileProvider.getUriForFile(
-                                                        context,
-                                                        "${context.packageName}.fileprovider",
-                                                        outFile
-                                                    )
-                                                }
-                                                val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                                    type = "application/json"
-                                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "HushCast Timeline: ${currentEpisodeBundle?.episode?.title ?: episodeId}")
-                                                    putExtra(android.content.Intent.EXTRA_STREAM, shareUri)
-                                                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                                }
-                                                context.startActivity(android.content.Intent.createChooser(intent, "Export Timeline Data"))
-                                            }
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Text("Export Timeline Data (Debug)")
-                                    }
-                                    }
-                                }
-                                else -> {
-                                    Text(
-                                        text = if (isDownloaded) "This episode is downloaded and ready for HushCast AI analysis."
-                                        else "Download and analyze this episode to mute words, skip sponsors, and generate chapters.",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Button(
-                                        onClick = {
-                                            showHushCastSheet = false
-                                            triggerAnalyzeNow()
-                                        },
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.AutoAwesome,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(if (isDownloaded) "Analyze with HushCast AI" else "Download & Analyze with AI")
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 2. Word Muting Card
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Mute words", style = MaterialTheme.typography.bodyLarge)
-                                    Text(
-                                        text = "Silence or bleep flagged words in real time",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                androidx.compose.material3.Switch(
-                                    checked = wordMutingEnabled,
-                                    onCheckedChange = { enabled ->
-                                        scope.launch { settingsRepository.hushCast.setWordMutingEnabled(enabled) }
-                                    }
-                                )
-                            }
-                            if (wordMutingEnabled) {
-                                Text(
-                                    text = "Mute style",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-                                androidx.compose.foundation.layout.FlowRow(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    val styleOptions = listOf(
-                                        app.hushcast.automute.dsp.MuteActionMode.HARD_SILENCE to "Silence",
-                                        app.hushcast.automute.dsp.MuteActionMode.VOLUME_DUCK to "Duck",
-                                        app.hushcast.automute.dsp.MuteActionMode.SAMPLE_DROP_MICRO_SKIP to "Micro-Skip",
-                                        app.hushcast.automute.dsp.MuteActionMode.BEEP to "Bleep",
-                                        app.hushcast.automute.dsp.MuteActionMode.CUSTOM_SOUND to "Custom"
-                                    )
-                                    styleOptions.forEach { (mode, label) ->
-                                        androidx.compose.material3.FilterChip(
-                                            selected = muteActionMode == mode,
-                                            onClick = {
-                                                HushCastEngineBridge.defaultActionMode = mode
-                                                scope.launch {
-                                                    settingsRepository.hushCast.setMuteActionMode(mode)
-                                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                                        autoMuteDb.dao().updateAllRulesActionMode(mode.name)
-                                                        autoMuteDb.dao().updateAllMuteSegmentsActionMode(mode.name)
-                                                        val activeEpId = HushCastEngineBridge.currentEpisodeId ?: episodeId
-                                                        if (activeEpId.isNotBlank()) {
-                                                            val updated = autoMuteDb.dao()
-                                                                .observeMuteSegmentsByEpisode(activeEpId)
-                                                                .first()
-                                                                .map { it.toDomain() }
-                                                            HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
-                                                        }
-                                                    }
-                                                }
-                                            },
-                                            label = { Text(label) }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 3. Sponsor Skipping Card
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Text(
-                                text = "Sponsor skipping",
-                                style = MaterialTheme.typography.bodyLarge
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                val adModes = listOf(
-                                    app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP to "Auto-Skip",
-                                    app.hushcast.automute.dsp.AdPolicyMode.MARK_ONLY to "Show Only",
-                                    app.hushcast.automute.dsp.AdPolicyMode.OFF to "Off"
-                                )
-                                adModes.forEach { (mode, label) ->
-                                    androidx.compose.material3.FilterChip(
-                                        selected = adPolicyMode == mode,
-                                        onClick = {
-                                            scope.launch { settingsRepository.hushCast.setAdPolicyMode(mode) }
-                                        },
-                                        label = { Text(label) }
-                                    )
-                                }
-                            }
-                            if (adPolicyMode == app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP) {
-                                Text(
-                                    text = "Auto-skip confidence",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    val scopes = listOf(
-                                        app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY to "High (80%+)",
-                                        app.hushcast.automute.dsp.AdAutoSkipScope.MODERATE_AND_HIGH to "Balanced",
-                                        app.hushcast.automute.dsp.AdAutoSkipScope.ALL_DETECTED to "All Ads"
-                                    )
-                                    scopes.forEach { (sc, label) ->
-                                        androidx.compose.material3.FilterChip(
-                                            selected = adAutoSkipScope == sc,
-                                            onClick = {
-                                                scope.launch { settingsRepository.hushCast.setAdAutoSkipScope(sc) }
-                                            },
-                                            label = { Text(label) }
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = "Section types to auto-skip",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                val selectedClasses by settingsRepository.hushCast.adAutoSkipClasses.collectAsState(initial = HushCastEngineBridge.autoSkipClasses)
-                                val sectionTypes = listOf(
-                                    "sponsor_ad" to "Sponsors",
-                                    "house_promo" to "Show Promos",
-                                    "membership_pitch" to "Memberships",
-                                    "boilerplate" to "Intros / Outros"
-                                )
-                                androidx.compose.foundation.layout.FlowRow(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    sectionTypes.forEach { (cls, label) ->
-                                        val checked = cls in selectedClasses
-                                        androidx.compose.material3.FilterChip(
-                                            selected = checked,
-                                            onClick = {
-                                                val updated = if (checked) selectedClasses - cls else selectedClasses + cls
-                                                HushCastEngineBridge.autoSkipClasses = updated
-                                                scope.launch { settingsRepository.hushCast.setAdAutoSkipClasses(updated) }
-                                            },
-                                            label = { Text(label) }
-                                        )
-                                    }
-                                }
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("Sponsor skip chime", style = MaterialTheme.typography.bodyMedium)
-                                    Text(
-                                        text = "Play a subtle tone when an ad is skipped",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                androidx.compose.material3.Switch(
-                                    checked = sponsorSkipSoundEnabled,
-                                    onCheckedChange = { enabled ->
-                                        scope.launch { settingsRepository.hushCast.setSponsorSkipSoundEnabled(enabled) }
-                                    }
-                                )
-                            }
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                }
-            }
-        }
-
-        if (showSetupSheet) {
-            val wordMutingEnabled by settingsRepository.hushCast.wordMutingEnabled.collectAsState(initial = true)
-            val adPolicyMode by settingsRepository.hushCast.adPolicyMode.collectAsState(initial = app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP)
-            val autoDownloadUpNext by settingsRepository.hushCast.autoDownloadUpNext.collectAsState(initial = true)
-            val context = androidx.compose.ui.platform.LocalContext.current
-            var processTarget by remember {
-                mutableStateOf(
-                    if (app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context)) "computer"
-                    else "phone"
-                )
-            }
-
-            ModalBottomSheet(onDismissRequest = { showSetupSheet = false }) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text = "Set up HushCast",
-                        style = Typography.titleLargeEmphasized
-                    )
-                    Text(
-                        text = "Choose how HushCast cleans up your podcasts automatically.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("1. Mute unwanted words", style = MaterialTheme.typography.bodyLarge)
-                            Text("Silence or bleep profanity and custom words", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        androidx.compose.material3.Switch(
-                            checked = wordMutingEnabled,
-                            onCheckedChange = { scope.launch { settingsRepository.hushCast.setWordMutingEnabled(it) } }
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("2. Skip sponsor reads", style = MaterialTheme.typography.bodyLarge)
-                            Text("Automatically jump over detected ad segments", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        androidx.compose.material3.Switch(
-                            checked = adPolicyMode == app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP,
-                            onCheckedChange = { skip ->
-                                scope.launch {
-                                    settingsRepository.hushCast.setAdPolicyMode(
-                                        if (skip) app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP
-                                        else app.hushcast.automute.dsp.AdPolicyMode.OFF
-                                    )
-                                }
-                            }
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text("3. Prepare Up Next", style = MaterialTheme.typography.bodyLarge)
-                            Text("Auto-download & process queued episodes", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                        androidx.compose.material3.Switch(
-                            checked = autoDownloadUpNext,
-                            onCheckedChange = { scope.launch { settingsRepository.hushCast.setAutoDownloadUpNext(it) } }
-                        )
-                    }
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("4. Where to process", style = MaterialTheme.typography.bodyLarge)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf(
-                                "phone" to "This phone",
-                                "computer" to "My computer",
-                                "off" to "Off"
-                            ).forEach { (key, label) ->
-                                androidx.compose.material3.FilterChip(
-                                    selected = processTarget == key,
-                                    onClick = { processTarget = key },
-                                    label = { Text(label) }
-                                )
-                            }
-                        }
-                        Text(
-                            text = when (processTarget) {
-                                "phone" -> "Downloads on-device AI models (~455 MB) over Wi-Fi."
-                                "computer" -> "Pair your desktop worker in Settings → HushCast."
-                                else -> "AI processing disabled; you can turn it on anytime."
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                when (processTarget) {
-                                    "phone" -> {
-                                        app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerEnabled(context, false)
-                                        val mm = app.hushcast.automute.engine.ModelManager(context)
-                                        if (!mm.areWordMuteModelsReady() || !mm.areAdModelsReady()) {
-                                            app.hushcast.automute.worker.ModelDownloadWorker.enqueue(
-                                                context = context,
-                                                includeAdModels = true,
-                                                allowMetered = false
-                                            )
-                                        }
-                                    }
-                                    "computer" -> {
-                                        app.hushcast.automute.engine.HushCastPrefs.setDesktopWorkerEnabled(context, true)
-                                    }
-                                    "off" -> {
-                                        settingsRepository.hushCast.setWordMutingEnabled(false)
-                                        settingsRepository.hushCast.setAdPolicyMode(app.hushcast.automute.dsp.AdPolicyMode.OFF)
-                                    }
-                                }
-                                settingsRepository.hushCast.setSetupCompleted(true)
-                                showSetupSheet = false
-                                showHushCastSheet = true
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(if (processTarget == "phone") "Download AI & Get started" else "Get started")
-                    }
-                    Spacer(Modifier.height(12.dp))
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun Image(
-    mediaPlayerViewModel: MediaPlayerViewModel,
-    compactLayout: Boolean,
-    isFullScreen: Boolean = false
-) {
-    val size = when {
-        compactLayout -> 96.dp
-        isFullScreen -> 260.dp
-        else -> 196.dp
-    }
-    val cornerRadius = if (isFullScreen && !compactLayout) 24.dp else 16.dp
-
-    AnimatedContent(mediaPlayerViewModel.isLoading) { isLoading ->
-        when(isLoading) {
-            true -> {
-                Box(
-                    Modifier.size(size),
-                    contentAlignment = Alignment.Center
-                ) {
-                    ContainedLoadingIndicator(
-                        Modifier.size(size / 2)
-                    )
-                }
-            }
-
-                    false -> {
-                AnimatedContent(mediaPlayerViewModel.mediaMetadata) { mediaMetadata ->
-                    ShimmerAsyncImage(
-                        modifier = Modifier
-                            .size(size)
-                            .clip(RoundedCornerShape(cornerRadius)),
-
-                        model = mediaMetadata?.artworkUri,
-                        contentDescription = null,
-
-                        contentScale = ContentScale.Crop
-                    )
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
-@Composable
-private fun PlayerSeekBarSection(
-    vm: MediaPlayerViewModel,
-    muteWindows: List<app.hushcast.automute.dsp.MuteWindow>,
-    adWindows: List<app.hushcast.automute.dsp.AdWindow>,
-    pendingUndo: app.hushcast.automute.dsp.AdSkipEvent? = null,
-    onSkipAd: ((app.hushcast.automute.dsp.AdWindow) -> Unit)? = null,
-    onUndoSkip: ((app.hushcast.automute.dsp.AdSkipEvent) -> Unit)? = null,
-    onDismissUndo: (() -> Unit)? = null
-) {
-    val scope = rememberCoroutineScope()
-    var blockSliderUpdate by remember { mutableStateOf(false) }
-    var dragSliderState by remember { mutableFloatStateOf(0f) }
-
-    val progressState = vm.getProgressState()
-    LaunchedEffect(blockSliderUpdate, progressState.value) {
-        if (blockSliderUpdate && kotlin.math.abs(progressState.value - dragSliderState) < 0.02f) {
-            blockSliderUpdate = false
-        }
-    }
-    val displayValue = if (blockSliderUpdate) dragSliderState else progressState.value
-
-    app.podiumpodcasts.podium.ui.component.media.AnnotatedPlaybackSlider(
-        value = displayValue,
-        durationMs = vm.currentDuration,
-        muteWindows = muteWindows,
-        adWindows = adWindows,
-        pendingUndo = pendingUndo,
-        onSkipAd = onSkipAd,
-        onUndoSkip = onUndoSkip,
-        onDismissUndo = onDismissUndo,
-        onValueChange = {
-            dragSliderState = it
-            blockSliderUpdate = true
-        },
-        onValueChangeFinished = {
-            blockSliderUpdate = true
-            vm.seek((dragSliderState * vm.currentDuration).toLong())
-            scope.launch {
-                delay(2000L)
-                blockSliderUpdate = false
-            }
-        }
-    )
-
-    val context = LocalContext.current
-    val settingsRepository = remember(context) { app.podiumpodcasts.podium.SettingsRepository(context) }
-    val remainingMode by settingsRepository.behavior.remainingTimeDisplay.collectAsState(
-        initial = app.podiumpodcasts.podium.RemainingTimeDisplayMode.BOTH
-    )
-
-    val currentPosMs = (displayValue * vm.currentDuration).toLong().coerceIn(0L, vm.currentDuration.coerceAtLeast(0L))
-    val remainingRawMs = (vm.currentDuration - currentPosMs).coerceAtLeast(0L)
-    val adjustedRemainingMs = remember(currentPosMs, vm.currentDuration, vm.speed, adWindows) {
-        computeAdjustedRemainingMs(
-            currentPosMs = currentPosMs,
-            durationMs = vm.currentDuration,
-            speed = vm.speed,
-            skipRanges = HushCastEngineBridge.getActiveSkipRanges()
         )
     }
 
-    val remainingText = when (remainingMode) {
-        app.podiumpodcasts.podium.RemainingTimeDisplayMode.RAW -> "-${formatPlayerTime(remainingRawMs)}"
-        app.podiumpodcasts.podium.RemainingTimeDisplayMode.ADJUSTED -> "-${formatPlayerTime(adjustedRemainingMs)}"
-        app.podiumpodcasts.podium.RemainingTimeDisplayMode.BOTH -> {
-            if (kotlin.math.abs(adjustedRemainingMs - remainingRawMs) >= 1000L) {
-                "-${formatPlayerTime(remainingRawMs)} (-${formatPlayerTime(adjustedRemainingMs)})"
-            } else {
-                "-${formatPlayerTime(remainingRawMs)}"
+    if (showNotDownloadedDialog) {
+        AlertDialog(
+            onDismissRequest = { showNotDownloadedDialog = false },
+            title = { Text("Download & process episode") },
+            text = { Text("Download this episode so HushCast can transcribe it and detect sponsors.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showNotDownloadedDialog = false
+                        scope.launch {
+                            DownloadManager.downloadEpisode(
+                                context = context,
+                                db = appDb,
+                                episodeId = episodeId,
+                                downloadMethod = DownloadAnalysisMethod.ON_DEVICE
+                            )
+                        }
+                    }
+                ) {
+                    Text("Download & Process")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showNotDownloadedDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showDeleteDownloadConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDownloadConfirm = false },
+            title = { Text("Remove download?") },
+            text = { Text("Delete the downloaded audio file from this device?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showDeleteDownloadConfirm = false
+                        currentEpisodeBundle?.episode?.let { ep ->
+                            scope.launch(Dispatchers.IO) {
+                                ep.craftDownloadFile(context).delete()
+                                appDb.podcastEpisodeDownloads().delete(ep.id)
+                            }
+                        }
+                    }
+                ) {
+                    Text("Remove")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDownloadConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    pendingWordMute?.let { word ->
+        val cleanWord = word.text.trim().trim { !it.isLetterOrDigit() && it != '\'' && it != '-' }
+        AlertDialog(
+            onDismissRequest = { pendingWordMute = null },
+            title = { Text("Mute \"$cleanWord\"?") },
+            text = { Text("Add \"$cleanWord\" to your HushCast word mute list so it is muted across episodes.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pendingWordMute = null
+                        playerVm.addMuteWordRule(cleanWord, HushCastEngineBridge.defaultActionMode)
+                    }
+                ) {
+                    Text("Mute word")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingWordMute = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun ChapterNavigationLine(
+    chapters: List<ResolvedChapter>,
+    currentChapter: ResolvedChapter,
+    currentIndex: Int,
+    skippedStarts: Set<Long>,
+    positionMs: Long,
+    speed: Float,
+    adjustForSpeed: Boolean,
+    onSeekToMs: (Long) -> Unit,
+    onOpenChaptersTab: () -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+    val prevChapter = remember(chapters, currentIndex, skippedStarts) {
+        chapters.take(currentIndex).lastOrNull { it.publishedStartMs !in skippedStarts }
+    }
+    val nextChapter = remember(chapters, currentIndex, skippedStarts) {
+        chapters.drop(currentIndex + 1).firstOrNull { it.publishedStartMs !in skippedStarts }
+    }
+
+    val chapterDurMs = (currentChapter.endMs - currentChapter.startMs).coerceAtLeast(1L)
+    val remainingFraction = ((currentChapter.endMs - positionMs).toFloat() / chapterDurMs.toFloat()).coerceIn(0f, 1f)
+    val remainingWallMs = if (adjustForSpeed) {
+        SkipAwareSeekCalculator.computeWallRemainingMs(
+            fromMs = positionMs,
+            targetEndMs = currentChapter.endMs,
+            speed = speed,
+            skipRanges = HushCastEngineBridge.getActiveSkipRanges()
+        )
+    } else {
+        (currentChapter.endMs - positionMs).coerceAtLeast(0L)
+    }
+    val remMins = ((remainingWallMs + 30_000L) / 60_000L).coerceAtLeast(1L)
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        IconButton(
+            enabled = prevChapter != null,
+            onClick = {
+                if (prevChapter != null) {
+                    haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                    onSeekToMs(prevChapter.startMs)
+                }
+            },
+            modifier = Modifier.size(48.dp)
+        ) {
+            Icon(Icons.Rounded.ChevronLeft, contentDescription = "Previous chapter")
+        }
+
+        val spatial = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+        AnimatedContent(
+            targetState = currentChapter,
+            modifier = Modifier
+                .weight(1f)
+                .clickable(onClick = onOpenChaptersTab),
+            label = "chapterTitleSwitch"
+        ) { ch ->
+            val idx = chapters.indexOf(ch).coerceAtLeast(0)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = ch.title,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "${idx + 1} of ${chapters.size} · ${remMins}m left",
+                    style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
             }
         }
+
+        Box(
+            modifier = Modifier.size(48.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(
+                progress = { remainingFraction },
+                modifier = Modifier.size(28.dp),
+                strokeWidth = 2.dp
+            )
+            IconButton(
+                enabled = nextChapter != null,
+                onClick = {
+                    if (nextChapter != null) {
+                        haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                        onSeekToMs(nextChapter.startMs)
+                    }
+                },
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(Icons.Rounded.ChevronRight, contentDescription = "Next chapter")
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun PlayerTransportControls(
+    isPlaying: Boolean,
+    seekBackMs: Long,
+    seekForwardMs: Long,
+    onSeekBack: () -> Unit,
+    onTogglePlay: () -> Unit,
+    onSeekForward: () -> Unit
+) {
+    val backIcon = when (seekBackMs) {
+        5000L -> Icons.Rounded.Replay5
+        10000L -> Icons.Rounded.Replay10
+        30000L -> Icons.Rounded.Replay30
+        else -> Icons.Rounded.Replay
+    }
+    val forwardIcon = when (seekForwardMs) {
+        5000L -> Icons.Rounded.Forward5
+        10000L -> Icons.Rounded.Forward10
+        30000L -> Icons.Rounded.Forward30
+        else -> Icons.Rounded.FastForward
     }
 
     Row(
-        Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = formatPlayerTime(
-                time = currentPosMs,
-                duration = vm.currentDuration
-            ),
-            style = Typography.labelMediumEmphasized
-        )
+        FilledTonalIconButton(
+            onClick = onSeekBack,
+            modifier = Modifier.size(56.dp)
+        ) {
+            Icon(
+                imageVector = backIcon,
+                contentDescription = "Seek back ${seekBackMs / 1000L} seconds",
+                modifier = Modifier.size(28.dp)
+            )
+        }
 
-        Text(
-            text = remainingText,
-            style = Typography.labelMediumEmphasized
-        )
+        FilledIconToggleButton(
+            checked = isPlaying,
+            onCheckedChange = { onTogglePlay() },
+            shapes = IconButtonDefaults.toggleableShapes(),
+            modifier = Modifier.size(width = 88.dp, height = 64.dp)
+        ) {
+            Icon(
+                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                contentDescription = if (isPlaying) "Pause" else "Play",
+                modifier = Modifier.size(34.dp)
+            )
+        }
+
+        FilledTonalIconButton(
+            onClick = onSeekForward,
+            modifier = Modifier.size(56.dp)
+        ) {
+            Icon(
+                imageVector = forwardIcon,
+                contentDescription = "Seek forward ${seekForwardMs / 1000L} seconds",
+                modifier = Modifier.size(28.dp)
+            )
+        }
     }
 }
 
-private fun computeAdjustedRemainingMs(
-    currentPosMs: Long,
-    durationMs: Long,
+@Composable
+private fun PlayerActionToolbar(
+    shortcutActions: List<PlayerToolbarAction>,
+    overflowActions: List<PlayerToolbarAction>,
+    isProcessed: Boolean,
+    protectionActive: Boolean,
     speed: Float,
-    skipRanges: List<app.hushcast.automute.dsp.SkipAwareSeekCalculator.SkipRange>
-): Long {
-    val remainingRaw = (durationMs - currentPosMs).coerceAtLeast(0L)
-    if (remainingRaw == 0L) return 0L
-
-    val clipped = skipRanges
-        .mapNotNull { r ->
-            val s = maxOf(r.startMs, currentPosMs)
-            val e = minOf(r.endMs, durationMs)
-            if (e > s) s to e else null
-        }
-        .sortedBy { it.first }
-
-    var skippedMs = 0L
-    var curStart = -1L
-    var curEnd = -1L
-    for ((s, e) in clipped) {
-        if (curStart < 0L) {
-            curStart = s
-            curEnd = e
-        } else if (s <= curEnd) {
-            curEnd = maxOf(curEnd, e)
-        } else {
-            skippedMs += (curEnd - curStart)
-            curStart = s
-            curEnd = e
-        }
-    }
-    if (curStart >= 0L) {
-        skippedMs += (curEnd - curStart)
-    }
-
-    val effectiveRemaining = (remainingRaw - skippedMs).coerceAtLeast(0L)
-    return (effectiveRemaining / speed.coerceAtLeast(0.25f)).toLong()
-}
-
-@Composable
-private fun LiveSyncedTranscriptCard(
-    vm: MediaPlayerViewModel,
-    segments: List<app.hushcast.automute.engine.Segment>,
-    words: List<app.hushcast.automute.engine.Word>,
-    muteWindows: List<app.hushcast.automute.dsp.MuteWindow>,
-    adWindows: List<app.hushcast.automute.dsp.AdWindow>,
-    onSeekToMs: (Long) -> Unit,
-    onToggleWordMute: (app.hushcast.automute.engine.Word, Boolean) -> Unit,
-    onPlayAdSegment: ((app.hushcast.automute.dsp.AdWindow, Long) -> Unit)? = null,
-    onCopyReport: (() -> Unit)? = null,
-    summary: String? = null,
-    chapters: List<app.hushcast.automute.desktop.DesktopChapterDto> = emptyList(),
-    modifier: Modifier = Modifier
+    sleepTimerMinutes: Int?,
+    isFavorite: Boolean,
+    isDownloaded: Boolean,
+    transcriptState: TranscriptLoadState,
+    showMoreMenu: Boolean,
+    onToggleMoreMenu: (Boolean) -> Unit,
+    onPerformAction: (PlayerToolbarAction) -> Unit,
+    onOpenCustomize: () -> Unit
 ) {
-    SyncedTranscriptCard(
-        modifier = modifier,
-        segments = segments,
-        words = words,
-        muteWindows = muteWindows,
-        adWindows = adWindows,
-        currentPositionMs = vm.rememberLivePositionMs(100L),
-        onSeekToMs = onSeekToMs,
-        onToggleWordMute = onToggleWordMute,
-        onPlayAdSegment = onPlayAdSegment,
-        onCopyReport = onCopyReport,
-        summary = summary,
-        chapters = chapters
-    )
-}
-
-@Composable
-private fun LiveChaptersTabContent(
-    vm: MediaPlayerViewModel,
-    chapters: List<app.hushcast.automute.desktop.DesktopChapterDto>,
-    skippedChapterStarts: Set<Long>,
-    onSeekToMs: (Long) -> Unit,
-    onToggleSkipChapter: (app.hushcast.automute.desktop.DesktopChapterDto, Boolean) -> Unit,
-    onAnalyzeNowClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    app.podiumpodcasts.podium.ui.component.media.ChaptersTabContent(
-        chapters = chapters,
-        currentPositionMs = vm.rememberLivePositionMs(500L),
-        episodeDurationMs = vm.currentDuration,
-        skippedChapterStarts = skippedChapterStarts,
-        onSeekToMs = onSeekToMs,
-        onToggleSkipChapter = onToggleSkipChapter,
-        onAnalyzeNowClick = onAnalyzeNowClick,
-        modifier = modifier
-    )
-}
-
-@Composable
-private fun ActiveChapterPill(
-    vm: MediaPlayerViewModel,
-    chapters: List<app.hushcast.automute.desktop.DesktopChapterDto>,
-    onClick: () -> Unit
-) {
-    val posMs = vm.rememberLivePositionMs(500L)
-    val activeChapter = remember(chapters, posMs) {
-        chapters.lastOrNull { it.startMs <= posMs } ?: chapters.firstOrNull()
-    } ?: return
-
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-        modifier = Modifier.clickable(onClick = onClick)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = "Ch: ${activeChapter.title}",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-        )
+        shortcutActions.forEach { action ->
+            val icon = when (action) {
+                PlayerToolbarAction.HUSHCAST, PlayerToolbarAction.ANALYZE ->
+                    if (isProcessed && protectionActive) Icons.Rounded.Shield else Icons.Outlined.Shield
+                PlayerToolbarAction.SPEED -> Icons.Filled.Speed
+                PlayerToolbarAction.SLEEP -> Icons.Filled.Bedtime
+                PlayerToolbarAction.TRANSCRIPT -> Icons.Rounded.Subtitles
+                PlayerToolbarAction.FAVORITE -> if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder
+                PlayerToolbarAction.DOWNLOAD -> if (isDownloaded) Icons.Rounded.DownloadForOffline else Icons.Rounded.Download
+                PlayerToolbarAction.GO_TO_PODCAST -> Icons.Rounded.Podcasts
+                PlayerToolbarAction.EPISODE_DETAILS -> Icons.Rounded.Info
+                PlayerToolbarAction.MARK_PLAYED -> Icons.Rounded.Done
+            }
+
+            val isTranscriptUnavailable = action == PlayerToolbarAction.TRANSCRIPT &&
+                transcriptState !is TranscriptLoadState.Ready
+            val alpha = if (isTranscriptUnavailable) 0.40f else 1f
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.alpha(alpha)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    IconButton(
+                        onClick = { onPerformAction(action) },
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = action.label,
+                            tint = when {
+                                action == PlayerToolbarAction.HUSHCAST && isProcessed && protectionActive ->
+                                    MaterialTheme.colorScheme.primary
+                                action == PlayerToolbarAction.SLEEP && sleepTimerMinutes != null ->
+                                    MaterialTheme.colorScheme.primary
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+
+                    if (action == PlayerToolbarAction.TRANSCRIPT && transcriptState is TranscriptLoadState.Transcribing) {
+                        CircularProgressIndicator(
+                            progress = { transcriptState.progressPercent.coerceIn(0, 100) / 100f },
+                            modifier = Modifier.size(32.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                }
+
+                val badgeText = when (action) {
+                    PlayerToolbarAction.SPEED -> formatPlaybackSpeed(speed)
+                    PlayerToolbarAction.SLEEP -> sleepTimerMinutes?.let { "${it}m" }
+                    else -> null
+                }
+                if (badgeText != null) {
+                    Text(
+                        text = badgeText,
+                        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+
+        Box {
+            IconButton(
+                onClick = { onToggleMoreMenu(true) },
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(Icons.Rounded.MoreHoriz, contentDescription = "More actions")
+            }
+
+            DropdownMenu(
+                expanded = showMoreMenu,
+                onDismissRequest = { onToggleMoreMenu(false) }
+            ) {
+                overflowActions.forEach { action ->
+                    DropdownMenuItem(
+                        text = { Text(action.label) },
+                        onClick = {
+                            onToggleMoreMenu(false)
+                            onPerformAction(action)
+                        }
+                    )
+                }
+                HorizontalDivider()
+                DropdownMenuItem(
+                    leadingIcon = { Icon(Icons.Rounded.Tune, contentDescription = null) },
+                    text = { Text("Customize player") },
+                    onClick = onOpenCustomize
+                )
+            }
+        }
     }
 }

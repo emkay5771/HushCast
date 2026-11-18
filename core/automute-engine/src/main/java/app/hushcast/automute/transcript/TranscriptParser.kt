@@ -70,6 +70,16 @@ object TranscriptParser {
                 segments.add(Segment(start, end.coerceAtLeast(start + 0.01), body.trim()))
             }
         }
+        // A6: Some Podcasting 2.0 feeds emit one word per segment without a nested words array.
+        if (!hasWordTimings && segments.isNotEmpty()) {
+            val singleTokenCount = segments.count { !it.text.any { ch -> ch.isWhitespace() } }
+            if (singleTokenCount * 10 >= segments.size * 8) {
+                hasWordTimings = true
+                for (seg in segments) {
+                    allWords.add(Word(seg.start, seg.end, " ${seg.text}"))
+                }
+            }
+        }
         return ParsedTranscript(
             format = TranscriptFormat.PODCASTING_20_JSON,
             segments = segments,

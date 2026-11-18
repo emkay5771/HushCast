@@ -2,6 +2,7 @@ package app.podiumpodcasts.podium.ui.view.model
 
 import androidx.activity.compose.LocalActivity
 import androidx.annotation.StringRes
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
@@ -183,18 +184,63 @@ fun PodcastDetailView(
     }
     val playerVm = viewModel<MediaPlayerViewModel>()
     val context = androidx.compose.ui.platform.LocalContext.current
+    val settingsRepository = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
+    val itemSwipeRightAction by settingsRepository.behavior.episodeSwipeRightAction.collectAsStateWithLifecycle(
+        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
+    )
+    val secondaryRightType by settingsRepository.behavior.episodeSwipeRightSecondaryAction.collectAsStateWithLifecycle(
+        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST
+    )
+    val itemSwipeLeftAction by settingsRepository.behavior.episodeSwipeLeftAction.collectAsStateWithLifecycle(
+        app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED
+    )
+    val secondaryLeftType by settingsRepository.behavior.episodeSwipeLeftSecondaryAction.collectAsStateWithLifecycle(
+        app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD
+    )
+    val queueEpisodeIds by remember(playerVm) {
+        derivedStateOf { playerVm.queue.toHashSet() }
+    }
 
-    val subscription = vm.subscription.collectAsState(initial = cachedSubModel)
+    val subscription = vm.subscription.collectAsStateWithLifecycle(initialValue = cachedSubModel)
     val episodePager = vm.episodePager.collectAsLazyPagingItems()
     val selectedEpisodeIds = remember(podcast.origin) { androidx.compose.runtime.mutableStateListOf<String>() }
 
     val isSubscribed = subscription.value != null
     var showOverflowMenu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var showMarkAllPlayedDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
     androidx.compose.runtime.LaunchedEffect(vm.refreshError) {
         val err = vm.refreshError ?: return@LaunchedEffect
         vm.snackbarHostState.showSnackbar(err)
         vm.refreshError = null
+    }
+
+    if (showMarkAllPlayedDialog) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showMarkAllPlayedDialog = false },
+            title = { Text("Mark all as listened?") },
+            text = { Text("All episodes of ${podcast.fetchTitle()} will be marked as listened.") },
+            confirmButton = {
+                androidx.compose.material3.Button(
+                    onClick = {
+                        showMarkAllPlayedDialog = false
+                        scope.launch {
+                            db.podcastEpisodePlayStates().markAllPlayedForOrigin(podcast.origin)
+                            vm.snackbarHostState.showSnackbar("Marked all episodes as listened")
+                        }
+                    }
+                ) {
+                    Text("Mark all")
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = { showMarkAllPlayedDialog = false }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     val BACKDROP_SIZE = 200.dp
@@ -299,9 +345,7 @@ fun PodcastDetailView(
                                                 },
                                                 onClick = {
                                                     showOverflowMenu = false
-                                                    scope.launch {
-                                                        db.podcastEpisodePlayStates().markAllPlayedForOrigin(podcast.origin)
-                                                    }
+                                                    showMarkAllPlayedDialog = true
                                                 }
                                             )
                                             if (isSubscribed) {
@@ -668,6 +712,12 @@ fun PodcastDetailView(
                                 scope = scope,
                                 episodePager = episodePager,
                                 selectedEpisodeIds = selectedEpisodeIds,
+                                playerVm = playerVm,
+                                queueEpisodeIds = queueEpisodeIds,
+                                itemSwipeRightAction = itemSwipeRightAction,
+                                secondaryRightType = secondaryRightType,
+                                itemSwipeLeftAction = itemSwipeLeftAction,
+                                secondaryLeftType = secondaryLeftType,
                                 onClickEpisode = onClickEpisode
                             )
                         }
@@ -738,6 +788,12 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
     scope: CoroutineScope,
     episodePager: LazyPagingItems<PodcastEpisodeBundle>,
     selectedEpisodeIds: MutableList<String>,
+    playerVm: MediaPlayerViewModel,
+    queueEpisodeIds: Set<String>,
+    itemSwipeRightAction: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    secondaryRightType: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    itemSwipeLeftAction: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    secondaryLeftType: app.podiumpodcasts.podium.EpisodeSwipeAction,
     onClickEpisode: (episode: PodcastEpisodeModel) -> Unit
 ) {
     item(
@@ -863,7 +919,8 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
 
     items(
         count = episodePager.itemCount,
-        key = episodePager.itemKey { "EPISODE:${it.episode.id}" }
+        key = episodePager.itemKey { "EPISODE:${it.episode.id}" },
+        contentType = { "episode" }
     ) {
         Surface(
             modifier = Modifier
@@ -873,6 +930,7 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
         ) {
             episodePager[it]?.let { episodeBundle ->
                 val isSelected = episodeBundle.episode.id in selectedEpisodeIds
+                val inQueue = episodeBundle.episode.id in queueEpisodeIds
                 Box(
                     Modifier.padding(
                         top = 2.dp,
@@ -885,21 +943,6 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                     val markedAsUnplayed = stringResource(R.string.snackbar_marked_as_unplayed)
                     val isCurrentlyPlayed = episodeBundle.playState?.played == true
 
-                    val itemPlayerVm = viewModel<MediaPlayerViewModel>()
-                    val itemSettings = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
-                    val itemSwipeRightAction = itemSettings.behavior.episodeSwipeRightAction.collectAsState(
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT
-                    ).value
-                    val secondaryRightType = itemSettings.behavior.episodeSwipeRightSecondaryAction.collectAsState(
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST
-                    ).value
-                    val itemSwipeLeftAction = itemSettings.behavior.episodeSwipeLeftAction.collectAsState(
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED
-                    ).value
-                    val secondaryLeftType = itemSettings.behavior.episodeSwipeLeftSecondaryAction.collectAsState(
-                        app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD
-                    ).value
-
                     SwipeableItem(
                         snackbarHostState = vm.snackbarHostState,
                         scope = scope,
@@ -907,11 +950,11 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                         startAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
                             actionType = itemSwipeRightAction,
                             bundle = episodeBundle,
-                            playerVm = itemPlayerVm,
+                            playerVm = playerVm,
                             onMarkPlayed = { markPlayed ->
                                 if (markPlayed) {
                                     vm.markAsPlayed(episodeBundle)
-                                    itemPlayerVm.removeEpisodeFromPlaybackAndQueue(episodeBundle.episode.id)
+                                    playerVm.removeEpisodeFromPlaybackAndQueue(episodeBundle.episode.id)
                                 } else vm.markAsUnplayed(episodeBundle)
                             }
                         ),
@@ -919,25 +962,25 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                             actionType = app.podiumpodcasts.podium.ui.component.common.swipeable.consolidateSecondarySwipeAction(
                                 primary = itemSwipeRightAction,
                                 secondary = secondaryRightType,
-                                inQueue = itemPlayerVm.queue.contains(episodeBundle.episode.id)
+                                inQueue = inQueue
                             ),
                             bundle = episodeBundle,
-                            playerVm = itemPlayerVm,
+                            playerVm = playerVm,
                             onMarkPlayed = { markPlayed ->
                                 if (markPlayed) {
                                     vm.markAsPlayed(episodeBundle)
-                                    itemPlayerVm.removeEpisodeFromPlaybackAndQueue(episodeBundle.episode.id)
+                                    playerVm.removeEpisodeFromPlaybackAndQueue(episodeBundle.episode.id)
                                 } else vm.markAsUnplayed(episodeBundle)
                             }
                         ),
                         endAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
                             actionType = itemSwipeLeftAction,
                             bundle = episodeBundle,
-                            playerVm = itemPlayerVm,
+                            playerVm = playerVm,
                             onMarkPlayed = { markPlayed ->
                                 if (markPlayed) {
                                     vm.markAsPlayed(episodeBundle)
-                                    itemPlayerVm.removeEpisodeFromPlaybackAndQueue(episodeBundle.episode.id)
+                                    playerVm.removeEpisodeFromPlaybackAndQueue(episodeBundle.episode.id)
                                 } else vm.markAsUnplayed(episodeBundle)
                             }
                         ),
@@ -945,14 +988,14 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                             actionType = app.podiumpodcasts.podium.ui.component.common.swipeable.consolidateSecondarySwipeAction(
                                 primary = itemSwipeLeftAction,
                                 secondary = secondaryLeftType,
-                                inQueue = itemPlayerVm.queue.contains(episodeBundle.episode.id)
+                                inQueue = inQueue
                             ),
                             bundle = episodeBundle,
-                            playerVm = itemPlayerVm,
+                            playerVm = playerVm,
                             onMarkPlayed = { markPlayed ->
                                 if (markPlayed) {
                                     vm.markAsPlayed(episodeBundle)
-                                    itemPlayerVm.removeEpisodeFromPlaybackAndQueue(episodeBundle.episode.id)
+                                    playerVm.removeEpisodeFromPlaybackAndQueue(episodeBundle.episode.id)
                                 } else vm.markAsUnplayed(episodeBundle)
                             }
                         ),

@@ -91,7 +91,7 @@ jobs:
       - name: Run unit tests and lint
         run: ./gradlew :core:automute-engine:testDebugUnitTest :app:testDebugUnitTest :app:lintDebug
 
-      - name: Build Release APK (tags) or Debug APK (PR/push)
+      - name: Build Release APK (tags) or Publish APK (PR/push)
         env:
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
@@ -100,7 +100,7 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]] && [ -f app/keystore.jks ]; then
             ./gradlew :app:assembleRelease
           else
-            ./gradlew :app:assembleDebug
+            ./gradlew :app:assemblePublish
           fi
 
       - name: Prepare APK artifacts
@@ -111,7 +111,7 @@ jobs:
           if [ -f app/build/outputs/apk/release/app-release.apk ]; then
             cp app/build/outputs/apk/release/app-release.apk "dist/HushCast-${TAG_NAME}.apk"
           else
-            cp app/build/outputs/apk/debug/app-debug.apk "dist/HushCast-${TAG_NAME}-debug.apk"
+            cp app/build/outputs/apk/publish/app-publish.apk "dist/HushCast-${TAG_NAME}-publish.apk"
           fi
 
       - name: Upload APKs as workflow artifact

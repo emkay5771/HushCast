@@ -8,9 +8,9 @@ import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldState
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.NavKey
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 
@@ -29,13 +29,9 @@ fun NavBarScaffold(
     val currentNavKey = currentNavKey()
 
     val settingsRepository = LocalSettingsRepository.current
-    val disableApplePodcastsApi = settingsRepository.privacy.disableApplePodcastsApi
-        .collectAsState(false)
     val bottomBarRaw = settingsRepository.appearance.bottomBarItemsRaw
-        .collectAsState("HOME,DISCOVER,LIBRARY")
-    val enabledItems = NavBarItems.parseList(bottomBarRaw.value).filter {
-        !(disableApplePodcastsApi.value && it == NavBarItems.DISCOVER)
-    }
+        .collectAsStateWithLifecycle("HOME,DISCOVER,LIBRARY")
+    val enabledItems = NavBarItems.parseList(bottomBarRaw.value)
 
     NavigationSuiteScaffold(
         layoutType = layoutType,

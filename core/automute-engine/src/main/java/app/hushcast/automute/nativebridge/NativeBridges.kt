@@ -15,9 +15,31 @@ internal class WhisperCallbacks(
     fun shouldAbort(): Boolean = abortFn()
 }
 
+private fun hasArmDotProd(): Boolean = try {
+    java.io.File("/proc/cpuinfo").takeIf { it.canRead() }?.useLines { lines ->
+        lines.any { line ->
+            line.startsWith("Features", ignoreCase = true) &&
+                line.contains("asimddp", ignoreCase = true)
+        }
+    } == true
+} catch (_: Throwable) {
+    false
+}
+
+private fun loadNativeWithDotProd(baseName: String) {
+    if (hasArmDotProd()) {
+        try {
+            System.loadLibrary("${baseName}_dp")
+            return
+        } catch (_: UnsatisfiedLinkError) {
+        }
+    }
+    System.loadLibrary(baseName)
+}
+
 internal object WhisperJni {
     val isAvailable: Boolean = try {
-        System.loadLibrary("hushcast_whisper")
+        loadNativeWithDotProd("hushcast_whisper")
         true
     } catch (_: UnsatisfiedLinkError) {
         false
@@ -108,7 +130,7 @@ internal object WhisperJni {
 
 internal object LlamaJni {
     init {
-        System.loadLibrary("hushcast_llama")
+        loadNativeWithDotProd("hushcast_llama")
     }
 
     @JvmStatic

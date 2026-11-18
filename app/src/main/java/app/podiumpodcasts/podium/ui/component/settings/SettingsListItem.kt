@@ -24,6 +24,7 @@ fun SettingsListItem(
     description: String? = null,
 
     selected: Boolean = false,
+    checked: Boolean? = null,
     enabled: Boolean = true,
 
     index: Int = 0,
@@ -55,29 +56,37 @@ fun SettingsListItem(
 
     onClick: () -> Unit
 ) {
-    SegmentedListItem(
-        modifier = if(count == 1)
-            modifier.clip(RoundedCornerShape(16.dp))
-        else
-            modifier,
-
-        selected = selected,
-        enabled = enabled,
-
-        onClick = onClick,
-
-        leadingContent = leadingContent,
-        content = content,
-        supportingContent = supportingContent,
-        trailingContent = trailingContent,
-
-        shapes = ListItemDefaults.segmentedShapes(
-            index = index,
-            count = count
-        ),
-
-        colors = ListItemDefaults.segmentedColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainer
-        )
+    val itemModifier = if (count == 1) modifier.clip(RoundedCornerShape(16.dp)) else modifier
+    val shapes = ListItemDefaults.segmentedShapes(index = index, count = count)
+    val colors = ListItemDefaults.segmentedColors(
+        containerColor = MaterialTheme.colorScheme.surfaceContainer
     )
+
+    if (checked != null) {
+        SegmentedListItem(
+            modifier = itemModifier,
+            checked = checked,
+            enabled = enabled,
+            onCheckedChange = { onClick() },
+            leadingContent = leadingContent,
+            content = content,
+            supportingContent = supportingContent,
+            trailingContent = trailingContent,
+            shapes = shapes,
+            colors = colors
+        )
+    } else {
+        SegmentedListItem(
+            modifier = itemModifier,
+            selected = selected,
+            enabled = enabled,
+            onClick = onClick,
+            leadingContent = leadingContent,
+            content = content,
+            supportingContent = supportingContent,
+            trailingContent = trailingContent,
+            shapes = shapes,
+            colors = colors
+        )
+    }
 }

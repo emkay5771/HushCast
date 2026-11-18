@@ -103,19 +103,37 @@ sealed class DetailPaneKey : Parcelable {
     ) : DetailPaneKey()
 }
 
-val enterSpec = androidx.compose.animation.slideInHorizontally(
-    animationSpec = tween(200, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f))
-) { it / 12 } + fadeIn(animationSpec = tween(110))
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun enterSpec(): androidx.compose.animation.EnterTransition {
+    val spatial = androidx.compose.material3.MaterialTheme.motionScheme.defaultSpatialSpec<androidx.compose.ui.unit.IntOffset>()
+    val effects = androidx.compose.material3.MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+    return androidx.compose.animation.slideInHorizontally(animationSpec = spatial) { it / 12 } +
+        fadeIn(animationSpec = effects)
+}
 
-val listEnterSpec = androidx.compose.animation.slideInHorizontally(
-    animationSpec = tween(200, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f))
-) { -it / 16 }
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun listEnterSpec(): androidx.compose.animation.EnterTransition {
+    val spatial = androidx.compose.material3.MaterialTheme.motionScheme.defaultSpatialSpec<androidx.compose.ui.unit.IntOffset>()
+    return androidx.compose.animation.slideInHorizontally(animationSpec = spatial) { -it / 16 }
+}
 
-val exitSpec = fadeOut(targetAlpha = 0.94f, animationSpec = tween(160))
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun exitSpec(): androidx.compose.animation.ExitTransition {
+    val effects = androidx.compose.material3.MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+    return fadeOut(targetAlpha = 0.94f, animationSpec = effects)
+}
 
-val detailExitSpec = androidx.compose.animation.slideOutHorizontally(
-    animationSpec = tween(200, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f))
-) { it / 10 } + fadeOut(targetAlpha = 0.5f, animationSpec = tween(160))
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun detailExitSpec(): androidx.compose.animation.ExitTransition {
+    val spatial = androidx.compose.material3.MaterialTheme.motionScheme.defaultSpatialSpec<androidx.compose.ui.unit.IntOffset>()
+    val effects = androidx.compose.material3.MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+    return androidx.compose.animation.slideOutHorizontally(animationSpec = spatial) { it / 10 } +
+        fadeOut(targetAlpha = 0.0f, animationSpec = effects)
+}
 
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
@@ -264,8 +282,8 @@ fun Main(
                     navigator = listDetailNavigator,
                     listPane = {
                         AnimatedPane(
-                            enterTransition = listEnterSpec,
-                            exitTransition = exitSpec
+                            enterTransition = listEnterSpec(),
+                            exitTransition = exitSpec()
                         ) {
                             Navigation(
                                 backStack = backStack,
@@ -361,7 +379,7 @@ fun Main(
                     .padding(bottom = 8.dp, end = 16.dp)
             ) {
                 FloatingMediaPlayer(
-                    hide = vm.hideFloatingMediaPlayer.value || navigationScaffoldState.isAnimating,
+                    hide = vm.hideFloatingMediaPlayer.value,
                     showMediaPlayerBottomSheet = vm.showMediaPlayerBottomSheet.value,
                     onMediaPlayerShownChange = {
                         floatingMediaPlayerShown.value = it
@@ -451,8 +469,8 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
         when(contentKey) {
             is DetailPaneKey.SettingsKey -> {
                 AnimatedPane(
-                    enterTransition = enterSpec,
-                    exitTransition = detailExitSpec
+                    enterTransition = enterSpec(),
+                    exitTransition = detailExitSpec()
                 ) {
                     SettingsPane(
                         showBackButton = scaffoldNavigator.scaffoldValue.secondary == PaneAdaptedValue.Hidden,
@@ -478,8 +496,8 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
                     .collectAsState(null)
 
                 AnimatedPane(
-                    enterTransition = enterSpec,
-                    exitTransition = detailExitSpec
+                    enterTransition = enterSpec(),
+                    exitTransition = detailExitSpec()
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxSize()
@@ -505,8 +523,25 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
                                             && contentKey is DetailPaneKey.PodcastEpisodeKey
                                 }
 
+                                @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+                                val spatial = androidx.compose.material3.MaterialTheme.motionScheme.defaultSpatialSpec<androidx.compose.ui.unit.IntOffset>()
+                                @OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
+                                val effects = androidx.compose.material3.MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
                                 AnimatedContent(
-                                    targetState = displayBundle.value
+                                    targetState = displayBundle.value,
+                                    transitionSpec = {
+                                        if (targetState) {
+                                            androidx.compose.animation.ContentTransform(
+                                                targetContentEnter = androidx.compose.animation.slideInHorizontally(animationSpec = spatial) { it / 8 } + fadeIn(animationSpec = effects),
+                                                initialContentExit = androidx.compose.animation.slideOutHorizontally(animationSpec = spatial) { -it / 12 } + fadeOut(animationSpec = effects)
+                                            )
+                                        } else {
+                                            androidx.compose.animation.ContentTransform(
+                                                targetContentEnter = androidx.compose.animation.slideInHorizontally(animationSpec = spatial) { -it / 12 } + fadeIn(animationSpec = effects),
+                                                initialContentExit = androidx.compose.animation.slideOutHorizontally(animationSpec = spatial) { it / 8 } + fadeOut(animationSpec = effects)
+                                            )
+                                        }
+                                    }
                                 ) { isBundle ->
                                     when(isBundle) {
                                         false -> PodcastDetailView(
@@ -558,8 +593,8 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
                     .collectAsState(null)
 
                 AnimatedPane(
-                    enterTransition = enterSpec,
-                    exitTransition = detailExitSpec
+                    enterTransition = enterSpec(),
+                    exitTransition = detailExitSpec()
                 ) {
                     Surface(
                         modifier = Modifier.fillMaxSize()

@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -146,6 +147,8 @@ fun PodcastEpisodeListItem(
         colors.containerColor
     }
 
+    var showContextMenu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
     val clickModifier = if (onLongClick != null) {
         Modifier
             .combinedClickable(
@@ -157,17 +160,82 @@ fun PodcastEpisodeListItem(
                     CustomAccessibilityAction("Select episode") {
                         onLongClick()
                         true
+                    },
+                    CustomAccessibilityAction("Play next") {
+                        playerVm.playNext(context, bundle)
+                        true
+                    },
+                    CustomAccessibilityAction("Play last") {
+                        playerVm.enqueue(context, bundle)
+                        true
                     }
                 )
             }
     } else {
-        Modifier.combinedClickable(
-            onClick = onClick
-        )
+        Modifier
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = { showContextMenu = true }
+            )
+            .semantics {
+                customActions = listOf(
+                    CustomAccessibilityAction("Play next") {
+                        playerVm.playNext(context, bundle)
+                        true
+                    },
+                    CustomAccessibilityAction("Play last") {
+                        playerVm.enqueue(context, bundle)
+                        true
+                    }
+                )
+            }
     }
 
+    Box(modifier = modifier.fillMaxWidth()) {
+        androidx.compose.material3.DropdownMenu(
+            expanded = showContextMenu,
+            onDismissRequest = { showContextMenu = false }
+        ) {
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text("Play next") },
+                onClick = {
+                    showContextMenu = false
+                    playerVm.playNext(context, bundle)
+                }
+            )
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text("Play last") },
+                onClick = {
+                    showContextMenu = false
+                    playerVm.enqueue(context, bundle)
+                }
+            )
+            if (!isDownloaded && !isDownloading) {
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text("Download") },
+                    onClick = {
+                        showContextMenu = false
+                        scope.launch {
+                            DownloadManager.downloadEpisode(context, db, bundle.episode.id)
+                        }
+                    }
+                )
+            }
+            androidx.compose.material3.DropdownMenuItem(
+                text = { Text(if (isPlayed) "Mark unplayed" else "Mark played") },
+                onClick = {
+                    showContextMenu = false
+                    scope.launch {
+                        db.podcastEpisodePlayStates().savePlayed(bundle.episode.id, !isPlayed)
+                        if (!isPlayed) {
+                            playerVm.removeEpisodeFromPlaybackAndQueue(bundle.episode.id)
+                        }
+                    }
+                }
+            )
+        }
     Surface(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .then(clickModifier),
@@ -418,6 +486,7 @@ fun PodcastEpisodeListItem(
                 }
             }
         }
+    }
     }
 }
 

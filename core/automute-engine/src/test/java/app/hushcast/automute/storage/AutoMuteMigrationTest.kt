@@ -38,4 +38,20 @@ class AutoMuteMigrationTest {
         assertTrue(executed.any { it.contains("ALTER TABLE `episode_word_index` ADD COLUMN `encoderDelayMs`") })
         assertTrue(executed.any { it.contains("ALTER TABLE `episode_analysis_status` ADD COLUMN `encoderDelayMs`") })
     }
+
+    @Test
+    fun `migration 3 to 4 adds pipelineVersion, checkpoints, and offset map`() {
+        val executed = mutableListOf<String>()
+        val db = recordingDb(executed)
+
+        assertEquals(3, AutoMuteDatabase.MIGRATION_3_4.startVersion)
+        assertEquals(4, AutoMuteDatabase.MIGRATION_3_4.endVersion)
+
+        AutoMuteDatabase.MIGRATION_3_4.migrate(db)
+
+        assertTrue(executed.any { it.contains("ALTER TABLE `episode_analysis_status` ADD COLUMN `pipelineVersion`") })
+        assertTrue(executed.any { it.contains("ALTER TABLE `episode_analysis_status` ADD COLUMN `rulesVersion`") })
+        assertTrue(executed.any { it.contains("CREATE TABLE IF NOT EXISTS `episode_chunk_checkpoints`") })
+        assertTrue(executed.any { it.contains("CREATE TABLE IF NOT EXISTS `episode_offset_map`") })
+    }
 }

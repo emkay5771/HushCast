@@ -426,4 +426,192 @@ def test_submit_job_inflight_dedup_and_force_cancel(tmp_path: Path) -> None:
         assert s["state"] == "READY"
 
 
+def test_b11_audio_only_clear_preserves_bundles_and_index(tmp_path: Path) -> None:
+    from hushcast_worker.models import DesktopAnalysisBundle, WordIndexBlobDto
+
+    cache = WorkerCache(tmp_path / "cache")
+    sha = "a" * 64
+    audio = cache.audio_path(sha)
+    audio.write_bytes(b"FAKE_AUDIO_BYTES")
+    bundle = DesktopAnalysisBundle(
+        fileSha256=sha,
+        episodeId="ep-b11",
+        durationSec=12.0,
+        wordIndexBlob=WordIndexBlobDto(
+            words=[],
+            segments=[SegmentDto(start=0.0, end=2.0, text="Hello world", nWords=2)],
+        ),
+        adSegments=[],
+    )
+    cache.save_episode(
+        sha256=sha,
+        audio_tmp_path=None,
+        bundle=bundle,
+        audio_url="https://example.com/b11.mp3",
+        title="Ep B11",
+    )
+    assert audio.exists()
+    assert cache.get_bundle(sha) is not None
+
+    stats = cache.clear(audio_only=True)
+    assert stats["removedFiles"] == 1
+    assert not audio.exists()
+    assert cache.get_bundle(sha) is not None
+    assert len(cache.list_ready()) == 1
+
+
+def test_a9_save_reprocessed_updates_index_and_invalidates_search_cache(tmp_path: Path) -> None:
+    from hushcast_worker.models import AdSegmentDto, DesktopAnalysisBundle, WordIndexBlobDto
+
+    cache = WorkerCache(tmp_path / "cache")
+    sha = "b" * 64
+    b1 = DesktopAnalysisBundle(
+        fileSha256=sha,
+        episodeId="ep-a9",
+        durationSec=10.0,
+        wordIndexBlob=WordIndexBlobDto(
+            words=[],
+            segments=[SegmentDto(start=0.0, end=2.0, text="Old text", nWords=2)],
+        ),
+        adSegments=[],
+        pipelineVersion=4,
+    )
+    emb = np.ones((1, 4), dtype=np.float32)
+    cache.save_episode(
+        sha256=sha,
+        audio_tmp_path=None,
+        bundle=b1,
+        audio_url="https://example.com/a9.mp3",
+        title="Ep A9",
+        embeddings=emb,
+    )
+    hits1 = cache.semantic_search([1.0, 0.0, 0.0, 0.0])
+    assert hits1 and hits1[0].text == "Old text"
+
+    b2 = b1.model_copy(
+        update={
+            "wordIndexBlob": WordIndexBlobDto(
+                words=[],
+                segments=[SegmentDto(start=0.0, end=2.0, text="Updated text", nWords=2)],
+            ),
+            "adSegments": [
+                AdSegmentDto(startMs=0, endMs=2000, confidence=0.9, isHighConfidence=True, label="Sponsor")
+            ],
+            "pipelineVersion": 5,
+        }
+    )
+    cache.save_reprocessed(sha256=sha, bundle=b2, embeddings=emb)
+    eps = cache.list_ready()
+    assert eps[0].adCount == 1
+    hits2 = cache.semantic_search([1.0, 0.0, 0.0, 0.0])
+    assert hits2 and hits2[0].text == "Updated text"
+
+
+def test_a3_frame_extractor_24k_kweight_18bands_and_sentence_splitter() -> None:
+    from hushcast_worker.ad_tagger import (
+        SR,
+        compute_segment_features,
+        extract_audio_frames,
+        find_ad_candidates,
+        split_sentences,
+    )
+    from hushcast_worker.models import WordDto
+
+    # 1.2s of 24 kHz stereo audio (mid = 440 Hz sine, side = 220 Hz sine)
+    t = np.arange(int(SR * 1.2), dtype=np.float32) / float(SR)
+    mid = 0.25 * np.sin(2.0 * np.pi * 440.0 * t).astype(np.float32)
+    side = 0.05 * np.sin(2.0 * np.pi * 220.0 * t).astype(np.float32)
+
+    frames = extract_audio_frames(mid, sr=SR, side_pcm=side)
+    assert frames.n == 13  # 12 frames + 1 trailing padded HOP matching FrameExtractor.kt
+    assert frames.stereo is True
+    assert frames.bands.shape == (13, 18)
+    assert np.all(np.isfinite(frames.lk))
+    assert np.mean(frames.side) > -100.0  # non-zero side energy
+
+    words = [
+        WordDto(start=0.0, end=0.3, text="Dr."),
+        WordDto(start=0.3, end=0.6, text=" Smith"),
+        WordDto(start=0.6, end=0.9, text=" spoke."),
+        WordDto(start=0.9, end=1.2, text=" Next."),
+    ]
+    segs = split_sentences(words)
+    assert len(segs) == 2  # "Dr." must NOT split a sentence
+    assert segs[0].text == "Dr. Smith spoke."
+
+    feats = compute_segment_features(frames, segs, duration_sec=1.2)
+    assert feats.shape == (2, 28)
+    assert np.all(np.isfinite(feats))
+
+    probs = np.array([[0.1, 0.30, 0.1, 0.1, 0.4], [0.1, 0.35, 0.1, 0.1, 0.35]], dtype=np.float32)
+    # Neither is argmax==sponsor_ad (class 4 wins), so find_ad_candidates should catch both!
+    cands = find_ad_candidates(probs, segs)
+    assert len(cands) == 1
+    assert cands[0].label == "Suggested Ad"
+
+
+def test_v22_parse_srt_vtt_and_one_word_json_and_a8_lang() -> None:
+    import json
+    from hushcast_worker.pipeline import _normalize_whisper_language, _parse_feed_transcript
+
+    assert _normalize_whisper_language(None) == "en"
+    assert _normalize_whisper_language("auto") == "en"
+    assert _normalize_whisper_language("fr-CA") == "fr"
+
+    vtt = "WEBVTT\n\n00:00:01.000 --> 00:00:03.000\nHello world.\n\n00:00:03.500 --> 00:00:05.000\nSecond cue.\n"
+    parsed_vtt = _parse_feed_transcript(vtt, "text/vtt")
+    assert parsed_vtt is not None
+    w_vtt, s_vtt, needs_align = parsed_vtt
+    assert needs_align is True
+    assert len(s_vtt) == 2 and len(w_vtt) == 4
+
+    one_word_json = json.dumps({
+        "segments": [
+            {"startTime": 0.0, "endTime": 0.4, "body": "Hello"},
+            {"startTime": 0.4, "endTime": 0.8, "body": "world."},
+        ]
+    })
+    parsed_json = _parse_feed_transcript(one_word_json, "application/json")
+    assert parsed_json is not None
+    w_j, s_j, needs_align_j = parsed_json
+    assert needs_align_j is False
+    assert len(w_j) == 2 and len(s_j) == 1
+
+
+def test_v9_long_poll_and_v10_stage_fields(tmp_path: Path) -> None:
+    payload = b"LONG_POLL_PAYLOAD"
+    expected_sha = hashlib.sha256(payload).hexdigest()
+
+    async def fast_dl(url: str, dest: Path, on_bytes):
+        dest.write_bytes(payload)
+        return expected_sha, "audio/mpeg"
+
+    cache = WorkerCache(tmp_path / "cache")
+    app = create_app(cache=cache, backend=FakeBackend(), token="tok", downloader=fast_dl)
+    headers = {"Authorization": "Bearer tok"}
+    with TestClient(app) as client:
+        r = client.post(
+            "/v1/jobs",
+            headers=headers,
+            json={"episodeId": "ep-lp", "audioUrl": "https://example.com/a.mp3"},
+        )
+        assert r.status_code == 200
+        jid = r.json()["jobId"]
+        # Long-poll wakes up on each rev change until READY
+        since_rev = 0
+        body = {}
+        for _ in range(10):
+            res = client.get(f"/v1/jobs/{jid}?waitMs=3000&sinceRev={since_rev}", headers=headers)
+            assert res.status_code == 200
+            body = res.json()
+            assert body["rev"] > since_rev or body["state"] == "READY"
+            since_rev = body["rev"]
+            if body["state"] == "READY":
+                break
+        assert body["state"] == "READY"
+        assert body["stage"] == "READY"
+        assert body["rev"] >= 1
+
+
+
 

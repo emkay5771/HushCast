@@ -70,14 +70,22 @@ data class PodcastEpisodeModel(
     @ColumnInfo("imageSeedColor")
     var imageSeedColor: Int,
     @ColumnInfo("new")
-    val new: Boolean = false
+    val new: Boolean = false,
+    @ColumnInfo("transcriptUrl", defaultValue = "")
+    val transcriptUrl: String = "",
+    @ColumnInfo("transcriptType", defaultValue = "")
+    val transcriptType: String = "",
+    @ColumnInfo("chaptersUrl", defaultValue = "")
+    val chaptersUrl: String = "",
+    @ColumnInfo("chaptersType", defaultValue = "")
+    val chaptersType: String = ""
 ) {
     @android.annotation.SuppressLint("RestrictedApi")
     fun createMediaItem(
         context: Context,
         playState: PodcastEpisodePlayStateModel? = null
     ): MediaItem {
-        val downloadFile = craftDownloadFile(context)
+        val downloadFile = craftDownloadFile(context, createDir = false)
         val isDownload = downloadFile.exists()
 
         return MediaItem.Builder()
@@ -85,7 +93,7 @@ data class PodcastEpisodeModel(
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(title)
-                    .setDescription(description)
+                    .setDescription(description.take(512))
                     .setArtist(podcastTitle)
                     .setSubtitle(podcastTitle)
                     .setDisplayTitle(title)

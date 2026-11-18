@@ -68,9 +68,11 @@ import kotlinx.coroutines.launch
 @Composable
 fun AddPodcastView(
     predefinedUrl: String? = null,
+    onImportOpml: (() -> Unit)? = null,
     onBack: (origin: String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
 
     val db = LocalDatabase.current
     val vm = remember { AddPodcastViewModel(db) }
@@ -127,6 +129,20 @@ fun AddPodcastView(
                             )
                         },
 
+                        trailingIcon = {
+                            androidx.compose.material3.TextButton(
+                                onClick = {
+                                    clipboardManager.getText()?.text?.trim()?.let { pasted ->
+                                        if (pasted.isNotEmpty()) {
+                                            vm.origin = pasted
+                                        }
+                                    }
+                                }
+                            ) {
+                                Text("Paste")
+                            }
+                        },
+
                         label = {
                             Text(
                                 text = stringResource(R.string.common_url)
@@ -134,6 +150,7 @@ fun AddPodcastView(
                         },
 
                         keyboardOptions = KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
                             imeAction = ImeAction.Go
                         ),
                         keyboardActions = KeyboardActions(
@@ -157,6 +174,17 @@ fun AddPodcastView(
                         Text(
                             text = stringResource(R.string.common_action_continue)
                         )
+                    }
+
+                    if (onImportOpml != null) {
+                        Spacer(Modifier.height(8.dp))
+
+                        androidx.compose.material3.OutlinedButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = onImportOpml
+                        ) {
+                            Text("Import OPML file")
+                        }
                     }
                 }
 
@@ -232,44 +260,25 @@ fun AddPodcastView(
                         )
                     }
 
-                    Spacer(Modifier.height(96.dp))
-
-                    val enableButton = remember { mutableStateOf(false) }
-                    LaunchedEffect(vm.seedColor) {
-                        if(vm.seedColor == null) {
-                            enableButton.value = false
-                            delay(2000)
-                            enableButton.value = true
-                        } else {
-                            enableButton.value = true
-                        }
-                    }
+                    Spacer(Modifier.height(48.dp))
 
                     DynamicMaterialExpressiveTheme(
                         seedColor = vm.seedColor
                             ?: MaterialTheme.colorScheme.primary,
                         isDark = app.podiumpodcasts.podium.ui.theme.LocalDarkTheme.current
                     ) {
-                        FilledIconButton(
+                        Button(
                             onClick = { vm.addPodcast() },
-                            modifier = Modifier.size(
-                                IconButtonDefaults.largeContainerSize(
-                                    widthOption = IconButtonDefaults.IconButtonWidthOption.Wide
-                                )
-                            ),
-                            enabled = enableButton.value,
-                            shapes = IconButtonDefaults.shapes(
-                                shape = IconButtonDefaults.largeSquareShape,
-                                pressedShape = IconButtonDefaults.largePressedShape,
-                            )
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
                         ) {
                             Icon(
-                                modifier = Modifier.size(
-                                    IconButtonDefaults.largeIconSize
-                                ),
-                                imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
-                                contentDescription = stringResource(R.string.common_action_continue)
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = null
                             )
+                            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                            Text("Subscribe")
                         }
                     }
                 }

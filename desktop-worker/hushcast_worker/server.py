@@ -14,12 +14,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 
 from . import __version__
 from .audio import download_audio_streaming_sha256
 from .models import (
+    PIPELINE_VERSION,
     DesktopAnalysisBundle,
     DesktopHealthResponse,
     DesktopJobRequest,
@@ -27,6 +29,7 @@ from .models import (
     DesktopReadyEpisode,
     DesktopSearchRequest,
     DesktopSearchResponse,
+    JobStage,
     JobState,
 )
 from .pipeline import AnalysisBackend, detect_accelerator
@@ -40,6 +43,45 @@ AudioDownloader = Callable[
 
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _CTRL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]|\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _infer_stage(state: JobState, label: str) -> JobStage:
+    low = (label or "").lower()
+    if state == JobState.QUEUED:
+        return JobStage.QUEUED
+    if state == JobState.DOWNLOADING:
+        return JobStage.DOWNLOADING
+    if state == JobState.TRANSCRIBING:
+        if "decoding" in low:
+            return JobStage.DECODING
+        if "align" in low:
+            return JobStage.ALIGNING
+        if "speaker" in low:
+            return JobStage.SPEAKER_ID
+        return JobStage.TRANSCRIBING
+    if state == JobState.EMBEDDING:
+        return JobStage.EMBEDDING
+    if state == JobState.TAGGING:
+        if "chapter" in low or "summary" in low or "llm" in low:
+            return JobStage.SUMMARIZING
+        return JobStage.TAGGING
+    if state == JobState.READY:
+        return JobStage.READY
+    if state == JobState.CANCELLED:
+        return JobStage.CANCELLED
+    return JobStage.FAILED
+
+
+def _classify_error(exc: Exception) -> tuple[str, bool]:
+    msg = str(exc).lower()
+    name = type(exc).__name__
+    if "404" in msg or "403" in msg or "401" in msg or "400" in msg or "invalid" in msg or "ssrf" in msg:
+        return ("PERMANENT_FETCH_ERROR", False)
+    if "filenotfound" in name.lower() or "missing model" in msg:
+        return ("MISSING_MODELS", False)
+    if "timeout" in name.lower() or "timeout" in msg or "connect" in msg or "network" in msg or "502" in msg or "503" in msg:
+        return ("TRANSIENT_NETWORK_ERROR", True)
+    return (name.upper(), True)
 
 
 def _sanitize_log_text(text: str, max_len: int = 80) -> str:
@@ -136,6 +178,7 @@ def create_app(
     allow_insecure_no_auth: bool = False,
     allow_lan_feeds: bool = False,
     public_deployment: bool = False,
+    deployment_kind: Optional[str] = None,
     downloader: Optional[AudioDownloader] = None,
     on_state_change: Optional[Callable[[], None]] = None,
 ) -> FastAPI:
@@ -153,15 +196,26 @@ def create_app(
     else:
         active_downloader = downloader
 
-    app = FastAPI(title="HushCast Desktop Worker", version=__version__)
+    app = FastAPI(
+        title="HushCast Desktop Worker",
+        version=__version__,
+        docs_url=None if public_deployment else "/docs",
+        redoc_url=None if public_deployment else "/redoc",
+        openapi_url=None if public_deployment else "/openapi.json",
+    )
+    app.add_middleware(GZipMiddleware, minimum_size=1024)
+
     jobs: dict[str, DesktopJobResponse] = cache.load_jobs()
     for _jid, _job in list(jobs.items()):
         if _job.state not in (JobState.READY, JobState.FAILED, JobState.CANCELLED):
             jobs[_jid] = _job.model_copy(
                 update={
                     "state": JobState.FAILED,
+                    "stage": JobStage.FAILED,
                     "stageLabel": "Worker restarted",
                     "errorMessage": "Worker restarted before job completed; please retry",
+                    "errorCode": "WORKER_RESTARTED",
+                    "retryable": True,
                 }
             )
             cache.save_job(jobs[_jid])
@@ -170,12 +224,56 @@ def create_app(
     last_job_save_ts: dict[str, float] = {}
     job_tasks: dict[str, asyncio.Task] = {}
     job_cancel_events: dict[str, threading.Event] = {}
+    job_change_events: dict[str, asyncio.Event] = {}
+    gpu_queue_order: list[str] = []
+    active_gpu_job_id: Optional[str] = None
     jobs_in_thread: set[str] = set()
     background_tasks: set[asyncio.Task] = set()
-    job_semaphore = asyncio.Semaphore(1)
+    fetch_semaphore = asyncio.Semaphore(2)
+    gpu_semaphore = asyncio.Semaphore(1)
+    loop_ref: list[Optional[asyncio.AbstractEventLoop]] = [None]
+    caffeinate_proc: list[object] = [None]
+
+    def _maybe_start_caffeinate() -> None:
+        if sys.platform != "darwin" or caffeinate_proc[0] is not None:
+            return
+        try:
+            import os as _os
+            import subprocess
+            caffeinate_proc[0] = subprocess.Popen(
+                ["caffeinate", "-i", "-w", str(_os.getpid())],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+
+    def _maybe_stop_caffeinate() -> None:
+        proc = caffeinate_proc[0]
+        if proc is None:
+            return
+        active = any(
+            j.state not in (JobState.READY, JobState.FAILED, JobState.CANCELLED)
+            for j in jobs.values()
+        )
+        if not active:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            caffeinate_proc[0] = None
 
     class _JobCancelledError(Exception):
         pass
+
+    def _notify_job(job_id: str) -> None:
+        ev = job_change_events.get(job_id)
+        lp = loop_ref[0]
+        if ev is not None:
+            if lp is not None and lp.is_running():
+                lp.call_soon_threadsafe(ev.set)
+            else:
+                ev.set()
 
     def _update_job(job_id: str, **updates) -> None:
         if job_id not in jobs:
@@ -190,13 +288,19 @@ def create_app(
             JobState.CANCELLED,
         ):
             updates["progressPercent"] = max(current.progressPercent, int(updates["progressPercent"]))
+        if "stage" not in updates:
+            updates["stage"] = _infer_stage(new_state, updates.get("stageLabel", current.stageLabel))
+        updates["rev"] = current.rev + 1
         updated = current.model_copy(update=updates)
         jobs[job_id] = updated
+        _notify_job(job_id)
         now = time.monotonic()
         is_terminal = new_state in (JobState.READY, JobState.FAILED, JobState.CANCELLED)
         if is_terminal or new_state != current.state or (now - last_job_save_ts.get(job_id, 0.0)) >= 5.0:
             last_job_save_ts[job_id] = now
             cache.save_job(updated)
+        if is_terminal:
+            _maybe_stop_caffeinate()
 
     def _cancel_in_flight(jid: Optional[str]) -> None:
         if not jid or jid not in jobs:
@@ -206,7 +310,7 @@ def create_app(
             return
         if jid in job_cancel_events:
             job_cancel_events[jid].set()
-        _update_job(jid, state=JobState.CANCELLED, stageLabel="Superseded by new request")
+        _update_job(jid, state=JobState.CANCELLED, stage=JobStage.CANCELLED, stageLabel="Cancelled")
         task = job_tasks.get(jid)
         if task and not task.done() and jid not in jobs_in_thread:
             task.cancel()
@@ -235,15 +339,30 @@ def create_app(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Worker models or ML dependencies are not ready. Run 'hushcast-worker setup'.",
             )
+        cache_bytes, disk_free = await asyncio.to_thread(cache.cache_stats)
+        active_title = None
+        if active_gpu_job_id and active_gpu_job_id in jobs:
+            active_title = jobs[active_gpu_job_id].episodeId
+        models_loaded = bool(getattr(backend, "models_loaded", lambda: False)())
+        gpu_name = getattr(backend, "gpu_name", lambda: None)()
         return DesktopHealthResponse(
             status="ok",
             version=__version__,
+            apiVersion=2,
+            pipelineVersion=PIPELINE_VERSION,
             hostname="" if public_deployment else socket.gethostname(),
             accelerator=detect_accelerator(),
+            deployment=deployment_kind or ("modal" if public_deployment else "local"),
+            gpuName=gpu_name,
             modelsReady=ready,
+            modelsLoaded=models_loaded,
             whisperModel=backend.whisper_model_name(),
             chatModelReady=backend.chat_model_ready(),
             cachedEpisodes=len(cache.list_ready()),
+            queueDepth=len(gpu_queue_order),
+            activeJob=active_title,
+            cacheBytes=cache_bytes,
+            diskFreeBytes=disk_free,
         )
 
     @app.post(
@@ -252,6 +371,7 @@ def create_app(
         dependencies=[Depends(verify_auth)],
     )
     async def submit_job(req: DesktopJobRequest) -> DesktopJobResponse:
+        loop_ref[0] = asyncio.get_running_loop()
         if not backend.models_ready():
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -266,6 +386,7 @@ def create_app(
                     jobId=job_id,
                     episodeId=req.episodeId,
                     state=JobState.READY,
+                    stage=JobStage.READY,
                     progressPercent=100,
                     stageLabel="Cached on desktop",
                     fileSha256=existing_sha,
@@ -293,12 +414,16 @@ def create_app(
             if req.episodeId:
                 _cancel_in_flight(episode_to_job_id.get(req.episodeId))
         job_id = str(uuid.uuid4())
+        gpu_queue_order.append(job_id)
+        q_pos = max(0, len(gpu_queue_order) - (1 if active_gpu_job_id else 0))
         job = DesktopJobResponse(
             jobId=job_id,
             episodeId=req.episodeId,
             state=JobState.QUEUED,
+            stage=JobStage.QUEUED,
             progressPercent=0,
             stageLabel="Reprocessing on desktop" if req.force else "Queued on desktop",
+            queuePosition=q_pos,
         )
         jobs[job_id] = job
         last_job_save_ts[job_id] = time.monotonic()
@@ -309,6 +434,8 @@ def create_app(
 
         cancel_event = threading.Event()
         job_cancel_events[job_id] = cancel_event
+        job_change_events[job_id] = asyncio.Event()
+        _maybe_start_caffeinate()
 
         task = asyncio.create_task(_run_job(job_id, req, cancel_event))
         job_tasks[job_id] = task
@@ -318,85 +445,138 @@ def create_app(
             background_tasks.discard(t)
             job_tasks.pop(job_id, None)
             job_cancel_events.pop(job_id, None)
+            job_change_events.pop(job_id, None)
             jobs_in_thread.discard(job_id)
+            if job_id in gpu_queue_order:
+                gpu_queue_order.remove(job_id)
 
         task.add_done_callback(_cleanup)
         return job
 
+    def _call_backend_analyze(
+        *,
+        audio_path: Path,
+        file_sha256: str,
+        episode_id: str,
+        req: DesktopJobRequest,
+        on_progress,
+        cancel_event: threading.Event,
+    ):
+        import inspect
+
+        fn = backend.analyze_with_embeddings
+        sig = inspect.signature(fn)
+        kwargs: dict[str, object] = {
+            "audio_path": audio_path,
+            "file_sha256": file_sha256,
+            "episode_id": episode_id,
+            "feed_transcript_raw": req.feedTranscriptRaw,
+            "feed_transcript_mime": req.feedTranscriptMime,
+            "on_progress": on_progress,
+        }
+        if "cancel_event" in sig.parameters:
+            kwargs["cancel_event"] = cancel_event
+        if "language" in sig.parameters:
+            kwargs["language"] = req.language
+        if "feed_transcript_url" in sig.parameters:
+            kwargs["feed_transcript_url"] = req.feedTranscriptUrl
+        if "feed_chapters_url" in sig.parameters:
+            kwargs["feed_chapters_url"] = req.feedChaptersUrl
+        if "feed_chapters_type" in sig.parameters:
+            kwargs["feed_chapters_type"] = req.feedChaptersType
+        return fn(**kwargs)
+
     async def _run_job(job_id: str, req: DesktopJobRequest, cancel_event: threading.Event) -> None:
+        nonlocal active_gpu_job_id
         tmp_audio = cache.tmp_dir / f"{job_id}.part"
         cli_log = _JobConsoleLogger(job_id, req.title or req.episodeId)
         try:
-            async with job_semaphore:
-                if cancel_event.is_set() or (jobs.get(job_id) and jobs[job_id].state == JobState.CANCELLED):
-                    return
+            stage_req = (req.reprocessStage or "").strip().upper()
+            if req.force and stage_req in ("SUMMARY_CHAPTERS", "ALIGN_WORDS", "ADS_AND_SUMMARY") and hasattr(backend, "reprocess_bundle"):
+                async with gpu_semaphore:
+                    if cancel_event.is_set() or (jobs.get(job_id) and jobs[job_id].state == JobState.CANCELLED):
+                        return
+                    active_gpu_job_id = job_id
+                    if job_id in gpu_queue_order:
+                        gpu_queue_order.remove(job_id)
+                    try:
+                        existing_sha = cache.lookup_by_url(req.audioUrl, require_audio=False)
+                        existing_bundle = cache.get_bundle(existing_sha) if existing_sha else None
+                        audio_ok = (stage_req == "SUMMARY_CHAPTERS") or (existing_sha is not None and cache.has_audio(existing_sha))
+                        if existing_sha and existing_bundle is not None and audio_ok:
+                            cached_audio = cache.audio_path(existing_sha) if cache.has_audio(existing_sha) else None
+                            emb_path = cache.embeddings_path(existing_sha)
+                            existing_emb = None
+                            if emb_path.exists():
+                                try:
+                                    import numpy as np
+                                    existing_emb = np.load(emb_path, allow_pickle=False)
+                                except Exception:
+                                    existing_emb = None
 
-                stage_req = (req.reprocessStage or "").strip().upper()
-                if req.force and stage_req in ("SUMMARY_CHAPTERS", "ALIGN_WORDS", "ADS_AND_SUMMARY") and hasattr(backend, "reprocess_bundle"):
-                    existing_sha = cache.lookup_by_url(req.audioUrl, require_audio=False)
-                    existing_bundle = cache.get_bundle(existing_sha) if existing_sha else None
-                    audio_ok = (stage_req == "SUMMARY_CHAPTERS") or (existing_sha is not None and cache.has_audio(existing_sha))
-                    if existing_sha and existing_bundle is not None and audio_ok:
-                        cached_audio = cache.audio_path(existing_sha) if cache.has_audio(existing_sha) else None
-                        emb_path = cache.embeddings_path(existing_sha)
-                        existing_emb = None
-                        if emb_path.exists():
+                            def on_reprocess_progress(state: JobState, pct: int, stage_lbl: str) -> None:
+                                if cancel_event.is_set():
+                                    raise _JobCancelledError()
+                                cli_log.update(state, pct, stage_lbl)
+                                _update_job(
+                                    job_id,
+                                    state=state,
+                                    progressPercent=pct,
+                                    stageLabel=stage_lbl,
+                                    fileSha256=existing_sha,
+                                    queuePosition=0,
+                                )
+
+                            jobs_in_thread.add(job_id)
                             try:
-                                import numpy as np
-                                existing_emb = np.load(emb_path, allow_pickle=False)
-                            except Exception:
-                                existing_emb = None
+                                import inspect
+                                rep_kwargs: dict[str, object] = {
+                                    "stage": stage_req,
+                                    "existing_bundle": existing_bundle,
+                                    "audio_path": cached_audio,
+                                    "existing_embeddings": existing_emb,
+                                    "on_progress": on_reprocess_progress,
+                                }
+                                if "cancel_event" in inspect.signature(backend.reprocess_bundle).parameters:
+                                    rep_kwargs["cancel_event"] = cancel_event
+                                bundle, new_emb = await asyncio.to_thread(backend.reprocess_bundle, **rep_kwargs)
+                            finally:
+                                jobs_in_thread.discard(job_id)
 
-                        def on_reprocess_progress(state: JobState, pct: int, stage_lbl: str) -> None:
                             if cancel_event.is_set():
-                                raise _JobCancelledError()
-                            cli_log.update(state, pct, stage_lbl)
+                                return
+
+                            cache.save_reprocessed(
+                                sha256=existing_sha,
+                                bundle=bundle,
+                                embeddings=new_emb,
+                            )
+                            cli_log.finish(f"Reprocessed ({stage_req})")
                             _update_job(
                                 job_id,
-                                state=state,
-                                progressPercent=pct,
-                                stageLabel=stage_lbl,
+                                state=JobState.READY,
+                                stage=JobStage.READY,
+                                progressPercent=100,
+                                stageLabel=f"Ready ({stage_req})",
                                 fileSha256=existing_sha,
+                                queuePosition=0,
                             )
-
-                        jobs_in_thread.add(job_id)
-                        try:
-                            bundle, new_emb = await asyncio.to_thread(
-                                backend.reprocess_bundle,
-                                stage=stage_req,
-                                existing_bundle=existing_bundle,
-                                audio_path=cached_audio,
-                                existing_embeddings=existing_emb,
-                                on_progress=on_reprocess_progress,
-                            )
-                        finally:
-                            jobs_in_thread.discard(job_id)
-
-                        if cancel_event.is_set():
+                            if on_state_change:
+                                await asyncio.to_thread(on_state_change)
                             return
+                    finally:
+                        if active_gpu_job_id == job_id:
+                            active_gpu_job_id = None
 
-                        cache.bundle_path(existing_sha).write_text(
-                            bundle.model_dump_json(), encoding="utf-8"
-                        )
-                        if new_emb is not None:
-                            import numpy as np
-                            np.save(cache.embeddings_path(existing_sha), new_emb, allow_pickle=False)
-                        cli_log.finish(f"Reprocessed ({stage_req})")
-                        _update_job(
-                            job_id,
-                            state=JobState.READY,
-                            progressPercent=100,
-                            stageLabel=f"Ready ({stage_req})",
-                            fileSha256=existing_sha,
-                        )
-                        if on_state_change:
-                            await asyncio.to_thread(on_state_change)
-                        return
+            async with fetch_semaphore:
+                if cancel_event.is_set() or (jobs.get(job_id) and jobs[job_id].state == JobState.CANCELLED):
+                    return
 
                 cli_log.update(JobState.DOWNLOADING, 5, "Downloading episode audio…")
                 _update_job(
                     job_id,
                     state=JobState.DOWNLOADING,
+                    stage=JobStage.DOWNLOADING,
                     progressPercent=5,
                     stageLabel="Downloading episode on desktop",
                 )
@@ -413,97 +593,141 @@ def create_app(
                         _update_job(
                             job_id,
                             state=JobState.DOWNLOADING,
+                            stage=JobStage.DOWNLOADING,
                             progressPercent=pct,
+                            stageProgress=dl_pct,
                             stageLabel=f"Downloading ({dl_pct}%)",
                         )
 
                 sha256, content_type = await active_downloader(req.audioUrl, tmp_audio, on_dl_bytes)
+                if cancel_event.is_set():
+                    tmp_audio.unlink(missing_ok=True)
+                    return
+
+                # Stage audio early (V5) and fix B11 (keep freshly downloaded audio if missing on cache hit)
+                staged_audio = cache.stage_audio(
+                    sha256=sha256,
+                    audio_tmp_path=tmp_audio,
+                    content_type=content_type,
+                    audio_url=req.audioUrl,
+                    title=req.title,
+                    episode_id=req.episodeId,
+                )
 
                 if not req.force and cache.has_bundle(sha256, require_current_pipeline=True):
-                    tmp_audio.unlink(missing_ok=True)
+                    if job_id in gpu_queue_order:
+                        gpu_queue_order.remove(job_id)
                     cli_log.finish(f"Matched cached SHA-256 ({sha256[:12]})")
                     _update_job(
                         job_id,
                         state=JobState.READY,
+                        stage=JobStage.READY,
                         progressPercent=100,
                         stageLabel="Ready (matched existing SHA-256)",
                         fileSha256=sha256,
+                        queuePosition=0,
                     )
                     if on_state_change:
                         await asyncio.to_thread(on_state_change)
                     return
 
-                def on_ml_progress(state: JobState, pct: int, stage: str) -> None:
-                    if cancel_event.is_set():
-                        raise _JobCancelledError()
-                    cli_log.update(state, pct, stage)
-                    _update_job(
-                        job_id,
-                        state=state,
-                        progressPercent=pct,
-                        stageLabel=stage,
-                        fileSha256=sha256,
-                    )
-
-                jobs_in_thread.add(job_id)
-                try:
-                    bundle, embeddings = await asyncio.to_thread(
-                        backend.analyze_with_embeddings,
-                        audio_path=tmp_audio,
-                        file_sha256=sha256,
-                        episode_id=req.episodeId,
-                        feed_transcript_raw=req.feedTranscriptRaw,
-                        feed_transcript_mime=req.feedTranscriptMime,
-                        on_progress=on_ml_progress,
-                    )
-                finally:
-                    jobs_in_thread.discard(job_id)
-
-                if cancel_event.is_set():
-                    tmp_audio.unlink(missing_ok=True)
-                    return
-
-                cache.save_episode(
-                    sha256=sha256,
-                    audio_tmp_path=tmp_audio,
-                    bundle=bundle,
-                    audio_url=req.audioUrl,
-                    title=req.title,
-                    content_type=content_type,
-                    embeddings=embeddings,
-                )
-
-                dur_m = int(bundle.durationSec // 60)
-                dur_s = int(bundle.durationSec % 60)
-                cli_log.finish(
-                    f"{dur_m}m{dur_s:02d}s audio • {len(bundle.wordIndexBlob.segments)} segments • "
-                    f"{len(bundle.adSegments)} ads • {len(bundle.chapters)} chapters"
-                )
                 _update_job(
                     job_id,
-                    state=JobState.READY,
-                    progressPercent=100,
-                    stageLabel="Ready",
                     fileSha256=sha256,
+                    stageLabel="Waiting for GPU worker",
                 )
-                if on_state_change:
-                    await asyncio.to_thread(on_state_change)
+
+            async with gpu_semaphore:
+                if cancel_event.is_set() or (jobs.get(job_id) and jobs[job_id].state == JobState.CANCELLED):
+                    return
+                active_gpu_job_id = job_id
+                if job_id in gpu_queue_order:
+                    gpu_queue_order.remove(job_id)
+                try:
+                    def on_ml_progress(state: JobState, pct: int, stage: str) -> None:
+                        if cancel_event.is_set():
+                            raise _JobCancelledError()
+                        cli_log.update(state, pct, stage)
+                        eta_fn = getattr(backend, "estimate_eta_sec", None)
+                        eta_val = eta_fn(pct) if callable(eta_fn) else None
+                        _update_job(
+                            job_id,
+                            state=state,
+                            progressPercent=pct,
+                            stageLabel=stage,
+                            fileSha256=sha256,
+                            queuePosition=0,
+                            etaSec=eta_val,
+                        )
+
+                    jobs_in_thread.add(job_id)
+                    try:
+                        bundle, embeddings = await asyncio.to_thread(
+                            _call_backend_analyze,
+                            audio_path=staged_audio,
+                            file_sha256=sha256,
+                            episode_id=req.episodeId,
+                            req=req,
+                            on_progress=on_ml_progress,
+                            cancel_event=cancel_event,
+                        )
+                    finally:
+                        jobs_in_thread.discard(job_id)
+
+                    if cancel_event.is_set():
+                        return
+
+                    cache.save_episode(
+                        sha256=sha256,
+                        audio_tmp_path=None,
+                        bundle=bundle,
+                        audio_url=req.audioUrl,
+                        title=req.title,
+                        content_type=content_type,
+                        embeddings=embeddings,
+                    )
+
+                    dur_m = int(bundle.durationSec // 60)
+                    dur_s = int(bundle.durationSec % 60)
+                    cli_log.finish(
+                        f"{dur_m}m{dur_s:02d}s audio • {len(bundle.wordIndexBlob.segments)} segments • "
+                        f"{len(bundle.adSegments)} ads • {len(bundle.chapters)} chapters"
+                    )
+                    _update_job(
+                        job_id,
+                        state=JobState.READY,
+                        stage=JobStage.READY,
+                        progressPercent=100,
+                        stageLabel="Ready",
+                        fileSha256=sha256,
+                        queuePosition=0,
+                        etaSec=0,
+                    )
+                    if on_state_change:
+                        await asyncio.to_thread(on_state_change)
+                finally:
+                    if active_gpu_job_id == job_id:
+                        active_gpu_job_id = None
         except _JobCancelledError:
             tmp_audio.unlink(missing_ok=True)
-            _update_job(job_id, state=JobState.CANCELLED, stageLabel="Cancelled")
+            _update_job(job_id, state=JobState.CANCELLED, stage=JobStage.CANCELLED, stageLabel="Cancelled")
         except asyncio.CancelledError:
             tmp_audio.unlink(missing_ok=True)
-            _update_job(job_id, state=JobState.CANCELLED, stageLabel="Cancelled")
+            _update_job(job_id, state=JobState.CANCELLED, stage=JobStage.CANCELLED, stageLabel="Cancelled")
             raise
         except Exception as exc:
             tmp_audio.unlink(missing_ok=True)
             logger.exception("Job %s failed", job_id)
             cli_log.fail(f"{type(exc).__name__}: {exc}")
+            err_code, is_retryable = _classify_error(exc)
             _update_job(
                 job_id,
                 state=JobState.FAILED,
+                stage=JobStage.FAILED,
                 stageLabel="Failed",
                 errorMessage=f"{type(exc).__name__}: {exc}",
+                errorCode=err_code,
+                retryable=is_retryable,
             )
 
     @app.get(
@@ -511,7 +735,11 @@ def create_app(
         response_model=DesktopJobResponse,
         dependencies=[Depends(verify_auth)],
     )
-    async def get_job(job_id: str) -> DesktopJobResponse:
+    async def get_job(
+        job_id: str,
+        waitMs: int = Query(default=0, ge=0, le=30000),
+        sinceRev: int = Query(default=0, ge=0),
+    ) -> DesktopJobResponse:
         job = jobs.get(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -522,10 +750,34 @@ def create_app(
             _update_job(
                 job_id,
                 state=JobState.FAILED,
+                stage=JobStage.FAILED,
                 stageLabel="Worker task stopped",
                 errorMessage="Worker task is no longer running; please retry",
+                errorCode="WORKER_TASK_STOPPED",
+                retryable=True,
             )
             return jobs[job_id]
+
+        if (
+            waitMs > 0
+            and job.rev <= sinceRev
+            and job.state not in (JobState.READY, JobState.FAILED, JobState.CANCELLED)
+        ):
+            ev = job_change_events.get(job_id)
+            if ev is not None:
+                ev.clear()
+                job = jobs.get(job_id)
+                if job and job.rev <= sinceRev and job.state not in (JobState.READY, JobState.FAILED, JobState.CANCELLED):
+                    try:
+                        await asyncio.wait_for(ev.wait(), timeout=waitMs / 1000.0)
+                    except asyncio.TimeoutError:
+                        pass
+                    job = jobs.get(job_id) or job
+
+        if job_id in gpu_queue_order:
+            q_pos = gpu_queue_order.index(job_id) + (1 if active_gpu_job_id else 0)
+            if job.queuePosition != q_pos:
+                job = job.model_copy(update={"queuePosition": q_pos})
         return job
 
     @app.delete(
@@ -541,7 +793,7 @@ def create_app(
             return job
         if job_id in job_cancel_events:
             job_cancel_events[job_id].set()
-        _update_job(job_id, state=JobState.CANCELLED, stageLabel="Cancelled")
+        _update_job(job_id, state=JobState.CANCELLED, stage=JobStage.CANCELLED, stageLabel="Cancelled")
         task = job_tasks.get(job_id)
         if task and not task.done() and job_id not in jobs_in_thread:
             task.cancel()
@@ -557,15 +809,18 @@ def create_app(
 
     @app.get(
         "/v1/episodes/{sha256}/bundle",
-        response_model=DesktopAnalysisBundle,
         dependencies=[Depends(verify_auth)],
     )
-    async def get_bundle(sha256: str) -> DesktopAnalysisBundle:
+    async def get_bundle(sha256: str) -> FileResponse:
         clean_sha = _validate_sha256(sha256)
-        bundle = cache.get_bundle(clean_sha)
-        if not bundle:
+        bundle_path = cache.bundle_path(clean_sha)
+        if not bundle_path.exists():
             raise HTTPException(status_code=404, detail="Bundle not found")
-        return bundle
+        return FileResponse(
+            path=bundle_path,
+            media_type="application/json",
+            headers={"ETag": f'"{clean_sha}"'},
+        )
 
     @app.get(
         "/v1/episodes/{sha256}/audio",
@@ -576,10 +831,14 @@ def create_app(
         audio = cache.audio_path(clean_sha)
         if not audio.exists():
             raise HTTPException(status_code=404, detail="Audio not found")
+        cache.touch_audio(clean_sha)
         return FileResponse(
             path=audio,
             media_type=cache.get_content_type(clean_sha),
-            headers={"X-HushCast-Sha256": clean_sha},
+            headers={
+                "X-HushCast-Sha256": clean_sha,
+                "ETag": f'"{clean_sha}"',
+            },
         )
 
     @app.post(

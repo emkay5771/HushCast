@@ -117,7 +117,32 @@ data class EpisodeAnalysisStatusEntity(
     val peakRssMb: Int = 0,
     val analysisDurationMs: Long = 0L,
     val updatedAt: Long = System.currentTimeMillis(),
-    val encoderDelayMs: Int = 0
+    val encoderDelayMs: Int = 0,
+    val pipelineVersion: Int = 1,
+    val rulesVersion: Int = 0
+)
+
+@Entity(
+    tableName = "episode_chunk_checkpoints",
+    primaryKeys = ["fileSha256", "chunkIndex"]
+)
+data class EpisodeChunkCheckpointEntity(
+    val fileSha256: String,
+    val chunkIndex: Int,
+    val chunkStartSec: Double,
+    val wordsJson: String,
+    val segmentsJson: String
+)
+
+@Entity(
+    tableName = "episode_offset_map",
+    indices = [Index("episodeId")]
+)
+data class EpisodeOffsetMapEntity(
+    @PrimaryKey val fileSha256: String,
+    val episodeId: String,
+    val stretchesJson: String,
+    val createdAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "episode_insights")
@@ -273,6 +298,9 @@ interface AutoMuteDao {
     @Query("SELECT * FROM podcast_ad_policy WHERE podcastOrigin = :origin LIMIT 1")
     fun observePodcastAdPolicy(origin: String): Flow<PodcastAdPolicyEntity?>
 
+    @Query("DELETE FROM podcast_ad_policy WHERE podcastOrigin = :origin")
+    suspend fun deletePodcastAdPolicy(origin: String)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertStatus(status: EpisodeAnalysisStatusEntity)
 
@@ -309,6 +337,42 @@ interface AutoMuteDao {
     @Query("DELETE FROM ad_segments WHERE episodeId = :episodeId")
     suspend fun deleteAdSegmentsByEpisode(episodeId: String)
 
+    @Query("DELETE FROM mute_segments WHERE episodeId = :episodeId AND fileSha256 != :keepSha256")
+    suspend fun deleteMuteSegmentsForOtherHashes(episodeId: String, keepSha256: String)
+
+    @Query("DELETE FROM ad_segments WHERE episodeId = :episodeId AND fileSha256 != :keepSha256")
+    suspend fun deleteAdSegmentsForOtherHashes(episodeId: String, keepSha256: String)
+
+    @androidx.room.Transaction
+    suspend fun clearAnalysisForOtherHashes(episodeId: String, keepSha256: String) {
+        deleteMuteSegmentsForOtherHashes(episodeId, keepSha256)
+        deleteAdSegmentsForOtherHashes(episodeId, keepSha256)
+    }
+
+    @Query("SELECT * FROM episode_chunk_checkpoints WHERE fileSha256 = :sha256 ORDER BY chunkIndex ASC")
+    suspend fun getCheckpoints(sha256: String): List<EpisodeChunkCheckpointEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertCheckpoint(entity: EpisodeChunkCheckpointEntity)
+
+    @Query("DELETE FROM episode_chunk_checkpoints WHERE fileSha256 = :sha256")
+    suspend fun deleteCheckpoints(sha256: String)
+
+    @Query("SELECT * FROM episode_offset_map WHERE fileSha256 = :sha256 LIMIT 1")
+    suspend fun getOffsetMap(sha256: String): EpisodeOffsetMapEntity?
+
+    @Query("SELECT * FROM episode_offset_map WHERE episodeId = :episodeId ORDER BY createdAt DESC LIMIT 1")
+    suspend fun getOffsetMapByEpisode(episodeId: String): EpisodeOffsetMapEntity?
+
+    @Query("SELECT * FROM episode_offset_map WHERE episodeId = :episodeId ORDER BY createdAt DESC LIMIT 1")
+    fun observeOffsetMapByEpisode(episodeId: String): Flow<EpisodeOffsetMapEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertOffsetMap(entity: EpisodeOffsetMapEntity)
+
+    @Query("DELETE FROM episode_offset_map WHERE episodeId = :episodeId")
+    suspend fun deleteOffsetMapsByEpisode(episodeId: String)
+
     @androidx.room.Transaction
     suspend fun clearAnalysisForEpisode(episodeId: String) {
         deleteStatusByEpisode(episodeId)
@@ -316,6 +380,7 @@ interface AutoMuteDao {
         deleteInsightsByEpisode(episodeId)
         deleteMuteSegmentsByEpisode(episodeId)
         deleteAdSegmentsByEpisode(episodeId)
+        deleteOffsetMapsByEpisode(episodeId)
     }
 
     @Query("DELETE FROM episode_analysis_status WHERE episodeId = :episodeId")
@@ -363,9 +428,11 @@ interface AutoMuteDao {
         MuteRuleEntity::class,
         PodcastAdPolicyEntity::class,
         EpisodeAnalysisStatusEntity::class,
-        EpisodeInsightsEntity::class
+        EpisodeInsightsEntity::class,
+        EpisodeChunkCheckpointEntity::class,
+        EpisodeOffsetMapEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class AutoMuteDatabase : RoomDatabase() {
@@ -411,13 +478,44 @@ abstract class AutoMuteDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `episode_analysis_status` ADD COLUMN `pipelineVersion` INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE `episode_analysis_status` ADD COLUMN `rulesVersion` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `episode_chunk_checkpoints` (
+                        `fileSha256` TEXT NOT NULL,
+                        `chunkIndex` INTEGER NOT NULL,
+                        `chunkStartSec` REAL NOT NULL,
+                        `wordsJson` TEXT NOT NULL,
+                        `segmentsJson` TEXT NOT NULL,
+                        PRIMARY KEY(`fileSha256`, `chunkIndex`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `episode_offset_map` (
+                        `fileSha256` TEXT NOT NULL,
+                        `episodeId` TEXT NOT NULL,
+                        `stretchesJson` TEXT NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`fileSha256`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_episode_offset_map_episodeId` ON `episode_offset_map` (`episodeId`)")
+            }
+        }
+
         fun getInstance(context: Context): AutoMuteDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     AutoMuteDatabase::class.java,
                     "hushcast_automute.db"
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { INSTANCE = it }
             }
         }
 

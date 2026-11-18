@@ -32,16 +32,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.11'
 
-      - name: Install dependencies and run pytest
+      - name: Install locked dependencies and run pytest
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-          pytest
+          uv sync --frozen --extra dev
+          uv run --frozen --extra dev pytest
 
   deploy:
     name: Deploy to Modal
@@ -55,13 +54,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
         with:
           python-version: '3.11'
 
-      - name: Install Modal CLI
-        run: python -m pip install --upgrade pip "modal==1.6.4"
+      - name: Install locked Modal CLI
+        run: uv sync --frozen --group deploy
 
       - name: Deploy Modal worker
         env:
@@ -72,4 +71,4 @@ jobs:
             echo "MODAL_TOKEN_ID / MODAL_TOKEN_SECRET not configured; skipping Modal deploy."
             exit 0
           fi
-          modal deploy modal_app.py
+          uv run --frozen --group deploy modal deploy modal_app.py

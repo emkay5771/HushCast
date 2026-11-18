@@ -197,8 +197,11 @@ def generate_chapters_and_summary(
     ad_segments: list[AdSegmentDto],
     chat_model_path: Optional[Path] = None,
     audio_path: Optional[Path] = None,
+    has_feed_chapters: bool = False,
+    on_token: Optional[Any] = None,
 ) -> tuple[Optional[str], list[DesktopChapterDto]]:
-    embedded_chapters = extract_embedded_chapters(audio_path)
+    embedded_chapters = [] if has_feed_chapters else extract_embedded_chapters(audio_path)
+    use_existing_chapters = has_feed_chapters or len(embedded_chapters) >= 2
 
     non_ad_indices = [
         i for i, s in enumerate(segments)
@@ -213,50 +216,53 @@ def generate_chapters_and_summary(
         0.0,
         float(segments[non_ad_indices[-1]].end) - float(segments[non_ad_indices[0]].start),
     )
-    win = min(6, max(2, m // 12))
-    boundaries: list[int] = [non_ad_indices[0]]
-    if m > win * 2 + 2:
-        sims: list[tuple[int, float]] = []
-        for k in range(win, m - win):
-            left = np.mean(sub_emb[k - win : k], axis=0)
-            right = np.mean(sub_emb[k : k + win], axis=0)
-            ln = float(np.linalg.norm(left))
-            rn = float(np.linalg.norm(right))
-            sim = float(np.dot(left / (ln + 1e-12), right / (rn + 1e-12)))
-            sims.append((k, sim))
 
-        sims.sort(key=lambda x: x[1])
-        max_chapters = min(9, max(4, int(round(total_dur_sec / 360.0)) + 1))
-        min_gap_sec = max(120.0, min(240.0, total_dur_sec / max(1, max_chapters + 2)))
-        selected_times: list[float] = [segments[non_ad_indices[0]].start]
-        for k, _ in sims:
-            seg_idx = non_ad_indices[k]
-            t = segments[seg_idx].start
-            if all(abs(t - st) >= min_gap_sec for st in selected_times):
-                boundaries.append(seg_idx)
-                selected_times.append(t)
-                if len(boundaries) >= max_chapters:
-                    break
-        boundaries.sort()
+    boundaries: list[int] = [non_ad_indices[0]]
+    if not use_existing_chapters:
+        win = min(6, max(2, m // 12))
+        if m > win * 2 + 2:
+            sims: list[tuple[int, float]] = []
+            for k in range(win, m - win):
+                left = np.mean(sub_emb[k - win : k], axis=0)
+                right = np.mean(sub_emb[k : k + win], axis=0)
+                ln = float(np.linalg.norm(left))
+                rn = float(np.linalg.norm(right))
+                sim = float(np.dot(left / (ln + 1e-12), right / (rn + 1e-12)))
+                sims.append((k, sim))
+
+            sims.sort(key=lambda x: x[1])
+            max_chapters = min(9, max(4, int(round(total_dur_sec / 360.0)) + 1))
+            min_gap_sec = max(120.0, min(240.0, total_dur_sec / max(1, max_chapters + 2)))
+            selected_times: list[float] = [segments[non_ad_indices[0]].start]
+            for k, _ in sims:
+                seg_idx = non_ad_indices[k]
+                t = segments[seg_idx].start
+                if all(abs(t - st) >= min_gap_sec for st in selected_times):
+                    boundaries.append(seg_idx)
+                    selected_times.append(t)
+                    if len(boundaries) >= max_chapters:
+                        break
+            boundaries.sort()
 
     chapter_texts_list: list[list[str]] = []
     all_chunk_token_sets: list[set[str]] = []
-    for b_pos, start_idx in enumerate(boundaries):
-        end_idx = boundaries[b_pos + 1] if b_pos + 1 < len(boundaries) else len(segments)
-        txts = [
-            segments[idx].text
-            for idx in range(start_idx, end_idx)
-            if not _is_inside_ad(segments[idx].start, segments[idx].end, ad_segments)
-        ]
-        chapter_texts_list.append(txts)
-        tset: set[str] = set()
-        for txt in txts:
-            toks = _extract_chapter_tokens(txt)
-            for ti, (low, _) in enumerate(toks):
-                tset.add(low)
-                if ti + 1 < len(toks):
-                    tset.add(f"{low} {toks[ti + 1][0]}")
-        all_chunk_token_sets.append(tset)
+    if not use_existing_chapters:
+        for b_pos, start_idx in enumerate(boundaries):
+            end_idx = boundaries[b_pos + 1] if b_pos + 1 < len(boundaries) else len(segments)
+            txts = [
+                segments[idx].text
+                for idx in range(start_idx, end_idx)
+                if not _is_inside_ad(segments[idx].start, segments[idx].end, ad_segments)
+            ]
+            chapter_texts_list.append(txts)
+            tset: set[str] = set()
+            for txt in txts:
+                toks = _extract_chapter_tokens(txt)
+                for ti, (low, _) in enumerate(toks):
+                    tset.add(low)
+                    if ti + 1 < len(toks):
+                        tset.add(f"{low} {toks[ti + 1][0]}")
+            all_chunk_token_sets.append(tset)
 
     chapter_starts_ms: list[int] = []
     for b_pos, start_idx in enumerate(boundaries):
@@ -267,27 +273,39 @@ def generate_chapters_and_summary(
 
     if chat_model_path is not None and chat_model_path.exists():
         try:
-            chapter_blocks: list[str] = []
-            for b_pos, txts in enumerate(chapter_texts_list):
-                non_empty = [t.strip() for t in txts if t.strip()]
-                if non_empty:
-                    step_c = max(1, len(non_empty) // 5)
-                    excerpt = " ".join(non_empty[::step_c][:5])[:420]
-                else:
-                    excerpt = ""
-                start_sec = chapter_starts_ms[b_pos] // 1000
-                chapter_blocks.append(
-                    f"Chapter {b_pos + 1} [{start_sec // 60:02d}:{start_sec % 60:02d}]: {excerpt}"
+            if use_existing_chapters:
+                # Chapters already provided by feed or embedded tags; ask LLM only for summary (R1)
+                non_ad_texts = [segments[i].text.strip() for i in non_ad_indices if segments[i].text.strip()]
+                step_s = max(1, len(non_ad_texts) // 18)
+                excerpt_text = " ".join(non_ad_texts[::step_s][:18])[:3200]
+                prompt = (
+                    "Summarize this podcast episode in 2-3 concise sentences based on the excerpts below.\n"
+                    'Return ONLY valid JSON: {"summary": "..."}\n\n'
+                    f"Excerpts:\n{excerpt_text}\n\nJSON:"
                 )
-            chapters_prompt_text = "\n".join(chapter_blocks)
-            n_ch = len(boundaries)
-            prompt = (
-                "Summarize this podcast episode in 2-3 concise sentences, and write a distinct "
-                f"short 3-7 word topic title for each of the {n_ch} chapters below.\n"
-                "Return ONLY valid JSON: "
-                '{"summary": "...", "titles": ["Title 1", "Title 2"]}\n\n'
-                f"Chapters:\n{chapters_prompt_text}\n\nJSON:"
-            )
+            else:
+                chapter_blocks: list[str] = []
+                for b_pos, txts in enumerate(chapter_texts_list):
+                    non_empty = [t.strip() for t in txts if t.strip()]
+                    if non_empty:
+                        step_c = max(1, len(non_empty) // 5)
+                        excerpt = " ".join(non_empty[::step_c][:5])[:420]
+                    else:
+                        excerpt = ""
+                    start_sec = chapter_starts_ms[b_pos] // 1000
+                    chapter_blocks.append(
+                        f"Chapter {b_pos + 1} [{start_sec // 60:02d}:{start_sec % 60:02d}]: {excerpt}"
+                    )
+                chapters_prompt_text = "\n".join(chapter_blocks)
+                n_ch = len(boundaries)
+                prompt = (
+                    "Summarize this podcast episode in 2-3 concise sentences, and write a distinct "
+                    f"short 3-7 word topic title for each of the {n_ch} chapters below.\n"
+                    "Return ONLY valid JSON: "
+                    '{"summary": "...", "titles": ["Title 1", "Title 2"]}\n\n'
+                    f"Chapters:\n{chapters_prompt_text}\n\nJSON:"
+                )
+
             chat_llm = _get_chat_llm(chat_model_path)
             with _CHAT_LLM_LOCK:
                 if hasattr(chat_llm, "create_chat_completion"):
@@ -301,20 +319,42 @@ def generate_chapters_and_summary(
                         },
                         {"role": "user", "content": prompt},
                     ]
+                    max_toks = 256 if use_existing_chapters else 768
                     try:
                         out = chat_llm.create_chat_completion(
                             messages=messages,
-                            max_tokens=768,
+                            max_tokens=max_toks,
                             temperature=0.2,
                             response_format={"type": "json_object"},
+                            stream=on_token is not None,
                         )
                     except TypeError:
-                        out = chat_llm.create_chat_completion(
-                            messages=messages,
-                            max_tokens=768,
-                            temperature=0.2,
-                        )
-                    raw_text = out["choices"][0]["message"]["content"].strip()
+                        try:
+                            out = chat_llm.create_chat_completion(
+                                messages=messages,
+                                max_tokens=max_toks,
+                                temperature=0.2,
+                                response_format={"type": "json_object"},
+                            )
+                        except TypeError:
+                            out = chat_llm.create_chat_completion(
+                                messages=messages,
+                                max_tokens=max_toks,
+                                temperature=0.2,
+                            )
+                    if isinstance(out, dict):
+                        raw_text = out["choices"][0]["message"]["content"].strip()
+                    else:
+                        parts_stream: list[str] = []
+                        tok_count = 0
+                        for chunk in out:
+                            delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            if delta:
+                                parts_stream.append(delta)
+                                tok_count += 1
+                                if on_token is not None:
+                                    on_token(tok_count)
+                        raw_text = "".join(parts_stream).strip()
                 else:
                     out = chat_llm.create_completion(prompt, max_tokens=768, temperature=0.2)
                     raw_text = out["choices"][0]["text"].strip()
@@ -325,33 +365,37 @@ def generate_chapters_and_summary(
                 json_candidate = re.sub(r",\s*([}\]])", r"\1", m_json.group(0))
                 parsed = json.loads(json_candidate)
                 llm_summary = str(parsed.get("summary") or "").strip() or None
-                raw_titles = parsed.get("titles") or []
-                seen_titles: set[str] = set()
-                llm_chapters: list[DesktopChapterDto] = []
-                for b_pos in range(n_ch):
-                    candidate = (
-                        str(raw_titles[b_pos]).strip()[:80]
-                        if b_pos < len(raw_titles)
-                        else ""
-                    )
-                    norm_cand = candidate.lower()
-                    if not candidate or norm_cand in seen_titles:
-                        candidate = _name_chapter_from_tfidf(
-                            chapter_texts_list[b_pos], all_chunk_token_sets, b_pos
+                if use_existing_chapters:
+                    if llm_summary:
+                        return llm_summary, embedded_chapters
+                else:
+                    n_ch = len(boundaries)
+                    raw_titles = parsed.get("titles") or []
+                    seen_titles: set[str] = set()
+                    llm_chapters: list[DesktopChapterDto] = []
+                    for b_pos in range(n_ch):
+                        candidate = (
+                            str(raw_titles[b_pos]).strip()[:80]
+                            if b_pos < len(raw_titles)
+                            else ""
                         )
-                    if candidate.lower() in seen_titles:
-                        candidate = f"{candidate[:72]} ({b_pos + 1})"
-                    seen_titles.add(candidate.lower())
-                    llm_chapters.append(
-                        DesktopChapterDto(
-                            startMs=chapter_starts_ms[b_pos],
-                            title=candidate,
-                            source="auto",
+                        norm_cand = candidate.lower()
+                        if not candidate or norm_cand in seen_titles:
+                            candidate = _name_chapter_from_tfidf(
+                                chapter_texts_list[b_pos], all_chunk_token_sets, b_pos
+                            )
+                        if candidate.lower() in seen_titles:
+                            candidate = f"{candidate[:72]} ({b_pos + 1})"
+                        seen_titles.add(candidate.lower())
+                        llm_chapters.append(
+                            DesktopChapterDto(
+                                startMs=chapter_starts_ms[b_pos],
+                                title=candidate,
+                                source="auto",
+                            )
                         )
-                    )
-                final_chapters = embedded_chapters if len(embedded_chapters) >= 2 else llm_chapters
-                if llm_summary and final_chapters:
-                    return llm_summary, final_chapters
+                    if llm_summary and llm_chapters:
+                        return llm_summary, llm_chapters
                 logger.warning("Chat model JSON missing summary/chapters; raw=%r", raw_text[:240])
             else:
                 logger.warning("Chat model returned non-JSON output; raw=%r", raw_text[:240])
@@ -362,6 +406,8 @@ def generate_chapters_and_summary(
 
     if embedded_chapters:
         chapters = embedded_chapters
+    elif use_existing_chapters:
+        chapters = []
     else:
         chapters = []
         for b_pos in range(len(boundaries)):

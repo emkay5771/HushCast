@@ -62,11 +62,6 @@ class PodcastPreviewViewModel(
     fun add(
         force: Boolean = false
     ) {
-        if(!force && seedColor == null) {
-            showIgnoreSeedColorDialog = true
-            return
-        }
-
         viewModelScope.launch {
             state = PodcastPreviewState.Loading()
 

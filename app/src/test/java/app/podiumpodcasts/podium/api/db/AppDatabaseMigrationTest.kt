@@ -55,4 +55,34 @@ class AppDatabaseMigrationTest {
         assertTrue(executed.any { it.contains("podcastEpisodeDownload_new") && it.contains("ON DELETE CASCADE") })
         assertTrue(executed.any { it.contains("ALTER TABLE `podcastEpisodeDownload_new` RENAME TO `podcastEpisodeDownload`") })
     }
+
+    @Test
+    fun `migration 18 to 19 adds transcript and chapters columns to podcastEpisode`() {
+        val executed = mutableListOf<String>()
+        val db = recordingDb(executed)
+
+        assertEquals(18, MIGRATION_18_19.startVersion)
+        assertEquals(19, MIGRATION_18_19.endVersion)
+
+        MIGRATION_18_19.migrate(db)
+
+        assertTrue(executed.any { it.contains("ADD COLUMN `transcriptUrl`") })
+        assertTrue(executed.any { it.contains("ADD COLUMN `transcriptType`") })
+        assertTrue(executed.any { it.contains("ADD COLUMN `chaptersUrl`") })
+        assertTrue(executed.any { it.contains("ADD COLUMN `chaptersType`") })
+    }
+
+    @Test
+    fun `migration 19 to 20 creates episodeChapter table`() {
+        val executed = mutableListOf<String>()
+        val db = recordingDb(executed)
+
+        assertEquals(19, MIGRATION_19_20.startVersion)
+        assertEquals(20, MIGRATION_19_20.endVersion)
+
+        MIGRATION_19_20.migrate(db)
+
+        assertTrue(executed.any { it.contains("CREATE TABLE IF NOT EXISTS `episodeChapter`") })
+        assertTrue(executed.any { it.contains("index_episodeChapter_episodeId") })
+    }
 }

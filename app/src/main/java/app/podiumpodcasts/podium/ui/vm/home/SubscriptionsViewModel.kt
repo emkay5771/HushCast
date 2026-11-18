@@ -28,7 +28,7 @@ class SubscriptionsViewModel(
     val subscriptionsState: StateFlow<List<PodcastSubscriptionBundle>?> =
         subscriptionsFlow.stateIn(
             scope = viewModelScope,
-            started = SharingStarted.Eagerly,
+            started = SharingStarted.WhileSubscribed(5_000),
             initialValue = null
         )
 
@@ -37,7 +37,7 @@ class SubscriptionsViewModel(
             .map { list -> list.associate { it.origin to it.count } }
             .stateIn(
                 scope = viewModelScope,
-                started = SharingStarted.Eagerly,
+                started = SharingStarted.WhileSubscribed(5_000),
                 initialValue = emptyMap()
             )
 

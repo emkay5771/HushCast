@@ -130,7 +130,7 @@ val Typography = defaultTypography.copy(
     ),
 
     labelSmall = defaultTypography.labelSmall.copy(fontFamily = googleSans()),
-    labelSmallEmphasized = defaultTypography.labelMediumEmphasized.copy(
+    labelSmallEmphasized = defaultTypography.labelSmallEmphasized.copy(
         fontFamily = googleSansVeryChunky()
     ),
 )

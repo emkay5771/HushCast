@@ -64,7 +64,6 @@ class AppActivity : ComponentActivity() {
 
         if (savedInstanceState == null) {
             handleWorkerPairingIntent(intent)
-            requestNotificationPermissionIfNeeded()
         }
 
         val deepLink = intent.extractDeepLink()

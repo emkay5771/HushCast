@@ -9,6 +9,8 @@ import app.podiumpodcasts.podium.api.db.AppDatabase
 import app.podiumpodcasts.podium.api.model.PodcastPreviewModel
 import app.podiumpodcasts.podium.api.podcastindex.PodcastIndexClient
 import app.podiumpodcasts.podium.ui.dialog.bottomsheet.PodcastPreviewBottomSheetState
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 
@@ -17,10 +19,11 @@ interface DiscoverSearchState {
     class Loading() : DiscoverSearchState
     class Empty() : DiscoverSearchState
     data class Done(
-        val result: List<PodcastPreviewModel>
+        val result: List<PodcastPreviewModel>,
+        val isSearching: Boolean = false
     ) : DiscoverSearchState
 
-    data class Error(val error: String) : DiscoverSearchState
+    data class Error(val error: String, val isNetworkError: Boolean = false) : DiscoverSearchState
 }
 
 class DiscoverSearchViewModel(
@@ -34,40 +37,58 @@ class DiscoverSearchViewModel(
     val state = mutableStateOf<DiscoverSearchState>(DiscoverSearchState.Idle())
     val gridState = LazyGridState(0, 0)
     val podcastPreviewBottomSheetState = PodcastPreviewBottomSheetState()
+    private var searchJob: Job? = null
+    var lastQuery: String = ""
+        private set
 
-    fun search(query: String) {
+    fun search(query: String, disableAppleApi: Boolean = false) {
+        lastQuery = query
+        searchJob?.cancel()
         if(query.isBlank()) {
             state.value = DiscoverSearchState.Idle()
             return
         }
 
-        viewModelScope.launch {
-            state.value = DiscoverSearchState.Loading()
+        searchJob = viewModelScope.launch {
+            val prev = state.value
+            state.value = if (prev is DiscoverSearchState.Done && prev.result.isNotEmpty()) {
+                prev.copy(isSearching = true)
+            } else {
+                DiscoverSearchState.Loading()
+            }
             state.value = try {
                 val piDeferred = async {
                     if(podcastIndexClient.isConfigured()) {
                         runCatching { podcastIndexClient.search(query) }.getOrDefault(emptyList())
                     } else emptyList()
                 }
-                val appleDeferred = async {
-                    runCatching {
+                val appleDeferred = if (disableAppleApi) {
+                    null
+                } else {
+                    async<List<PodcastPreviewModel>> {
                         applePodcastClient.search.search(
                             query = query,
                             countryCode = countryCode
                         )
-                    }.getOrDefault(emptyList())
+                    }
                 }
 
-                val combined = (piDeferred.await() + appleDeferred.await())
+                val combined = (piDeferred.await() + (appleDeferred?.await() ?: emptyList()))
                     .distinctBy { it.fetchUrl.trimEnd('/') }
 
                 if(combined.isEmpty())
                     DiscoverSearchState.Empty()
                 else
-                    DiscoverSearchState.Done(combined)
+                    DiscoverSearchState.Done(combined, isSearching = false)
+            } catch (e: CancellationException) {
+                throw e
             } catch(e: Exception) {
                 e.printStackTrace()
-                DiscoverSearchState.Error(e.toString())
+                val isNet = e is java.io.IOException || e.cause is java.io.IOException
+                DiscoverSearchState.Error(
+                    error = e.localizedMessage ?: "Search failed",
+                    isNetworkError = isNet
+                )
             }
         }
     }

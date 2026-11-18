@@ -24,7 +24,7 @@ fun SettingsSwitchListItem(
         label = label,
         description = description,
 
-        selected = checked,
+        checked = checked,
         enabled = enabled,
 
         trailingContent = {
@@ -32,7 +32,7 @@ fun SettingsSwitchListItem(
                 enabled = enabled,
 
                 checked = checked,
-                onCheckedChange = onCheckedChange
+                onCheckedChange = null
             )
         },
 

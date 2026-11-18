@@ -66,6 +66,7 @@ class PodcastEpisodeDownloadWorker(
 
             var lastTitle = ""
             var lastNotifPct = 0
+            var lastNotifMs = 0L
             val worker = PodcastEpisodeDownloadWork(applicationContext, db)
             val isFinalAttempt = runAttemptCount >= 4
             val outcome = worker.doWork(
@@ -79,6 +80,14 @@ class PodcastEpisodeDownloadWorker(
             ) { title, sourceLabel, pct ->
                 if (title.isNotBlank()) lastTitle = title
                 val clampedPct = maxOf(lastNotifPct, pct.coerceIn(0, 100))
+                val now = System.currentTimeMillis()
+                if (now - lastNotifMs < 500L && clampedPct < 100 && clampedPct == lastNotifPct) {
+                    return@doWork
+                }
+                if (now - lastNotifMs < 500L && clampedPct < 100) {
+                    return@doWork
+                }
+                lastNotifMs = now
                 lastNotifPct = clampedPct
                 runCatching {
                     setForegroundAsync(

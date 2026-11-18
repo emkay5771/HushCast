@@ -41,6 +41,10 @@ android {
         val piSecret = localProps.getProperty("PODCAST_INDEX_API_SECRET", "")
         buildConfigField("String", "PODCAST_INDEX_API_KEY", "\"$piKey\"")
         buildConfigField("String", "PODCAST_INDEX_API_SECRET", "\"$piSecret\"")
+        androidResources {
+            localeFilters += listOf("en", "de", "es", "fr", "it", "tr")
+            noCompress += listOf("ttf")
+        }
     }
 
     signingConfigs {
@@ -69,11 +73,20 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-
+            buildConfigField("boolean", "DEV_TOOLS", "false")
             signingConfig = signingConfigs["release"]
         }
         debug {
             applicationIdSuffix = ".debug"
+            buildConfigField("boolean", "DEV_TOOLS", "true")
+        }
+        create("publish") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            applicationIdSuffix = ".debug"
+            signingConfig = signingConfigs.getByName("debug")
+            isDebuggable = false
+            buildConfigField("boolean", "DEV_TOOLS", "false")
         }
     }
     compileOptions {
@@ -105,6 +118,7 @@ dependencies {
     implementation(libs.concurrent.futures)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation("androidx.lifecycle:lifecycle-process:2.10.0")
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
 
@@ -158,7 +172,6 @@ dependencies {
     implementation(libs.ktor.client.content.negotiation)
     implementation(libs.ktor.client.serialization)
     implementation(libs.ktor.client.serialization.json)
-    implementation(libs.ktor.client.logging)
 
     implementation(libs.ktor.client.okhttp)
 
@@ -172,9 +185,9 @@ dependencies {
 
     implementation(libs.androidx.media3.exoplayer)
     implementation("androidx.media3:media3-extractor:${libs.versions.media3.get()}")
-    implementation(libs.androidx.media3.ui)
     implementation(libs.androidx.media3.common)
     implementation(libs.androidx.media3.session)
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 
     implementation(libs.rssparser)
 

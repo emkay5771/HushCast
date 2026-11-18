@@ -66,13 +66,15 @@ class ModelManager(private val context: Context) {
             .sumOf { it.length() }
     }
 
-    fun loadTaggerBytes(): ByteArray {
+    fun taggerFile(): File {
         val p = getPaths()
         if (p.adTagger.exists() && p.adTagger.length() > 0L) {
-            return p.adTagger.readBytes()
+            return p.adTagger
         }
         error("Ad tagger model not downloaded. Download models in HushCast setup.")
     }
+
+    fun loadTaggerBytes(): ByteArray = taggerFile().readBytes()
 
     fun ensureWordMuteModels(
         shouldAbort: () -> Boolean = { false },

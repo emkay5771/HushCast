@@ -214,6 +214,7 @@ class EpisodeAnalysisWorker(
         const val KEY_QUICK_MODE = "quick_mode"
         const val KEY_ACTION_MODE = "action_mode"
         const val KEY_FEED_TRANSCRIPT_RAW = "feed_transcript_raw"
+        const val KEY_FEED_TRANSCRIPT_PATH = "feed_transcript_path"
         const val KEY_FEED_TRANSCRIPT_MIME = "feed_transcript_mime"
 
         const val ANALYSIS_QUEUE_NAME = "hushcast_analysis_queue"
@@ -221,6 +222,17 @@ class EpisodeAnalysisWorker(
         private val analysisSemaphore = Semaphore(1)
 
         private fun uniqueWorkName(episodeId: String) = "hushcast_analysis_$episodeId"
+
+        private fun stageTranscriptFile(context: Context, episodeId: String, raw: String?): String? {
+            if (raw.isNullOrBlank()) return null
+            return runCatching {
+                val dir = File(context.cacheDir, "transcripts").apply { mkdirs() }
+                val safeName = episodeId.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(80)
+                val file = File(dir, "$safeName.txt")
+                file.writeText(raw)
+                file.absolutePath
+            }.getOrNull()
+        }
 
         fun enqueueBackgroundCharging(
             context: Context,
@@ -236,6 +248,7 @@ class EpisodeAnalysisWorker(
             val constraints = Constraints.Builder()
                 .setRequiresCharging(true)
                 .build()
+            val transcriptPath = stageTranscriptFile(context, episodeId, feedTranscriptRaw)
 
             val request = OneTimeWorkRequestBuilder<EpisodeAnalysisWorker>()
                 .addTag(ANALYSIS_QUEUE_NAME)
@@ -249,7 +262,7 @@ class EpisodeAnalysisWorker(
                         KEY_KNOWN_SHA256 to knownSha256,
                         KEY_QUICK_MODE to quickMode,
                         KEY_ACTION_MODE to actionMode.name,
-                        KEY_FEED_TRANSCRIPT_RAW to feedTranscriptRaw,
+                        KEY_FEED_TRANSCRIPT_PATH to transcriptPath,
                         KEY_FEED_TRANSCRIPT_MIME to feedTranscriptMime
                     )
                 )
@@ -274,6 +287,7 @@ class EpisodeAnalysisWorker(
             feedTranscriptMime: String = ""
         ) {
             val chargingOnly = HushCastPrefs.isAnalyzeOnlyWhileCharging(context)
+            val transcriptPath = stageTranscriptFile(context, episodeId, feedTranscriptRaw)
             val builder = OneTimeWorkRequestBuilder<EpisodeAnalysisWorker>()
                 .addTag(ANALYSIS_QUEUE_NAME)
                 .addTag("episode:$episodeId")
@@ -285,7 +299,7 @@ class EpisodeAnalysisWorker(
                         KEY_KNOWN_SHA256 to knownSha256,
                         KEY_QUICK_MODE to quickMode,
                         KEY_ACTION_MODE to actionMode.name,
-                        KEY_FEED_TRANSCRIPT_RAW to feedTranscriptRaw,
+                        KEY_FEED_TRANSCRIPT_PATH to transcriptPath,
                         KEY_FEED_TRANSCRIPT_MIME to feedTranscriptMime
                     )
                 )

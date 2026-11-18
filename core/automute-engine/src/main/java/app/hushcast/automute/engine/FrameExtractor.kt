@@ -71,7 +71,10 @@ class FrameExtractor {
     private val fft = Fft(NFFT)
     private val re = DoubleArray(NFFT)
     private val im = DoubleArray(NFFT)
-    private val power = DoubleArray(N_BINS)
+    private val power0 = DoubleArray(N_BINS)
+    private val power1 = DoubleArray(N_BINS)
+    private val logPower0 = DoubleArray(N_BINS)
+    private val logPower1 = DoubleArray(N_BINS)
     private val mag = DoubleArray(N_BINS)
     private var prevMag: DoubleArray? = null
     private val cepWindow = DoubleArray(Q_HI - Q_LO)
@@ -170,14 +173,55 @@ class FrameExtractor {
         var centroid = 0.0; var flatness = 0.0; var flux = 0.0
         var bestCpp = Double.NEGATIVE_INFINITY; var bestF0 = 0.0
         java.util.Arrays.fill(bandSum, 0.0)
-        for (k in 0 until HOP / SHOP) {
-            val start = (f * (HOP / SHOP) + k) * SHOP + SHOP / 2
-            for (i in 0 until NFFT) { re[i] = buf[start + i] * win[i]; im[i] = 0.0 }
-            fft.transform(re, im, false)
+
+        // P2: Pack the two real sub-windows (k = 0, 1) into one complex FFT: z = w0 + i*w1
+        val start0 = (f * (HOP / SHOP)) * SHOP + SHOP / 2
+        val start1 = (f * (HOP / SHOP) + 1) * SHOP + SHOP / 2
+        for (i in 0 until NFFT) {
+            val w = win[i]
+            re[i] = buf[start0 + i] * w
+            im[i] = buf[start1 + i] * w
+        }
+        fft.transform(re, im, false)
+
+        // Unpack Hermitian spectra for k = 0 and k = 1
+        run {
+            val bn0 = binNorm[0]
+            val p0 = (re[0] * re[0]) * bn0 + 1e-20
+            val p1 = (im[0] * im[0]) * bn0 + 1e-20
+            power0[0] = p0; power1[0] = p1
+            logPower0[0] = ln(p0); logPower1[0] = ln(p1)
+
+            val last = N_BINS - 1
+            val bnLast = binNorm[last]
+            val p0Last = (re[last] * re[last]) * bnLast + 1e-20
+            val p1Last = (im[last] * im[last]) * bnLast + 1e-20
+            power0[last] = p0Last; power1[last] = p1Last
+            logPower0[last] = ln(p0Last); logPower1[last] = ln(p1Last)
+
+            for (b in 1 until last) {
+                val rB = re[b]; val iB = im[b]
+                val rM = re[NFFT - b]; val iM = im[NFFT - b]
+                val re0 = 0.5 * (rB + rM)
+                val im0 = 0.5 * (iB - iM)
+                val re1 = 0.5 * (iB + iM)
+                val im1 = 0.5 * (rM - rB)
+                val bn = binNorm[b]
+                val p0b = (re0 * re0 + im0 * im0) * bn + 1e-20
+                val p1b = (re1 * re1 + im1 * im1) * bn + 1e-20
+                power0[b] = p0b; power1[b] = p1b
+                logPower0[b] = ln(p0b); logPower1[b] = ln(p1b)
+            }
+        }
+
+        // Accumulate spectral stats in chronological order (k = 0 then k = 1) so prevMag flux is exact
+        for (k in 0 until 2) {
+            val pwr = if (k == 0) power0 else power1
+            val lpwr = if (k == 0) logPower0 else logPower1
             var total = 0.0; var weighted = 0.0; var logSum = 0.0
             for (b in 0 until N_BINS) {
-                val p = (re[b] * re[b] + im[b] * im[b]) * binNorm[b] + 1e-20
-                power[b] = p; total += p; weighted += p * freqs[b]; logSum += ln(p)
+                val p = pwr[b]
+                total += p; weighted += p * freqs[b]; logSum += lpwr[b]
                 if (bandOf[b] >= 0) bandSum[bandOf[b]] += p
             }
             centroid += weighted / total
@@ -185,19 +229,30 @@ class FrameExtractor {
             var fl = 0.0
             val prev = prevMag
             for (b in 0 until N_BINS) {
-                mag[b] = sqrt(power[b])
+                mag[b] = sqrt(pwr[b])
                 if (prev != null) fl += max(mag[b] - prev[b], 0.0)
             }
             flux += fl
             prevMag = (prevMag ?: DoubleArray(N_BINS)).also { System.arraycopy(mag, 0, it, 0, N_BINS) }
-            // real cepstrum: inverse FFT of the (symmetric) log power spectrum, scaled by 1/n
-            for (b in 0 until N_BINS) { re[b] = ln(power[b]); im[b] = 0.0 }
-            for (b in 1 until N_BINS - 1) { re[NFFT - b] = re[b]; im[NFFT - b] = 0.0 }
-            fft.transform(re, im, true)
+        }
+
+        // P2: Pack both real even log-power spectra into one complex IFFT
+        for (b in 0 until N_BINS) {
+            re[b] = logPower0[b]
+            im[b] = logPower1[b]
+        }
+        for (b in 1 until N_BINS - 1) {
+            re[NFFT - b] = re[b]
+            im[NFFT - b] = im[b]
+        }
+        fft.transform(re, im, true)
+
+        for (k in 0 until 2) {
+            val cepArr = if (k == 0) re else im
             var peak = 0
             var peakV = Double.NEGATIVE_INFINITY
             for (q in Q_LO until Q_HI) {
-                val v = re[q] / NFFT
+                val v = cepArr[q] / NFFT
                 cepWindow[q - Q_LO] = v
                 if (v > peakV) { peakV = v; peak = q - Q_LO }
             }

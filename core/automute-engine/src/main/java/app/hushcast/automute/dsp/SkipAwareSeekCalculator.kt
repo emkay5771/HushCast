@@ -105,4 +105,29 @@ object SkipAwareSeekCalculator {
 
         return pos.coerceAtLeast(0L)
     }
+
+    /**
+     * Computes wall-clock milliseconds remaining from [fromMs] to [targetEndMs],
+     * subtracting any overlapping [skipRanges] and dividing by [speed].
+     */
+    fun computeWallRemainingMs(
+        fromMs: Long,
+        targetEndMs: Long,
+        speed: Float,
+        skipRanges: List<SkipRange>
+    ): Long {
+        if (targetEndMs <= fromMs) return 0L
+        var audioMs = targetEndMs - fromMs
+        if (skipRanges.isNotEmpty()) {
+            for (r in mergeRanges(skipRanges)) {
+                val overlapStart = maxOf(fromMs, r.startMs)
+                val overlapEnd = minOf(targetEndMs, r.endMs)
+                if (overlapEnd > overlapStart) {
+                    audioMs -= (overlapEnd - overlapStart)
+                }
+            }
+        }
+        val safeSpeed = speed.coerceAtLeast(0.5f).toDouble()
+        return (audioMs.coerceAtLeast(0L) / safeSpeed).toLong()
+    }
 }

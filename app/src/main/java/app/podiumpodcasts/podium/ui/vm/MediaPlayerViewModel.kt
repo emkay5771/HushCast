@@ -642,32 +642,38 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         isRestoringQueue = true
         viewModelScope.launch {
             try {
-                val saved = withContext(Dispatchers.IO) {
-                    db.playbackQueue().getQueueSync()
+                val (lastMediaItemAndResume, queueMediaItems) = withContext(Dispatchers.IO) {
+                    val saved = db.playbackQueue().getQueueSync()
+                    val allIds = buildList {
+                        if (lastEpisodeId != null) add(lastEpisodeId)
+                        saved.forEach { if (it.episodeId != lastEpisodeId) add(it.episodeId) }
+                    }
+                    val bundlesById = if (allIds.isEmpty()) emptyMap() else {
+                        db.podcastEpisodes().getByIds(allIds).associateBy { it.episode.id }
+                    }
+                    val lastPair = lastEpisodeId?.let { id ->
+                        bundlesById[id]?.let { b ->
+                            val resumeMs = ((b.playState?.state ?: 0) * 1000L).coerceAtLeast(0L)
+                            b.episode.createMediaItem(appCtx, b.playState) to resumeMs
+                        }
+                    }
+                    val queuedItems = saved.mapNotNull { item ->
+                        if (item.episodeId == lastEpisodeId) null
+                        else bundlesById[item.episodeId]?.let { b ->
+                            b.episode.createMediaItem(appCtx, b.playState)
+                        }
+                    }
+                    lastPair to queuedItems
                 }
                 if (controller != mediaController || controller.mediaItemCount > 1) return@launch
 
-                if (controller.mediaItemCount == 0 && lastEpisodeId != null) {
-                    val lastBundle = withContext(Dispatchers.IO) {
-                        db.podcastEpisodes().getSyncNullable(lastEpisodeId)
-                    }
-                    if (lastBundle != null && controller == mediaController && controller.mediaItemCount == 0) {
-                        val resumeMs = ((lastBundle.playState?.state ?: 0) * 1000L).coerceAtLeast(0L)
-                        controller.setMediaItem(lastBundle.episode.createMediaItem(appCtx, lastBundle.playState), resumeMs)
-                    }
+                if (controller.mediaItemCount == 0 && lastMediaItemAndResume != null) {
+                    val (lastItem, resumeMs) = lastMediaItemAndResume
+                    controller.setMediaItem(lastItem, resumeMs)
                 }
 
-                for (item in saved) {
-                    if (item.episodeId == lastEpisodeId) continue
-                    val bundle = withContext(Dispatchers.IO) {
-                        db.podcastEpisodes().getSyncNullable(item.episodeId)
-                    } ?: continue
-                    if (controller != mediaController) return@launch
-                    controller.addMediaItem(bundle.episode.createMediaItem(appCtx, bundle.playState))
-                }
-
-                if (controller == mediaController && controller.mediaItemCount > 0 && controller.playbackState == Player.STATE_IDLE) {
-                    controller.prepare()
+                if (queueMediaItems.isNotEmpty()) {
+                    controller.addMediaItems(queueMediaItems)
                 }
 
                 syncQueue(persist = false)

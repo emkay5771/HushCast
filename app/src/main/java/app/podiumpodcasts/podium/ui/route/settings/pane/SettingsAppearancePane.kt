@@ -258,6 +258,7 @@ fun SettingsAppearancePane(
                 val libraryVm = viewModel { app.podiumpodcasts.podium.ui.vm.library.LibraryViewModel(db) }
                 val userLists = libraryVm.nonSystemLists.collectAsLazyPagingItems()
                 val systemLists = libraryVm.systemLists.collectAsLazyPagingItems()
+                val showStartupPicker = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
                 val destinations = buildList {
                     app.podiumpodcasts.podium.ui.navigation.NavBarItems.entries.forEach {
@@ -270,56 +271,94 @@ fun SettingsAppearancePane(
                         userLists[i]?.let { l -> add("LIST:${l.id}" to "Playlist: ${l.name}") }
                     }
                 }
+                val currentLabel = destinations.firstOrNull { it.first == startupDest.value }?.second ?: "Home"
 
-                androidx.compose.foundation.layout.Column(
-                    modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                androidx.compose.material3.Surface(
+                    onClick = { showStartupPicker.value = true },
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh
                 ) {
-                    Text(
-                        text = "Startup screen",
-                        style = androidx.compose.material3.MaterialTheme.typography.titleMedium
-                    )
-                    Text(
-                        text = "Choose which tab or playlist opens when launching the app",
-                        style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    destinations.forEach { (key, label) ->
-                        val selected = startupDest.value == key
-                        androidx.compose.material3.Surface(
-                            onClick = {
-                                scope.launch {
-                                    vm.repository.appearance.setStartupDestination(key)
-                                }
-                            },
-                            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                            color = if (selected) {
-                                androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer
-                            } else {
-                                androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh
-                            }
-                        ) {
-                            androidx.compose.foundation.layout.Row(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    androidx.compose.foundation.layout.Row(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        androidx.compose.foundation.layout.Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Startup screen",
+                                style = androidx.compose.material3.MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = currentLabel,
+                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text(
+                            text = "Change",
+                            style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                if (showStartupPicker.value) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { showStartupPicker.value = false },
+                        title = { Text("Startup screen") },
+                        text = {
+                            androidx.compose.foundation.layout.Column(
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                androidx.compose.material3.RadioButton(
-                                    selected = selected,
-                                    onClick = {
-                                        scope.launch {
-                                            vm.repository.appearance.setStartupDestination(key)
+                                destinations.forEach { (key, label) ->
+                                    val selected = startupDest.value == key
+                                    androidx.compose.material3.Surface(
+                                        onClick = {
+                                            showStartupPicker.value = false
+                                            scope.launch {
+                                                vm.repository.appearance.setStartupDestination(key)
+                                            }
+                                        },
+                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                                        color = if (selected) {
+                                            androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer
+                                        } else {
+                                            androidx.compose.ui.graphics.Color.Transparent
+                                        }
+                                    ) {
+                                        androidx.compose.foundation.layout.Row(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                                        ) {
+                                            androidx.compose.material3.RadioButton(
+                                                selected = selected,
+                                                onClick = {
+                                                    showStartupPicker.value = false
+                                                    scope.launch {
+                                                        vm.repository.appearance.setStartupDestination(key)
+                                                    }
+                                                }
+                                            )
+                                            Text(
+                                                text = label,
+                                                style = androidx.compose.material3.MaterialTheme.typography.bodyMedium
+                                            )
                                         }
                                     }
-                                )
-                                Text(
-                                    text = label,
-                                    style = androidx.compose.material3.MaterialTheme.typography.bodyMedium
-                                )
+                                }
+                            }
+                        },
+                        confirmButton = {
+                            androidx.compose.material3.TextButton(
+                                onClick = { showStartupPicker.value = false }
+                            ) {
+                                Text("Close")
                             }
                         }
-                    }
+                    )
                 }
             }
 
@@ -339,7 +378,7 @@ fun SettingsAppearancePane(
                         style = androidx.compose.material3.MaterialTheme.typography.titleMedium
                     )
                     Text(
-                        text = "Show 2–5 tabs and reorder them with the arrows",
+                        text = "Show 2–5 tabs and reorder them",
                         style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                         color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
                     )

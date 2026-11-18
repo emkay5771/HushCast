@@ -29,7 +29,9 @@ import androidx.compose.material3.SearchBarValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSearchBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -132,9 +134,102 @@ private fun SearchContent(
     onClickPodcast: (origin: String) -> Unit,
     onClickEpisode: (episode: PodcastEpisodeModel) -> Unit
 ) {
-    AnimatedContent(
-        targetState = vm.state.value
-    ) { state ->
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val desktopUrl = androidx.compose.runtime.remember(context) {
+        app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context)
+    }
+    val desktopToken = androidx.compose.runtime.remember(context) {
+        app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerToken(context)
+    }
+    var transcriptQuery by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf("") }
+    var transcriptBusy by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    var transcriptError by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    var transcriptHits by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf<List<app.hushcast.automute.desktop.DesktopSearchHit>>(emptyList())
+    }
+
+    androidx.compose.foundation.layout.Column(Modifier.fillMaxSize()) {
+        if (desktopUrl.isNotBlank()) {
+            androidx.compose.material3.Surface(
+                modifier = Modifier
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow
+            ) {
+                androidx.compose.foundation.layout.Column(Modifier.padding(12.dp)) {
+                    Text(
+                        text = "Search transcripts",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    androidx.compose.foundation.layout.Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        androidx.compose.material3.OutlinedTextField(
+                            value = transcriptQuery,
+                            onValueChange = { transcriptQuery = it },
+                            label = { Text("Search spoken topics…") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        androidx.compose.material3.Button(
+                            enabled = !transcriptBusy && transcriptQuery.isNotBlank(),
+                            onClick = {
+                                transcriptBusy = true
+                                transcriptError = null
+                                scope.launch {
+                                    try {
+                                        val resp = app.hushcast.automute.desktop.DesktopWorkerClient.semanticSearch(
+                                            baseUrl = desktopUrl,
+                                            token = desktopToken,
+                                            query = transcriptQuery,
+                                            topK = 8
+                                        )
+                                        transcriptHits = resp.hits
+                                        if (resp.hits.isEmpty()) {
+                                            transcriptError = "No matching moments found."
+                                        }
+                                    } catch (t: Throwable) {
+                                        transcriptError = t.message ?: t.javaClass.simpleName
+                                    } finally {
+                                        transcriptBusy = false
+                                    }
+                                }
+                            }
+                        ) {
+                            Text(if (transcriptBusy) "…" else "Search")
+                        }
+                    }
+                    transcriptError?.let { err ->
+                        Spacer(Modifier.height(4.dp))
+                        Text(err, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    if (transcriptHits.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        transcriptHits.take(5).forEach { hit ->
+                            val totalSec = (hit.startMs / 1000L).coerceAtLeast(0L)
+                            val m = totalSec / 60L
+                            val s = totalSec % 60L
+                            Text(
+                                text = "${hit.episodeTitle.ifBlank { hit.episodeId }} • %02d:%02d — ${hit.text}".format(m, s),
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 2,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        AnimatedContent(
+            targetState = vm.state.value,
+            modifier = Modifier.weight(1f)
+        ) { state ->
         when(state) {
             is LibrarySearchState.Idle -> {
                 InfoLayout(
@@ -232,5 +327,6 @@ private fun SearchContent(
                 }
             }
         }
+    }
     }
 }

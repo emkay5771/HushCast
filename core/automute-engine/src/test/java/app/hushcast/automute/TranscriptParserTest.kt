@@ -56,4 +56,21 @@ class TranscriptParserTest {
         assertEquals("Welcome to HushCast", parsed.segments[0].text)
         assertEquals(60.0, parsed.segments[1].start, 0.01)
     }
+
+    @Test
+    fun parsesPodcasting20JsonWithSingleWordSegments() {
+        val json = """
+            {
+              "version": "1.0.0",
+              "segments": [
+                { "startTime": 0.5, "endTime": 0.8, "body": "Hello" },
+                { "startTime": 0.9, "endTime": 1.3, "body": "HushCast" }
+              ]
+            }
+        """.trimIndent()
+        val parsed = TranscriptParser.parse(json, "application/json")
+        assertTrue(parsed.hasWordLevelTimings)
+        assertEquals(2, parsed.words.size)
+        assertEquals(" HushCast", parsed.words[1].text)
+    }
 }

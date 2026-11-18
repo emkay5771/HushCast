@@ -109,18 +109,24 @@ object WordMatcher {
         MuteActionMode.SAMPLE_DROP_MICRO_SKIP -> 4
     }
 
-    fun matchWords(
-        words: List<Word>,
-        rules: List<MuteRule>,
-        prePadMs: Long = 80L,
-        postPadMs: Long = 100L,
-        defaultActionMode: MuteActionMode = MuteActionMode.HARD_SILENCE
-    ): List<MuteWindow> {
-        val activeRules = rules.filter { it.enabled && it.pattern.isNotBlank() }
-        if (words.isEmpty() || activeRules.isEmpty()) return emptyList()
+    class CompiledRules internal constructor(
+        internal val exactSet: Map<String, MuteRule>,
+        internal val compoundByFirstToken: Map<String, List<Pair<List<String>, MuteRule>>>,
+        internal val combinedRegex: Regex?,
+        internal val regexRules: List<Pair<Regex, MuteRule>>,
+        internal val defaultActionMode: MuteActionMode
+    ) {
+        val isEmpty: Boolean
+            get() = exactSet.isEmpty() && compoundByFirstToken.isEmpty() && regexRules.isEmpty()
+    }
 
+    fun compileRules(
+        rules: List<MuteRule>,
+        defaultActionMode: MuteActionMode = MuteActionMode.HARD_SILENCE
+    ): CompiledRules {
+        val activeRules = rules.filter { it.enabled && it.pattern.isNotBlank() }
         val exactSet = HashMap<String, MuteRule>()
-        val compoundPhrases = ArrayList<Pair<List<String>, MuteRule>>()
+        val compoundByFirst = HashMap<String, MutableList<Pair<List<String>, MuteRule>>>()
         val regexRules = ArrayList<Pair<Regex, MuteRule>>()
 
         for (rule in activeRules) {
@@ -146,10 +152,45 @@ object WordMatcher {
                         }
                     }
                 } else if (tokens.size > 1) {
-                    compoundPhrases.add(tokens to rule)
+                    compoundByFirst.getOrPut(tokens[0]) { ArrayList(2) }.add(tokens to rule)
                 }
             }
         }
+
+        val combinedRegex = if (regexRules.size > 1) {
+            runCatching {
+                Regex(regexRules.joinToString("|") { "(?:${it.first.pattern})" }, RegexOption.IGNORE_CASE)
+            }.getOrNull()
+        } else null
+
+        return CompiledRules(exactSet, compoundByFirst, combinedRegex, regexRules, defaultActionMode)
+    }
+
+    fun matchWords(
+        words: List<Word>,
+        rules: List<MuteRule>,
+        prePadMs: Long = 80L,
+        postPadMs: Long = 100L,
+        defaultActionMode: MuteActionMode = MuteActionMode.HARD_SILENCE
+    ): List<MuteWindow> {
+        if (words.isEmpty() || rules.isEmpty()) return emptyList()
+        val compiled = compileRules(rules, defaultActionMode)
+        return matchWords(words, compiled, prePadMs, postPadMs)
+    }
+
+    fun matchWords(
+        words: List<Word>,
+        compiled: CompiledRules,
+        prePadMs: Long = 80L,
+        postPadMs: Long = 100L
+    ): List<MuteWindow> {
+        if (words.isEmpty() || compiled.isEmpty) return emptyList()
+
+        val exactSet = compiled.exactSet
+        val compoundByFirst = compiled.compoundByFirstToken
+        val combinedRegex = compiled.combinedRegex
+        val regexRules = compiled.regexRules
+        val defaultActionMode = compiled.defaultActionMode
 
         val normalizedWords = words.map { normalizeToken(it.text) }
         val rawWindows = ArrayList<MuteWindow>()
@@ -213,48 +254,53 @@ object WordMatcher {
                         mode = effectiveMode(exactRule, defaultActionMode)
                     )
                 )
-                continue
-            }
-
-            val trimmedRaw = w.text.trim()
-            val matchedRegex = regexRules.firstOrNull { (regex, _) ->
-                regex.containsMatchIn(trimmedRaw) || regex.containsMatchIn(norm)
-            }
-            if (matchedRegex != null) {
-                rawWindows.add(
-                    neighborBoundedWindow(
-                        firstIdx = i,
-                        lastIdx = i,
-                        wordText = trimmedRaw,
-                        ruleId = matchedRegex.second.id,
-                        mode = effectiveMode(matchedRegex.second, defaultActionMode)
-                    )
-                )
-            }
-        }
-
-        for ((phraseTokens, rule) in compoundPhrases) {
-            val len = phraseTokens.size
-            if (words.size < len) continue
-            for (i in 0..(words.size - len)) {
-                var allMatch = true
-                for (j in 0 until len) {
-                    if (normalizedWords[i + j] != phraseTokens[j]) {
-                        allMatch = false
-                        break
+            } else if (regexRules.isNotEmpty()) {
+                val trimmedRaw = w.text.trim()
+                val mayMatch = combinedRegex == null ||
+                    combinedRegex.containsMatchIn(trimmedRaw) ||
+                    combinedRegex.containsMatchIn(norm)
+                if (mayMatch) {
+                    val matchedRegex = regexRules.firstOrNull { (regex, _) ->
+                        regex.containsMatchIn(trimmedRaw) || regex.containsMatchIn(norm)
+                    }
+                    if (matchedRegex != null) {
+                        rawWindows.add(
+                            neighborBoundedWindow(
+                                firstIdx = i,
+                                lastIdx = i,
+                                wordText = trimmedRaw,
+                                ruleId = matchedRegex.second.id,
+                                mode = effectiveMode(matchedRegex.second, defaultActionMode)
+                            )
+                        )
                     }
                 }
-                if (allMatch) {
-                    val phraseText = words.subList(i, i + len).joinToString(" ") { it.text.trim() }
-                    rawWindows.add(
-                        neighborBoundedWindow(
-                            firstIdx = i,
-                            lastIdx = i + len - 1,
-                            wordText = phraseText,
-                            ruleId = rule.id,
-                            mode = effectiveMode(rule, defaultActionMode)
+            }
+
+            val phrasesStartingHere = compoundByFirst[norm]
+            if (phrasesStartingHere != null) {
+                for ((phraseTokens, rule) in phrasesStartingHere) {
+                    val len = phraseTokens.size
+                    if (i + len > words.size) continue
+                    var allMatch = true
+                    for (j in 1 until len) {
+                        if (normalizedWords[i + j] != phraseTokens[j]) {
+                            allMatch = false
+                            break
+                        }
+                    }
+                    if (allMatch) {
+                        val phraseText = words.subList(i, i + len).joinToString(" ") { it.text.trim() }
+                        rawWindows.add(
+                            neighborBoundedWindow(
+                                firstIdx = i,
+                                lastIdx = i + len - 1,
+                                wordText = phraseText,
+                                ruleId = rule.id,
+                                mode = effectiveMode(rule, defaultActionMode)
+                            )
                         )
-                    )
+                    }
                 }
             }
         }

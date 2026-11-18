@@ -75,7 +75,7 @@ class PodcastUpdateWork(
 
                                     val candidateEpisodes = response.rssChannel.items
                                         .filter { !episodeIds.contains(it.computeEpisodeId(origin)) }
-                                        .map { it.toPodcastEpisode(podcast = podcast, new = true) }
+                                        .map { it.toPodcastEpisode(podcast = podcast, new = true, extras = response.extras) }
 
                                     val inserted = db.podcastEpisodes()
                                         .insertAllAndUpdateNewEpisodesCount(

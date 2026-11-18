@@ -77,7 +77,8 @@ enum class EpisodeSwipeAction(val label: String) {
 
 enum class HeadsetNextAction(val label: String) {
     SKIP_FORWARD("Skip forward"),
-    NEXT_EPISODE("Next episode in queue")
+    NEXT_EPISODE("Next episode in queue"),
+    NEXT_CHAPTER("Next chapter (otherwise skip forward)")
 }
 
 enum class HeadsetPrevAction(val label: String) {
@@ -95,6 +96,7 @@ enum class PlayerToolbarAction(val label: String) {
     HUSHCAST("HushCast"),
     SPEED("Speed"),
     SLEEP("Sleep timer"),
+    TRANSCRIPT("Transcript"),
     FAVORITE("Favorite"),
     DOWNLOAD("Download"),
     GO_TO_PODCAST("Go to Podcast"),
@@ -628,7 +630,7 @@ class SettingsRepository(val context: Context) {
         val playerToolbarActions: Flow<List<PlayerToolbarAction>> = dataStore.data
             .map { preferences ->
                 val raw = preferences[SettingsKeys.BEHAVIOR_PLAYER_TOOLBAR_ACTIONS]
-                    ?: "HUSHCAST,SPEED,SLEEP,FAVORITE"
+                    ?: "HUSHCAST,SPEED,SLEEP,TRANSCRIPT"
                 raw.split(",").mapNotNull { token ->
                     runCatching { PlayerToolbarAction.valueOf(token.trim()) }.getOrNull()
                 }.ifEmpty {
@@ -636,7 +638,7 @@ class SettingsRepository(val context: Context) {
                         PlayerToolbarAction.HUSHCAST,
                         PlayerToolbarAction.SPEED,
                         PlayerToolbarAction.SLEEP,
-                        PlayerToolbarAction.FAVORITE
+                        PlayerToolbarAction.TRANSCRIPT
                     )
                 }
             }
@@ -650,8 +652,7 @@ class SettingsRepository(val context: Context) {
                 val defaults = listOf(
                     PlayerTabConfig("PLAYER", visible = true),
                     PlayerTabConfig("NOTES", visible = true),
-                    PlayerTabConfig("CHAPTERS", visible = true),
-                    PlayerTabConfig("TRANSCRIPT", visible = true)
+                    PlayerTabConfig("CHAPTERS", visible = true)
                 )
                 val raw = preferences[SettingsKeys.BEHAVIOR_PLAYER_TABS_CONFIG]
                 val parsed = if (raw.isNullOrBlank()) {
@@ -661,16 +662,19 @@ class SettingsRepository(val context: Context) {
                         kotlinx.serialization.json.Json.decodeFromString<List<PlayerTabConfig>>(raw)
                     }.getOrNull().orEmpty()
                 }
-                val validIds = setOf("PLAYER", "NOTES", "CHAPTERS", "TRANSCRIPT")
+                val validIds = setOf("PLAYER", "NOTES", "CHAPTERS")
                 val deduped = parsed.filter { it.id in validIds }.distinctBy { it.id }.toMutableList()
                 defaults.forEach { def ->
                     if (deduped.none { it.id == def.id }) {
                         deduped.add(def)
                     }
                 }
-                if (deduped.none { it.visible }) {
-                    val idx = deduped.indexOfFirst { it.id == "PLAYER" }.takeIf { it >= 0 } ?: 0
-                    deduped[idx] = deduped[idx].copy(visible = true)
+                val playerIdx = deduped.indexOfFirst { it.id == "PLAYER" }
+                if (playerIdx > 0) {
+                    val playerCfg = deduped.removeAt(playerIdx)
+                    deduped.add(0, playerCfg.copy(visible = true))
+                } else if (playerIdx == 0) {
+                    deduped[0] = deduped[0].copy(visible = true)
                 }
                 deduped
             }
@@ -832,7 +836,7 @@ class SettingsRepository(val context: Context) {
         }
 
         val devMode: Flow<Boolean> = dataStore.data.map { preferences ->
-            preferences[SettingsKeys.HUSHCAST_DEV_MODE] ?: false
+            preferences[SettingsKeys.HUSHCAST_DEV_MODE] ?: BuildConfig.DEV_TOOLS
         }
 
         suspend fun setDevMode(enabled: Boolean) = dataStore.edit { preferences ->

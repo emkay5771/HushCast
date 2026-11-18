@@ -134,13 +134,12 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
             return
         }
         val posMs = (frameIndex * 1000L) / sampleRateHz.coerceAtLeast(1)
-        val delayMs = encoderDelayOffsetMs
-        // Binary search for the first window whose shifted endMs >= posMs
+        // Binary search for the first window whose endMs >= posMs
         var lo = 0
         var hi = active.size
         while (lo < hi) {
             val mid = (lo + hi) ushr 1
-            val we = (active[mid].endMs + delayMs).coerceAtLeast(1L)
+            val we = active[mid].endMs.coerceAtLeast(1L)
             if (we < posMs) lo = mid + 1 else hi = mid
         }
         windowCursor = lo
@@ -164,20 +163,19 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
             return
         }
 
-        val delayMs = encoderDelayOffsetMs
         val bufStartMs = (currentInputFrameIndex * 1000L) / sampleRateHz
         val bufEndMs = ((currentInputFrameIndex + frameCount) * 1000L) / sampleRateHz
 
         var idx = windowCursor.coerceIn(0, activeWindows.size)
         while (idx < activeWindows.size) {
-            val we = (activeWindows[idx].endMs + delayMs).coerceAtLeast(1L)
+            val we = activeWindows[idx].endMs.coerceAtLeast(1L)
             if (we >= bufStartMs) break
             idx++
         }
         windowCursor = idx
 
         // Fast path: next window starts after this buffer ends -> single bulk copy
-        if (idx >= activeWindows.size || (activeWindows[idx].startMs + delayMs).coerceAtLeast(0L) > bufEndMs) {
+        if (idx >= activeWindows.size || activeWindows[idx].startMs.coerceAtLeast(0L) > bufEndMs) {
             val out = replaceOutputBuffer(remaining)
             bulkCopyFrames(inputBuffer, out, frameCount)
             out.flip()
@@ -196,9 +194,7 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
             val frameMs = (frameIndex * 1000.0) / sampleRateHz
 
             while (idx < activeWindows.size) {
-                val we = (activeWindows[idx].endMs + delayMs).coerceAtLeast(
-                    activeWindows[idx].startMs + delayMs + 1L
-                ).toDouble()
+                val we = activeWindows[idx].endMs.coerceAtLeast(activeWindows[idx].startMs + 1L).toDouble()
                 if (frameMs <= we) break
                 idx++
             }
@@ -212,8 +208,8 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
             }
 
             val w = activeWindows[idx]
-            val wsMs = (w.startMs + delayMs).coerceAtLeast(0L).toDouble()
-            val weMs = (w.endMs + delayMs).coerceAtLeast(w.startMs + delayMs + 1L).toDouble()
+            val wsMs = w.startMs.coerceAtLeast(0L).toDouble()
+            val weMs = w.endMs.coerceAtLeast(w.startMs + 1L).toDouble()
 
             if (frameMs < wsMs) {
                 // Bulk copy up to the start of the window
@@ -230,7 +226,12 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
             when (w.actionMode) {
                 MuteActionMode.HARD_SILENCE -> {
                     val gain = cosineRampGain(framesFromStart, framesToEnd, rampFramesSilence, floor = 0.0f)
-                    copyFrameWithGain(inputBuffer, out, gain)
+                    if (gain == 0.0f && !volumeBoostEnabled) {
+                        skipFrame(inputBuffer)
+                        for (b in 0 until bytesPerFrame) out.put(0)
+                    } else {
+                        copyFrameWithGain(inputBuffer, out, gain)
+                    }
                 }
                 MuteActionMode.VOLUME_DUCK -> {
                     val gain = cosineRampGain(framesFromStart, framesToEnd, rampFramesSilence, floor = DUCK_FLOOR)
@@ -279,7 +280,9 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
 
     private fun applyBoostFloat(sample: Float): Float {
         if (!volumeBoostEnabled) return sample
-        return tanh((sample * VOLUME_BOOST_GAIN).toDouble()).toFloat()
+        val x = sample * VOLUME_BOOST_GAIN
+        val x2 = x * x
+        return (x * (27.0f + x2) / (27.0f + 9.0f * x2)).coerceIn(-1.0f, 1.0f)
     }
 
     private fun bulkCopyFrames(src: ByteBuffer, dst: ByteBuffer, count: Int) {

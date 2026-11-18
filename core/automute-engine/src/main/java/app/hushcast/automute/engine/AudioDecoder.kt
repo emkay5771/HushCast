@@ -141,6 +141,148 @@ object AudioDecoder {
         }
     }
 
+    fun probeDurationSec(path: String): Double {
+        val ex = MediaExtractor()
+        try {
+            ex.setDataSource(path)
+            val track = (0 until ex.trackCount).firstOrNull {
+                ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+            } ?: return 0.0
+            val format = ex.getTrackFormat(track)
+            val durationUs = if (format.containsKey(MediaFormat.KEY_DURATION)) format.getLong(MediaFormat.KEY_DURATION) else 0L
+            return durationUs / 1_000_000.0
+        } finally {
+            runCatching { ex.release() }
+        }
+    }
+
+    fun decodeRange(
+        path: String,
+        startSec: Double,
+        endSec: Double,
+        shouldAbort: () -> Boolean = { false }
+    ): PcmBuffer {
+        val pcm = PcmBuffer(((endSec - startSec).coerceAtLeast(1.0) * WHISPER_SR).toInt() + WHISPER_SR)
+        val ex = MediaExtractor()
+        var codec: MediaCodec? = null
+        try {
+            ex.setDataSource(path)
+            val track = (0 until ex.trackCount).firstOrNull {
+                ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true
+            } ?: error("no audio track in $path")
+            ex.selectTrack(track)
+            val format = ex.getTrackFormat(track)
+            val mime = format.getString(MediaFormat.KEY_MIME)!!
+            var rate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            var channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            var encoding = AudioFormat.ENCODING_PCM_16BIT
+            codec = MediaCodec.createDecoderByType(mime)
+            try {
+                format.setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_FLOAT)
+                codec.configure(format, null, null, 0)
+            } catch (_: Exception) {
+                codec.reset()
+                codec.configure(ex.getTrackFormat(track), null, null, 0)
+            }
+            codec.start()
+
+            val startUs = (startSec.coerceAtLeast(0.0) * 1_000_000.0).toLong()
+            val endUs = (endSec.coerceAtLeast(startSec + 0.1) * 1_000_000.0).toLong()
+            if (startUs > 0L) {
+                ex.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            }
+
+            var resampler = Resampler(rate, WHISPER_SR)
+            val info = MediaCodec.BufferInfo()
+            var inputDone = false
+            var outputDone = false
+            var floatScratch = FloatArray(0)
+            var shortScratch = ShortArray(0)
+            var midScratch = FloatArray(0)
+
+            try {
+                while (!outputDone) {
+                    if (shouldAbort()) throw CancellationException("Audio range decode cancelled")
+                    if (!inputDone) {
+                        val i = codec.dequeueInputBuffer(10_000)
+                        if (i >= 0) {
+                            val st = ex.sampleTime
+                            val n = ex.readSampleData(codec.getInputBuffer(i)!!, 0)
+                            if (n < 0 || (st >= 0L && st > endUs + 250_000L)) {
+                                codec.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                                inputDone = true
+                            } else {
+                                codec.queueInputBuffer(i, 0, n, st, 0)
+                                ex.advance()
+                            }
+                        }
+                    }
+                    val o = codec.dequeueOutputBuffer(info, 10_000)
+                    if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        val f = codec.outputFormat
+                        val newRate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                        channels = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                        if (f.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                            encoding = f.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                        }
+                        if (newRate != rate) {
+                            resampler.close()
+                            rate = newRate
+                            resampler = Resampler(rate, WHISPER_SR)
+                        }
+                    } else if (o >= 0) {
+                        val ptsUs = info.presentationTimeUs
+                        val buf = codec.getOutputBuffer(o)!!.order(ByteOrder.nativeOrder())
+                        buf.position(info.offset)
+                        buf.limit(info.offset + info.size)
+                        val bytesPerSample = if (encoding == AudioFormat.ENCODING_PCM_FLOAT) 4 else 2
+                        val count = info.size / bytesPerSample / channels
+                        if (count > 0 && ptsUs + (count * 1_000_000L) / rate >= startUs && ptsUs <= endUs) {
+                            val totalSamples = count * channels
+                            if (midScratch.size < count) midScratch = FloatArray(count)
+                            if (encoding == AudioFormat.ENCODING_PCM_FLOAT) {
+                                if (floatScratch.size < totalSamples) floatScratch = FloatArray(totalSamples)
+                                buf.asFloatBuffer().get(floatScratch, 0, totalSamples)
+                                extractMidSideFloat(floatScratch, count, channels, midScratch, null)
+                            } else {
+                                if (shortScratch.size < totalSamples) shortScratch = ShortArray(totalSamples)
+                                buf.asShortBuffer().get(shortScratch, 0, totalSamples)
+                                extractMidSideShort(shortScratch, count, channels, midScratch, null)
+                            }
+                            val frameUs = (count * 1_000_000.0) / rate
+                            val trimStart = if (ptsUs < startUs) {
+                                (((startUs - ptsUs) / frameUs) * count).toInt().coerceIn(0, count)
+                            } else 0
+                            val trimEnd = if (ptsUs + frameUs > endUs) {
+                                (((endUs - ptsUs) / frameUs) * count).toInt().coerceIn(trimStart, count)
+                            } else count
+                            if (trimEnd > trimStart) {
+                                val w = resampler.process(midScratch, trimStart, trimEnd - trimStart)
+                                if (w.isNotEmpty()) pcm.append(w)
+                            }
+                        }
+                        codec.releaseOutputBuffer(o, false)
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0 || ptsUs > endUs) {
+                            outputDone = true
+                        }
+                    }
+                }
+                val tail = resampler.finish()
+                if (tail.isNotEmpty()) pcm.append(tail)
+            } finally {
+                resampler.close()
+            }
+            return pcm
+        } catch (t: Throwable) {
+            pcm.close()
+            throw t
+        } finally {
+            runCatching { codec?.stop() }
+            runCatching { codec?.release() }
+            runCatching { ex.release() }
+        }
+    }
+
     fun decode(
         path: String,
         frames: FrameExtractor? = null,
@@ -176,13 +318,7 @@ object AudioDecoder {
             } else {
                 0
             }
-            val encoderDelayMs = if (encoderDelaySamples > 0 && rate > 0) {
-                (encoderDelaySamples * 1000L / rate).toInt()
-            } else if (mime.contains("mp4a", ignoreCase = true) || mime.contains("aac", ignoreCase = true)) {
-                46
-            } else {
-                0
-            }
+            var remainingDelaySamples = encoderDelaySamples
 
             var encoding = AudioFormat.ENCODING_PCM_16BIT
             codec = MediaCodec.createDecoderByType(mime)
@@ -258,7 +394,14 @@ object AudioDecoder {
                         buf.position(info.offset)
                         buf.limit(info.offset + info.size)
                         val stereo = channels >= 2
-                        val count = if (encoding == AudioFormat.ENCODING_PCM_FLOAT) info.size / 4 / channels else info.size / 2 / channels
+                        val bytesPerSample = if (encoding == AudioFormat.ENCODING_PCM_FLOAT) 4 else 2
+                        var count = info.size / bytesPerSample / channels
+                        if (count > 0 && remainingDelaySamples > 0) {
+                            val trim = minOf(count, remainingDelaySamples)
+                            buf.position(buf.position() + trim * channels * bytesPerSample)
+                            remainingDelaySamples -= trim
+                            count -= trim
+                        }
                         if (count > 0) {
                             val totalSamples = count * channels
                             if (midScratch.size < count) midScratch = FloatArray(count)
@@ -303,7 +446,7 @@ object AudioDecoder {
                 resamplers.close()
                 chunkBuf?.close()
             }
-            return Info(rate, channels, duration, encoderDelayMs)
+            return Info(rate, channels, duration, 0)
         } finally {
             runCatching { codec?.stop() }
             runCatching { codec?.release() }

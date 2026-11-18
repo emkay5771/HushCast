@@ -6,18 +6,17 @@ import android.os.Process
 import app.hushcast.automute.dsp.MuteActionMode
 import app.hushcast.automute.dsp.ReadinessBadge
 import app.hushcast.automute.engine.AudioDecoder
+import app.hushcast.automute.engine.CpuTopology
 import app.hushcast.automute.engine.Decoder
 import app.hushcast.automute.engine.Embedder
 import app.hushcast.automute.engine.FrameExtractor
 import app.hushcast.automute.engine.Frames
 import app.hushcast.automute.engine.HushCastPrefs
 import app.hushcast.automute.engine.ModelManager
-import app.hushcast.automute.engine.PcmBuffer
 import app.hushcast.automute.engine.Segment
 import app.hushcast.automute.engine.SegmentFeatures
 import app.hushcast.automute.engine.Tagger
 import app.hushcast.automute.engine.Transcriber
-import app.hushcast.automute.engine.VadDetector
 import app.hushcast.automute.engine.Word
 import app.hushcast.automute.hash.StreamingSha256
 import app.hushcast.automute.matcher.WordMatcher
@@ -25,19 +24,21 @@ import app.hushcast.automute.storage.AdSegmentEntity
 import app.hushcast.automute.storage.AutoMuteDatabase
 import app.hushcast.automute.storage.BlobCodec
 import app.hushcast.automute.storage.EpisodeAnalysisStatusEntity
+import app.hushcast.automute.storage.EpisodeChunkCheckpointEntity
+import app.hushcast.automute.storage.EpisodeOffsetMapEntity
 import app.hushcast.automute.storage.EpisodeWordIndexEntity
 import app.hushcast.automute.storage.MuteSegmentEntity
 import app.hushcast.automute.storage.WordIndexBlob
 import app.hushcast.automute.storage.toDomain
-import app.hushcast.automute.transcript.ParsedTranscript
+import app.hushcast.automute.transcript.DaiRetimer
 import app.hushcast.automute.transcript.TranscriptParser
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.yield
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import java.io.File
-import java.util.Locale
 import java.util.concurrent.CancellationException
-import kotlin.math.abs
 
 data class AnalysisProgress(
     val percent: Int,
@@ -58,7 +59,8 @@ data class AnalysisResult(
 /**
  * Sequential, memory-bounded on-device analysis pipeline:
  * 1. Verifies/computes file SHA-256 and checks required models are already downloaded.
- * 2. Streams 180s+5s overlapping chunks through whisper.cpp while extracting 24 kHz acoustic frames.
+ * 2. Uses DAI Retiming Bridge for publisher transcripts/chapters, or streams 180s+5s overlapping
+ *    chunks through whisper.cpp with chunk checkpoints while extracting 24 kHz acoustic frames.
  * 3. Saves WordIndexBlob + MuteSegments atomically and unloads Whisper before loading Qwen3.
  * 4. If full mode: embeds segments with Qwen3, unloads Embedder, runs ad_tagger.onnx, and saves AdSegments.
  */
@@ -68,6 +70,7 @@ class AutoMuteAnalyzer(
     private val modelManager: ModelManager = ModelManager(context)
 ) {
     private val dao = db.dao()
+    private val json = Json { ignoreUnknownKeys = true }
 
     suspend fun analyzeEpisode(
         episodeId: String,
@@ -86,10 +89,12 @@ class AutoMuteAnalyzer(
         val resolvedPrePad = prePadMs ?: precision.prePadMs
         val resolvedPostPad = postPadMs ?: precision.postPadMs
         try {
-            return runPipeline(
-                episodeId, audioFile, knownSha256, quickWordMuteOnly, feedTranscriptRaw,
-                feedTranscriptMime, resolvedPrePad, resolvedPostPad, defaultActionMode, onProgress
-            ) { stage = it }
+            return withContext(CpuTopology.analysisDispatcher) {
+                runPipeline(
+                    episodeId, audioFile, knownSha256, quickWordMuteOnly, feedTranscriptRaw,
+                    feedTranscriptMime, resolvedPrePad, resolvedPostPad, defaultActionMode, onProgress
+                ) { stage = it }
+            }
         } catch (c: CancellationException) {
             android.util.Log.w("HushCastPerf", "Analysis cancelled during [$stage]")
             throw c
@@ -142,7 +147,8 @@ class AutoMuteAnalyzer(
                         stageLabel = stage,
                         peakRssMb = peakRssMb,
                         analysisDurationMs = durationMs,
-                        encoderDelayMs = encoderDelayMs
+                        encoderDelayMs = encoderDelayMs,
+                        pipelineVersion = CURRENT_PIPELINE_VERSION
                     )
                 )
             }
@@ -158,10 +164,29 @@ class AutoMuteAnalyzer(
         val sha256 = knownSha256?.takeIf { it.isNotBlank() } ?: StreamingSha256.hashFile(audioFile)
         currentSha = sha256
 
+        // R2: Skip full run if already READY for this sha256 at current pipeline version
         val existingIndex = dao.getWordIndex(sha256)
+        val existingStatus = dao.getStatus(episodeId)
+        if (existingIndex != null &&
+            existingStatus != null &&
+            existingStatus.fileSha256 == sha256 &&
+            existingStatus.badge == ReadinessBadge.READY.name &&
+            existingStatus.pipelineVersion >= CURRENT_PIPELINE_VERSION &&
+            (effectiveQuickWordMuteOnly || dao.getAdSegments(sha256).isNotEmpty())
+        ) {
+            val blob = BlobCodec.decompress(existingIndex.compressedBlob)
+            val muteCount = applyWordRules(sha256, episodeId, blob.words, prePadMs, postPadMs, defaultActionMode)
+            dao.clearAnalysisForOtherHashes(episodeId, sha256)
+            val adCount = dao.getAdSegments(sha256).size
+            val elapsed = System.currentTimeMillis() - startTime
+            writeStatus(100, "Ready", ReadinessBadge.READY, force = true, durationMs = elapsed)
+            return AnalysisResult(sha256, ReadinessBadge.READY, blob.words.size, muteCount, adCount, peakRssMb, elapsed)
+        }
+
         var words: List<Word>
         var segments: List<Segment>
         var frames: Frames? = null
+        val daiCandidateSpans = ArrayList<Pair<Double, Double>>()
 
         if (existingIndex != null) {
             val blob = BlobCodec.decompress(existingIndex.compressedBlob)
@@ -192,67 +217,93 @@ class AutoMuteAnalyzer(
         } else {
             val parsedFeed = feedTranscriptRaw?.let {
                 runCatching { TranscriptParser.parse(it, feedTranscriptMime) }.getOrNull()
-            }?.takeIf { it.segments.isNotEmpty() && it.hasWordLevelTimings }
+            }?.takeIf { it.segments.isNotEmpty() }
 
             val paths = modelManager.getPaths()
             val useFastModel = HushCastPrefs.isFastModelEnabled(context)
             val useFlashAttn = HushCastPrefs.isFastAttentionEnabled(context)
             val whisperModelPath = if (useFastModel) paths.whisperTinyEn.absolutePath else paths.whisperBaseEn.absolutePath
             val vadModelStr = paths.sileroVad.takeIf { it.exists() }?.absolutePath
+            val threads = CpuTopology.recommendedThreads(context)
 
-            val extractor = if (!quickWordMuteOnly) FrameExtractor() else null
+            var daiSucceeded = false
+            var daiWords: List<Word> = emptyList()
+            var daiSegments: List<Segment> = emptyList()
 
             if (parsedFeed != null) {
-                writeStatus(5, "Decoding audio", ReadinessBadge.ANALYZING)
-                val pcm = PcmBuffer()
-                try {
-                    var lastDecodePct = 5
-                    val info = AudioDecoder.decode(
-                        path = audioFile.absolutePath,
-                        frames = extractor,
-                        pcm16k = pcm,
-                        shouldAbort = shouldAbort
-                    ) { fraction ->
-                        val pct = (5 + (fraction * 20f).toInt()).coerceIn(5, 25)
-                        if (pct > lastDecodePct) {
-                            lastDecodePct = pct
-                            onProgress(AnalysisProgress(pct, "Decoding audio ($pct%)", ReadinessBadge.ANALYZING))
-                        }
-                    }
-                    encoderDelayMs = info.encoderDelayMs
-                    frames = extractor?.finish()
-
-                    writeStatus(25, "Verifying feed transcript", ReadinessBadge.ANALYZING)
+                val durSec = AudioDecoder.probeDurationSec(audioFile.absolutePath)
+                if (durSec >= MIN_FEED_CHECK_DUR_SEC) {
+                    writeStatus(5, "Aligning publisher transcript", ReadinessBadge.ANALYZING)
+                    val enabledRules = dao.getEnabledRules().map { it.toDomain() }
                     val transcriber = Transcriber(
                         modelPath = whisperModelPath,
+                        threads = threads,
                         useDtw = true,
                         useFlashAttn = useFlashAttn,
                         isTiny = useFastModel
                     )
-                    try {
-                        val output = transcribeWithFeedFallback(
-                            transcriber = transcriber,
-                            vadPath = paths.sileroVad,
-                            pcm = pcm,
+                    val daiResult = try {
+                        DaiRetimer.retimeTranscript(
+                            audioPath = audioFile.absolutePath,
+                            durationSec = durSec,
                             parsedFeed = parsedFeed,
+                            transcriber = transcriber,
+                            vadModelPath = vadModelStr,
+                            enabledRules = enabledRules,
                             shouldAbort = shouldAbort
-                        ) { wPct ->
-                            val pct = (25 + (wPct * 34) / 100).coerceIn(25, 59)
-                            onProgress(AnalysisProgress(pct, "Transcribing speech ($pct%)", ReadinessBadge.ANALYZING))
+                        ) { subPct ->
+                            val pct = (5 + (subPct * 35) / 100).coerceIn(5, 40)
+                            onProgress(AnalysisProgress(pct, "Aligning transcript ($pct%)", ReadinessBadge.ANALYZING))
                         }
-                        words = output.first
-                        segments = output.second
                     } finally {
                         transcriber.close()
                     }
-                } finally {
-                    pcm.close()
+                    if (daiResult != null) {
+                        daiSucceeded = true
+                        daiWords = daiResult.words
+                        daiSegments = daiResult.segments
+                        daiCandidateSpans.addAll(daiResult.adCandidateSpansSec)
+                        dao.upsertOffsetMap(
+                            EpisodeOffsetMapEntity(
+                                fileSha256 = sha256,
+                                episodeId = episodeId,
+                                stretchesJson = json.encodeToString(daiResult.offsetMap)
+                            )
+                        )
+                    }
+                }
+            }
+
+            if (daiSucceeded) {
+                words = daiWords
+                segments = daiSegments
+                if (!effectiveQuickWordMuteOnly) {
+                    writeStatus(42, "Extracting acoustic features", ReadinessBadge.ANALYZING)
+                    val extractor = FrameExtractor()
+                    var lastPct = 42
+                    val info = AudioDecoder.decode(
+                        path = audioFile.absolutePath,
+                        frames = extractor,
+                        pcm16k = null,
+                        shouldAbort = shouldAbort
+                    ) { fraction ->
+                        val pct = (42 + (fraction * 17f).toInt()).coerceIn(42, 59)
+                        if (pct > lastPct) {
+                            lastPct = pct
+                            onProgress(AnalysisProgress(pct, "Extracting audio ($pct%)", ReadinessBadge.ANALYZING))
+                        }
+                    }
+                    encoderDelayMs = info.encoderDelayMs
+                    frames = extractor.finish()
                 }
             } else {
-                // E1 + E5: Stream 180s+5s overlapping chunks directly into Whisper (~11.8 MB peak PCM)
+                // E1 + E5 + R2: Stream 180s+5s overlapping chunks with checkpoint resume
+                val extractor = if (!effectiveQuickWordMuteOnly) FrameExtractor() else null
+                val checkpoints = dao.getCheckpoints(sha256).associateBy { it.chunkIndex }
                 writeStatus(5, "Loading Whisper", ReadinessBadge.ANALYZING)
                 val transcriber = Transcriber(
                     modelPath = whisperModelPath,
+                    threads = threads,
                     useDtw = true,
                     useFlashAttn = useFlashAttn,
                     isTiny = useFastModel
@@ -270,13 +321,31 @@ class AutoMuteAnalyzer(
                         shouldAbort = shouldAbort,
                         onPcmChunk = { chunkStartSec, chunkPcm ->
                             if (shouldAbort()) throw CancellationException("Analysis cancelled")
-                            chunkIdx++
-                            val out = transcriber.transcribe(
-                                pcm = chunkPcm,
-                                vadModelPath = vadModelStr,
-                                shouldAbort = shouldAbort
-                            )
-                            mergeChunkOutput(chunkStartSec, out.words, out.segments, allWords, allSegments)
+                            val idx = chunkIdx++
+                            val saved = checkpoints[idx]
+                            if (saved != null) {
+                                val cWords = json.decodeFromString<List<Word>>(saved.wordsJson)
+                                val cSegs = json.decodeFromString<List<Segment>>(saved.segmentsJson)
+                                mergeChunkOutput(saved.chunkStartSec, cWords, cSegs, allWords, allSegments)
+                            } else {
+                                val out = transcriber.transcribe(
+                                    pcm = chunkPcm,
+                                    vadModelPath = vadModelStr,
+                                    shouldAbort = shouldAbort
+                                )
+                                mergeChunkOutput(chunkStartSec, out.words, out.segments, allWords, allSegments)
+                                kotlinx.coroutines.runBlocking {
+                                    dao.upsertCheckpoint(
+                                        EpisodeChunkCheckpointEntity(
+                                            fileSha256 = sha256,
+                                            chunkIndex = idx,
+                                            chunkStartSec = chunkStartSec,
+                                            wordsJson = json.encodeToString(out.words),
+                                            segmentsJson = json.encodeToString(out.segments)
+                                        )
+                                    )
+                                }
+                            }
                         },
                         onProgress = { fraction ->
                             val pct = maxOf(lastTranscribePct, (5 + (fraction * 54f).toInt()).coerceIn(5, 59))
@@ -307,6 +376,7 @@ class AutoMuteAnalyzer(
                     encoderDelayMs = encoderDelayMs
                 )
             )
+            dao.deleteCheckpoints(sha256)
             dao.pruneHashCache()
         }
 
@@ -322,6 +392,7 @@ class AutoMuteAnalyzer(
 
         val finalFrames = frames
         if (effectiveQuickWordMuteOnly || segments.isEmpty() || finalFrames == null) {
+            dao.clearAnalysisForOtherHashes(episodeId, sha256)
             val elapsed = System.currentTimeMillis() - startTime
             writeStatus(100, "Word-Mute Ready", ReadinessBadge.WORD_MUTE_READY, force = true, durationMs = elapsed)
             return AnalysisResult(sha256, ReadinessBadge.WORD_MUTE_READY, words.size, muteCount, 0, peakRssMb, elapsed)
@@ -330,7 +401,7 @@ class AutoMuteAnalyzer(
         writeStatus(65, "Embedding sentences for ad detection", ReadinessBadge.WORD_MUTE_READY, force = true)
         val paths = modelManager.getPaths()
         val embeddings: FloatArray
-        val embedder = Embedder(paths.qwenEmbedder.absolutePath)
+        val embedder = Embedder(paths.qwenEmbedder.absolutePath, threads = CpuTopology.recommendedThreads(context))
         try {
             setStage("Embedding ${segments.size} sentences (Qwen3)")
             check(embedder.dim == Tagger.EMB_DIM) { "embedder dim ${embedder.dim} != ${Tagger.EMB_DIM}" }
@@ -351,15 +422,14 @@ class AutoMuteAnalyzer(
         }
 
         writeStatus(90, "Detecting sponsor segments", ReadinessBadge.WORD_MUTE_READY, force = true)
-        val tagger = Tagger(modelManager.loadTaggerBytes())
+        val tagger = Tagger(modelManager.taggerFile())
         val adEntities = try {
             val probs = tagger.probs(embeddings, SegmentFeatures.compute(finalFrames, segments))
             val highSpans = Decoder.findSpans(probs, segments)
             val candidates = Decoder.findCandidates(probs, highSpans, segments)
 
-            val list = ArrayList<AdSegmentEntity>(highSpans.size + candidates.size)
+            val list = ArrayList<AdSegmentEntity>(highSpans.size + candidates.size + daiCandidateSpans.size)
             for (s in highSpans) {
-                // F6: Only sponsor_ad is auto-skippable high confidence; promos/memberships/boilerplate are marked only
                 val isSponsor = s.type == "sponsor_ad"
                 val displayLabel = when (s.type) {
                     "sponsor_ad" -> "Sponsor / Ad"
@@ -395,6 +465,26 @@ class AutoMuteAnalyzer(
                     )
                 )
             }
+            // DAI Retiming Bridge: pass uncovered ad-break gaps as separate candidate spans
+            for ((gStartSec, gEndSec) in daiCandidateSpans) {
+                val gStartMs = (gStartSec * 1000.0).toLong()
+                val gEndMs = (gEndSec * 1000.0).toLong()
+                val overlapsHigh = highSpans.any { (it.start * 1000.0) < gEndMs && (it.end * 1000.0) > gStartMs }
+                if (!overlapsHigh) {
+                    list.add(
+                        AdSegmentEntity(
+                            fileSha256 = sha256,
+                            episodeId = episodeId,
+                            startMs = gStartMs,
+                            endMs = gEndMs,
+                            confidence = 0.72f,
+                            isHighConfidence = false,
+                            label = "DAI Ad Break",
+                            adClass = "sponsor_ad"
+                        )
+                    )
+                }
+            }
             list
         } finally {
             tagger.close()
@@ -403,6 +493,7 @@ class AutoMuteAnalyzer(
         setStage("Saving ad segments")
         dao.deleteAdSegmentsByEpisode(episodeId)
         dao.replaceAdSegments(sha256, adEntities)
+        dao.clearAnalysisForOtherHashes(episodeId, sha256)
 
         val elapsed = System.currentTimeMillis() - startTime
         writeStatus(100, "Ready", ReadinessBadge.READY, force = true, durationMs = elapsed)
@@ -468,6 +559,34 @@ class AutoMuteAnalyzer(
         return applyWordRules(fileSha256, episodeId, blob.words, prePadMs, postPadMs, defaultActionMode)
     }
 
+    suspend fun reevaluateMuteRulesWithCompiled(
+        fileSha256: String,
+        episodeId: String,
+        prePadMs: Long = 80L,
+        postPadMs: Long = 100L,
+        compiled: WordMatcher.CompiledRules
+    ): Int {
+        val index = dao.getWordIndex(fileSha256) ?: return 0
+        val blob = BlobCodec.decompress(index.compressedBlob)
+        val windows = WordMatcher.matchWords(blob.words, compiled, prePadMs, postPadMs)
+        dao.replaceMuteSegments(
+            fileSha256,
+            windows.map { w ->
+                MuteSegmentEntity(
+                    fileSha256 = fileSha256,
+                    episodeId = episodeId,
+                    startMs = w.startMs,
+                    endMs = w.endMs,
+                    word = w.word,
+                    ruleId = w.ruleId,
+                    actionMode = w.actionMode.name,
+                    enabled = w.enabled
+                )
+            }
+        )
+        return windows.size
+    }
+
     private suspend fun applyWordRules(
         sha256: String,
         episodeId: String,
@@ -496,151 +615,17 @@ class AutoMuteAnalyzer(
         return windows.size
     }
 
-    private suspend fun transcribeChunked(
-        transcriber: Transcriber,
-        vadModelStr: String?,
-        pcm: PcmBuffer,
-        shouldAbort: () -> Boolean,
-        onWhisperProgress: ((Int) -> Unit)? = null
-    ): Pair<List<Word>, List<Segment>> {
-        val dur = pcm.durationSeconds
-        if (dur <= CHUNK_SEC) {
-            val out = transcriber.transcribe(pcm, vadModelPath = vadModelStr, shouldAbort = shouldAbort, onProgress = onWhisperProgress)
-            return out.words to out.segments
-        }
-
-        val allWords = ArrayList<Word>()
-        val allSegments = ArrayList<Segment>()
-        var start = 0.0
-        var lastOverall = 0
-        while (start < dur - 0.1) {
-            yield()
-            val end = (start + CHUNK_SEC).coerceAtMost(dur)
-            val basePct = (start / dur) * 100.0
-            val spanPct = ((end - start) / dur) * 100.0
-            val out = transcriber.transcribeRange(
-                pcm = pcm,
-                startSec = start,
-                endSec = end,
-                vadModelPath = vadModelStr,
-                shouldAbort = shouldAbort,
-                onProgress = { subPct ->
-                    val overall = maxOf(lastOverall, (basePct + (subPct * spanPct) / 100.0).toInt().coerceIn(0, 100))
-                    if (overall > lastOverall) {
-                        lastOverall = overall
-                        onWhisperProgress?.invoke(overall)
-                    }
-                }
-            )
-            mergeChunkOutput(0.0, out.words, out.segments, allWords, allSegments)
-            val endOverall = maxOf(lastOverall, ((end / dur) * 100.0).toInt().coerceIn(0, 100))
-            if (endOverall > lastOverall) {
-                lastOverall = endOverall
-                onWhisperProgress?.invoke(endOverall)
-            }
-            if (end >= dur - 0.1) break
-            start = (end - OVERLAP_SEC).coerceAtLeast(start + 1.0)
-        }
-        return allWords to allSegments
-    }
-
-    /**
-     * Verifies a feed transcript using 30-second spot-checks (start, middle, end) requiring both
-     * word overlap (>= 55%) and median timestamp offset < 0.3s (E17).
-     */
-    private suspend fun transcribeWithFeedFallback(
-        transcriber: Transcriber,
-        vadPath: File,
-        pcm: PcmBuffer,
-        parsedFeed: ParsedTranscript?,
-        shouldAbort: () -> Boolean,
-        onWhisperProgress: ((Int) -> Unit)? = null
-    ): Pair<List<Word>, List<Segment>> {
-        val vadModelStr = vadPath.takeIf { it.exists() }?.absolutePath
-        if (parsedFeed == null || parsedFeed.segments.isEmpty() || !parsedFeed.hasWordLevelTimings) {
-            return transcribeChunked(transcriber, vadModelStr, pcm, shouldAbort, onWhisperProgress)
-        }
-
-        val dur = pcm.durationSeconds
-        if (dur < MIN_FEED_CHECK_DUR_SEC) {
-            return transcribeChunked(transcriber, vadModelStr, pcm, shouldAbort, onWhisperProgress)
-        }
-
-        val checkStarts = SPOT_CHECK_FRACTIONS.map { dur * it }
-        var passed = 0
-        for (s in checkStarts) {
-            yield()
-            val end = (s + SPOT_CHECK_SEC).coerceAtMost(dur)
-            val sampleOut = transcriber.transcribeRange(pcm, s, end, shouldAbort = shouldAbort)
-            val sampleWords = sampleOut.words
-                .mapNotNull { w -> WordMatcher.normalizeToken(w.text).takeIf { it.isNotEmpty() }?.let { it to w.start } }
-            val feedWords = parsedFeed.words
-                .filter { it.start >= s - 2.0 && it.end <= end + 2.0 }
-                .mapNotNull { w -> WordMatcher.normalizeToken(w.text).takeIf { it.isNotEmpty() }?.let { it to w.start } }
-            if (sampleWords.isNotEmpty() && feedWords.isNotEmpty()) {
-                val feedMap = feedWords.groupBy({ it.first }, { it.second })
-                val offsets = ArrayList<Double>()
-                var matched = 0
-                for ((tok, tSample) in sampleWords) {
-                    val candidates = feedMap[tok] ?: continue
-                    matched++
-                    val bestDelta = candidates.minOf { abs(it - tSample) }
-                    offsets.add(bestDelta)
-                }
-                val overlap = matched.toDouble() / minOf(sampleWords.size, feedWords.size)
-                val medianOffset = if (offsets.isNotEmpty()) {
-                    offsets.sort()
-                    offsets[offsets.size / 2]
-                } else Double.MAX_VALUE
-                if (overlap >= SPOT_CHECK_OVERLAP_MIN && medianOffset < MAX_FEED_MEDIAN_OFFSET_SEC) {
-                    passed++
-                }
-            }
-        }
-
-        if (passed < 2) {
-            return transcribeChunked(transcriber, vadModelStr, pcm, shouldAbort, onWhisperProgress)
-        }
-
-        val mergedWords = parsedFeed.words.toMutableList()
-        val mergedSegments = parsedFeed.segments.toMutableList()
-        if (vadPath.exists()) {
-            val speechSpans = VadDetector.detectSpeech(vadPath.absolutePath, pcm, threshold = VAD_THRESHOLD, minSilenceDurationMs = VAD_MIN_SILENCE_MS)
-            for (span in speechSpans) {
-                if (span.endSec - span.startSec < MIN_UNCOVERED_GAP_SEC) continue
-                val covered = parsedFeed.segments.any { seg ->
-                    seg.end >= span.startSec + 1.0 && seg.start <= span.endSec - 1.0
-                }
-                if (!covered) {
-                    yield()
-                    val gapOut = transcriber.transcribeRange(pcm, span.startSec, span.endSec, shouldAbort = shouldAbort)
-                    mergedWords.addAll(gapOut.words)
-                    mergedSegments.addAll(gapOut.segments)
-                }
-            }
-        }
-        return mergedWords.sortedBy { it.start } to mergedSegments.sortedBy { it.start }
-    }
-
     private fun currentRssMb(): Int {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return 0
         val info = am.getProcessMemoryInfo(intArrayOf(Process.myPid())).firstOrNull() ?: return 0
         return info.totalPss / 1024
     }
 
-    private companion object {
-        const val CHUNK_SEC = 180.0
-        const val OVERLAP_SEC = 5.0
-        const val OVERLAP_DEDUP_TOLERANCE_SEC = 0.15
-        const val STATUS_WRITE_INTERVAL_MS = 5_000L
-        const val HIGH_CONFIDENCE_THRESHOLD = 0.80
-        const val MIN_FEED_CHECK_DUR_SEC = 90.0
-        const val SPOT_CHECK_SEC = 30.0
-        val SPOT_CHECK_FRACTIONS = listOf(0.10, 0.50, 0.85)
-        const val SPOT_CHECK_OVERLAP_MIN = 0.55
-        const val MAX_FEED_MEDIAN_OFFSET_SEC = 0.30
-        const val MIN_UNCOVERED_GAP_SEC = 3.5
-        const val VAD_THRESHOLD = 0.35f
-        const val VAD_MIN_SILENCE_MS = 1000
+    companion object {
+        const val CURRENT_PIPELINE_VERSION = 5
+        private const val OVERLAP_DEDUP_TOLERANCE_SEC = 0.15
+        private const val STATUS_WRITE_INTERVAL_MS = 5_000L
+        private const val HIGH_CONFIDENCE_THRESHOLD = 0.80
+        private const val MIN_FEED_CHECK_DUR_SEC = 90.0
     }
 }

@@ -51,11 +51,20 @@ interface PodcastEpisodeDao {
         observedEntities = [
             PodcastEpisodeModel::class,
             PodcastEpisodePlayStateModel::class,
+            PodcastEpisodeDownloadModel::class
+        ]
+    )
+    fun queryPaged(query: SupportSQLiteQuery): PagingSource<Int, PodcastEpisodeBundle>
+
+    @RawQuery(
+        observedEntities = [
+            PodcastEpisodeModel::class,
+            PodcastEpisodePlayStateModel::class,
             PodcastEpisodeDownloadModel::class,
             app.podiumpodcasts.podium.api.db.model.PodcastSubscriptionModel::class
         ]
     )
-    fun queryPaged(query: SupportSQLiteQuery): PagingSource<Int, PodcastEpisodeBundle>
+    fun queryNewEpisodesPaged(query: SupportSQLiteQuery): PagingSource<Int, PodcastEpisodeBundle>
 
     fun buildNewEpisodesQuery(
         excludePlayed: Boolean,
@@ -153,6 +162,10 @@ interface PodcastEpisodeDao {
 
     @Query("SELECT id FROM podcastEpisode WHERE origin=:origin")
     suspend fun getEpisodeIds(origin: String): List<String>
+
+    @Transaction
+    @Query("SELECT * FROM podcastEpisode WHERE id IN (:ids)")
+    suspend fun getByIds(ids: List<String>): List<PodcastEpisodeBundle>
 
     @Transaction
     @Query("SELECT * FROM podcastEpisode WHERE id=:id")

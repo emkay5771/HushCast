@@ -21,6 +21,7 @@ fun SubscriptionCard(
     fillCell: Boolean = true,
     showTitles: Boolean = true,
     compact: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit
 ) {
     val badgeCount = unplayedCountOverride ?: bundle.subscription.newEpisodes
@@ -49,6 +50,7 @@ fun SubscriptionCard(
                 }
             }
         },
+        onLongClick = onLongClick,
         onClick = onClick
     )
 }

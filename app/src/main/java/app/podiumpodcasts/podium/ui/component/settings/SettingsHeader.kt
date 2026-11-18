@@ -7,8 +7,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import app.podiumpodcasts.podium.ui.theme.Typography
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -16,12 +17,14 @@ fun SettingsHeader(
     label: String
 ) {
     Box(
-        Modifier.padding(12.dp)
+        Modifier
+            .padding(12.dp)
+            .semantics { heading() }
     ) {
         Text(
             text = label,
             color = MaterialTheme.colorScheme.primary,
-            style = Typography.titleMediumEmphasized
+            style = MaterialTheme.typography.titleSmall
         )
     }
 }

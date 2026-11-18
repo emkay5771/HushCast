@@ -44,7 +44,7 @@ fun PodcastEpisodeQueueButton(
     var showMenu by remember { mutableStateOf(false) }
 
     AnimatedVisibility(
-        visible = vm.isPlayerVisible && !isCurrentlyPlaying,
+        visible = !isCurrentlyPlaying,
         enter = fadeIn() + expandIn(expandFrom = Alignment.Center),
         exit = fadeOut() + shrinkOut(shrinkTowards = Alignment.Center)
     ) {

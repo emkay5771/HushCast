@@ -50,11 +50,13 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import app.hushcast.automute.storage.toDomain
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -219,6 +221,17 @@ fun PodcastEpisodeDetailView(
                 }
             }
 
+            val detailPlayerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.PlayerScreenViewModel>()
+            val detailMediaVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+            androidx.compose.runtime.LaunchedEffect(episode.id, episode.duration) {
+                detailPlayerVm.bindEpisode(episode.id, episode.duration * 1000L)
+            }
+            val detailChapters by detailPlayerVm.resolvedChapters.collectAsState(initial = emptyList())
+            val detailTranscriptState by detailPlayerVm.transcriptState.collectAsState(
+                initial = app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.TranscriptLoadState.Loading
+            )
+            val detailMutes by detailPlayerVm.muteSegments.collectAsState(initial = emptyList())
+
             // Pocket Casts-style balanced action row
             Surface(
                 modifier = Modifier
@@ -295,12 +308,58 @@ fun PodcastEpisodeDetailView(
                             onDismissRequest = { showMoreMenu = false }
                         ) {
                             DropdownMenuItem(
+                                text = { Text("Play Next") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    detailMediaVm.playNext(downloadContext, bundle)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Play Last") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    detailMediaVm.enqueue(downloadContext, bundle)
+                                }
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Save to List") },
                                 onClick = {
                                     showMoreMenu = false
                                     showSaveToList = true
                                 }
                             )
+                            if (detailChapters.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("Generate chapters") },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        downloadScope.launch {
+                                            val localFile = episode.craftDownloadFile(downloadContext)
+                                            if (isAlreadyDownloaded && !hasDesktopUrl && localFile.exists()) {
+                                                app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueAnalyzeNow(
+                                                    context = downloadContext,
+                                                    episodeId = episode.id,
+                                                    audioPath = localFile.absolutePath,
+                                                    actionMode = app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode,
+                                                    episodeTitle = episode.title
+                                                )
+                                            } else {
+                                                app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                                    context = downloadContext,
+                                                    db = downloadDb,
+                                                    episodeId = episode.id,
+                                                    downloadMethod = if (hasDesktopUrl) {
+                                                        app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
+                                                    } else {
+                                                        app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
+                                                    },
+                                                    forceReprocess = isAlreadyDownloaded
+                                                )
+                                            }
+                                        }
+                                    }
+                                )
+                            }
                             DropdownMenuItem(
                                 text = { Text("Process with HushCast") },
                                 onClick = {
@@ -406,6 +465,102 @@ fun PodcastEpisodeDetailView(
                 }
             }
 
+            // T1 & C6: Transcript & Chapters on Episode Detail page
+            var showDetailTranscriptSheet by remember { mutableStateOf(false) }
+
+            if (detailTranscriptState is app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.TranscriptLoadState.Ready) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    androidx.compose.material3.FilledTonalButton(
+                        onClick = { showDetailTranscriptSheet = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("View transcript")
+                    }
+                }
+            }
+
+            if (detailChapters.isNotEmpty()) {
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Chapters (${detailChapters.size})",
+                                style = Typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            detailChapters.forEach { ch ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            detailMediaVm.play(context, bundle)
+                                            detailMediaVm.seek(ch.startMs)
+                                        }
+                                        .padding(vertical = 8.dp, horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = ch.title,
+                                        style = Typography.bodyMedium,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = android.text.format.DateUtils.formatElapsedTime(ch.startMs / 1000L),
+                                        style = Typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (showDetailTranscriptSheet) {
+                androidx.compose.material3.ModalBottomSheet(
+                    sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                    sheetMaxWidth = androidx.compose.ui.unit.Dp.Infinity,
+                    onDismissRequest = { showDetailTranscriptSheet = false }
+                ) {
+                    Box(modifier = Modifier.fillMaxWidth().height(640.dp)) {
+                        app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.TranscriptOverlay(
+                            state = detailTranscriptState,
+                            episodeTitle = episode.title,
+                            currentPositionMs = if (detailMediaVm.metadataEpisodeId == episode.id) detailMediaVm.rememberLivePositionMs(100L) else 0L,
+                            isPlaying = detailMediaVm.metadataEpisodeId == episode.id && detailMediaVm.isPlaying,
+                            muteWindows = detailMutes.map { it.toDomain() },
+                            onClose = { showDetailTranscriptSheet = false },
+                            onSeekToMs = { posMs ->
+                                if (detailMediaVm.metadataEpisodeId != episode.id) {
+                                    detailMediaVm.play(context, bundle)
+                                }
+                                detailMediaVm.seek(posMs)
+                            },
+                            onMuteWord = { word ->
+                                detailPlayerVm.addMuteWordRule(word.text, app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode)
+                            },
+                            onShareTxt = { lines ->
+                                detailPlayerVm.shareTranscriptTxt(context, episode.title, lines)
+                            },
+                            onRetry = { detailPlayerVm.retryPublisherTranscript() },
+                            onProcessNow = { showDetailTranscriptSheet = false },
+                            onDownloadNow = { showDetailTranscriptSheet = false },
+                            bottomControlsPadding = 24.dp
+                        )
+                    }
+                }
+            }
+
             // Show notes expanded by default (Pocket Casts style)
             Column(Modifier.padding(16.dp)) {
                 Surface(
@@ -475,6 +630,7 @@ fun PodcastEpisodeDetailView(
             }
 
             FloatingMediaPlayerSpacer()
+            Spacer(Modifier.height(24.dp))
         }
     }
 }

@@ -156,9 +156,20 @@ class MediaLibrarySessionCallback(
         if (playerCommand == Player.COMMAND_SEEK_TO_PREVIOUS && service.headsetPrevAction == HeadsetPrevAction.SKIP_BACK) {
             session.player.seekBack()
             return SessionResult.RESULT_INFO_SKIPPED
-        } else if (playerCommand == Player.COMMAND_SEEK_TO_NEXT && service.headsetNextAction == HeadsetNextAction.SKIP_FORWARD) {
-            session.player.seekForward()
-            return SessionResult.RESULT_INFO_SKIPPED
+        } else if (playerCommand == Player.COMMAND_SEEK_TO_NEXT) {
+            when (service.headsetNextAction) {
+                HeadsetNextAction.SKIP_FORWARD -> {
+                    session.player.seekForward()
+                    return SessionResult.RESULT_INFO_SKIPPED
+                }
+                HeadsetNextAction.NEXT_CHAPTER -> {
+                    if (!service.jumpToNextChapter()) {
+                        session.player.seekForward()
+                    }
+                    return SessionResult.RESULT_INFO_SKIPPED
+                }
+                HeadsetNextAction.NEXT_EPISODE -> Unit
+            }
         }
 
         return super.onPlayerCommandRequest(session, controller, playerCommand)

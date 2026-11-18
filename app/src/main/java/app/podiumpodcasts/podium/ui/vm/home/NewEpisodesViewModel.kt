@@ -47,7 +47,7 @@ class NewEpisodesViewModel(
                     onlyInProgress = filter.onlyInProgress,
                     onlyDownloaded = filter.onlyDownloaded
                 )
-                db.podcastEpisodes().queryPaged(query)
+                db.podcastEpisodes().queryNewEpisodesPaged(query)
             }.flow
         }
         .cachedIn(viewModelScope)

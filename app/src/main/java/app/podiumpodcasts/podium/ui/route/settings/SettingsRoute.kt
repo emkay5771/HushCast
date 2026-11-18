@@ -37,6 +37,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -101,7 +102,8 @@ fun SettingsRoute(
     }
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
-    val debugUnlocked = remember { androidx.compose.runtime.mutableStateOf(app.podiumpodcasts.podium.BuildConfig.DEBUG) }
+    val scope = rememberCoroutineScope()
+    val devMode by settingsRepository.hushCast.devMode.collectAsState(initial = false)
     val versionTapCount = remember { androidx.compose.runtime.mutableIntStateOf(0) }
 
     Scaffold(
@@ -131,11 +133,34 @@ fun SettingsRoute(
         ) {
             item {
                 SettingsHeader(
-                    label = "HushCast AI"
+                    label = "HushCast"
                 )
             }
 
             item {
+                val wordMuting by settingsRepository.hushCast.wordMutingEnabled.collectAsState(initial = true)
+                val adPolicy by settingsRepository.hushCast.adPolicyMode.collectAsState(initial = app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP)
+                val workerConfigured = remember {
+                    app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) &&
+                        app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+                }
+                val modelsReady = remember { app.hushcast.automute.engine.ModelManager(context).areAllModelsReady() }
+                val whereLabel = when {
+                    workerConfigured -> "Cloud / desktop"
+                    modelsReady -> "This phone"
+                    else -> null
+                }
+                val statusDesc = if (whereLabel == null) {
+                    "Set up muting, sponsor skipping & processing"
+                } else {
+                    val mStr = if (wordMuting) "Muting on" else "Muting off"
+                    val sStr = when (adPolicy) {
+                        app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP -> "Skipping on"
+                        app.hushcast.automute.dsp.AdPolicyMode.MARK_ONLY -> "Marking only"
+                        app.hushcast.automute.dsp.AdPolicyMode.OFF -> "Skipping off"
+                    }
+                    "$mStr · $sStr · $whereLabel"
+                }
                 SettingsListItem(
                     icon = {
                         Icon(
@@ -143,14 +168,144 @@ fun SettingsRoute(
                             contentDescription = ""
                         )
                     },
-                    label = "Auto-Mute & Ad-Skip",
-                    description = "Word muting, sponsor skipping, models & desktop worker",
+                    label = "HushCast",
+                    description = statusDesc,
                     index = 0,
                     count = 1,
                     onClick = {
                         onPane(SettingsHushCastKey())
                     }
                 )
+            }
+
+            item {
+                Spacer(Modifier.height(16.dp))
+            }
+
+            item {
+                SettingsListItem(
+                    icon = {
+                        Icon(
+                            Icons.Rounded.ColorLens,
+                            stringResource(R.string.route_settings_appearance)
+                        )
+                    },
+                    label = stringResource(R.string.route_settings_appearance),
+                    index = 0,
+                    count = 7,
+                    onClick = {
+                        onPane(SettingsAppearanceKey())
+                    }
+                )
+            }
+
+            item {
+                SettingsListItem(
+                    icon = {
+                        Icon(
+                            Icons.Rounded.PlayArrow,
+                            stringResource(R.string.route_settings_playback)
+                        )
+                    },
+                    label = stringResource(R.string.route_settings_playback),
+                    index = 1,
+                    count = 7,
+                    onClick = {
+                        onPane(SettingsPlaybackKey())
+                    }
+                )
+            }
+
+            item {
+                SettingsListItem(
+                    icon = {
+                        Icon(
+                            Icons.Rounded.Storage,
+                            stringResource(R.string.route_settings_database_and_backup)
+                        )
+                    },
+                    label = stringResource(R.string.route_settings_database_and_backup),
+                    index = 2,
+                    count = 7,
+                    onClick = {
+                        onPane(SettingsDatabaseKey())
+                    }
+                )
+            }
+
+            item {
+                SettingsListItem(
+                    icon = {
+                        Icon(
+                            Icons.Rounded.Construction,
+                            "Updates & notifications"
+                        )
+                    },
+                    label = "Updates & notifications",
+                    index = 3,
+                    count = 7,
+                    onClick = {
+                        onPane(SettingsBackgroundActivityKey())
+                    }
+                )
+            }
+
+            item {
+                SettingsListItem(
+                    icon = {
+                        Icon(
+                            Icons.Rounded.Download,
+                            stringResource(R.string.route_settings_downloads_and_storage)
+                        )
+                    },
+                    label = stringResource(R.string.route_settings_downloads_and_storage),
+                    index = 4,
+                    count = 7,
+                    onClick = {
+                        onPane(SettingsDownloadsAndStorageKey())
+                    }
+                )
+            }
+
+            item {
+                SettingsListItem(
+                    icon = {
+                        Icon(
+                            Icons.Rounded.Sync,
+                            stringResource(R.string.route_settings_synchronization)
+                        )
+                    },
+                    label = stringResource(R.string.route_settings_synchronization),
+                    trailingContent = {
+                        ExperimentalBadge()
+                    },
+                    index = 5,
+                    count = 7,
+                    onClick = {
+                        onPane(SettingsSynchronizationKey())
+                    }
+                )
+            }
+
+            item {
+                SettingsListItem(
+                    icon = {
+                        Icon(
+                            Icons.Rounded.Visibility,
+                            stringResource(R.string.route_settings_privacy)
+                        )
+                    },
+                    label = stringResource(R.string.route_settings_privacy),
+                    index = 6,
+                    count = 7,
+                    onClick = {
+                        onPane(SettingsPrivacyKey())
+                    }
+                )
+            }
+
+            item {
+                Spacer(Modifier.height(16.dp))
             }
 
             item {
@@ -175,18 +330,14 @@ fun SettingsRoute(
                         )
                     },
                     label = stringResource(R.string.app_name),
-                    description = "v${version.first} (${version.second}) • View on GitHub",
-
+                    description = "v${version.first} (${version.second})",
                     index = 0,
                     count = 3,
-
                     onClick = {
                         versionTapCount.intValue++
-                        if (versionTapCount.intValue >= 7 && !debugUnlocked.value) {
-                            debugUnlocked.value = true
-                            android.widget.Toast.makeText(context, "Debug settings unlocked", android.widget.Toast.LENGTH_SHORT).show()
-                        } else {
-                            uriHandler.openUri(GITHUB_LINK)
+                        if (versionTapCount.intValue >= 7 && !devMode) {
+                            scope.launch { settingsRepository.hushCast.setDevMode(true) }
+                            android.widget.Toast.makeText(context, "Developer mode enabled", android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
                 )
@@ -202,16 +353,13 @@ fun SettingsRoute(
                     },
                     label = "Open-source licenses",
                     description = "See used software and their licenses",
-
                     index = 1,
                     count = 3,
-
                     onClick = {
                         onLicenses()
                     }
                 )
             }
-
 
             item {
                 SettingsListItem(
@@ -223,169 +371,17 @@ fun SettingsRoute(
                     },
                     label = "Support upstream podium on Ko-Fi",
                     description = "HushCast is forked from podium by aimok04 — buy them a coffee :)",
-
                     index = 2,
                     count = 3,
-
                     onClick = {
                         uriHandler.openUri(KOFI_LINK)
                     }
                 )
             }
 
-            item {
-                Spacer(
-                    Modifier.height(32.dp)
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.ColorLens,
-                            stringResource(R.string.route_settings_appearance)
-                        )
-                    },
-
-                    label = stringResource(R.string.route_settings_appearance),
-
-                    index = 0,
-                    count = 7,
-
-                    onClick = {
-                        onPane(SettingsAppearanceKey())
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.PlayArrow,
-                            stringResource(R.string.route_settings_playback)
-                        )
-                    },
-
-                    label = stringResource(R.string.route_settings_playback),
-
-                    index = 1,
-                    count = 7,
-
-                    onClick = {
-                        onPane(SettingsPlaybackKey())
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Storage,
-                            stringResource(R.string.route_settings_database_and_backup)
-                        )
-                    },
-
-                    label = stringResource(R.string.route_settings_database_and_backup),
-
-                    index = 2,
-                    count = 7,
-
-                    onClick = {
-                        onPane(SettingsDatabaseKey())
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Construction,
-                            stringResource(R.string.route_settings_background_activity)
-                        )
-                    },
-
-                    label = stringResource(R.string.route_settings_background_activity),
-
-                    index = 3,
-                    count = 7,
-
-                    onClick = {
-                        onPane(SettingsBackgroundActivityKey())
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Download,
-                            stringResource(R.string.route_settings_downloads_and_storage)
-                        )
-                    },
-
-                    label = stringResource(R.string.route_settings_downloads_and_storage),
-
-                    index = 4,
-                    count = 7,
-
-                    onClick = {
-                        onPane(SettingsDownloadsAndStorageKey())
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Sync,
-                            stringResource(R.string.route_settings_synchronization)
-                        )
-                    },
-
-                    label = stringResource(R.string.route_settings_synchronization),
-
-                    trailingContent = {
-                        ExperimentalBadge()
-                    },
-
-                    index = 5,
-                    count = 7,
-
-                    onClick = {
-                        onPane(SettingsSynchronizationKey())
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Visibility,
-                            stringResource(R.string.route_settings_privacy)
-                        )
-                    },
-
-                    label = stringResource(R.string.route_settings_privacy),
-
-                    index = 6,
-                    count = 7,
-
-                    onClick = {
-                        onPane(SettingsPrivacyKey())
-                    }
-                )
-            }
-
-            if (debugUnlocked.value) {
+            if (devMode) {
                 item {
-                    Spacer(Modifier.height(32.dp))
+                    Spacer(Modifier.height(16.dp))
                 }
 
                 item {

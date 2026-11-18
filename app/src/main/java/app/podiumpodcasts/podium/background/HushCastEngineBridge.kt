@@ -71,7 +71,26 @@ object HushCastEngineBridge {
     var currentEpisodeId: String? = null
 
     @Volatile
+    var currentResolvedChapters: List<app.podiumpodcasts.podium.api.chapters.ResolvedChapter> = emptyList()
+
+    @Volatile
     private var skippedChapterRanges: List<app.hushcast.automute.dsp.SkipAwareSeekCalculator.SkipRange> = emptyList()
+
+    fun updateSkippedChapterRangesResolved(
+        episodeId: String,
+        chapters: List<app.podiumpodcasts.podium.api.chapters.ResolvedChapter>,
+        skippedStarts: Set<Long>
+    ) {
+        if (episodeId != currentEpisodeId && !currentEpisodeId.isNullOrBlank()) return
+        currentResolvedChapters = chapters
+        if (chapters.isEmpty() || skippedStarts.isEmpty()) {
+            skippedChapterRanges = emptyList()
+            return
+        }
+        skippedChapterRanges = chapters
+            .filter { it.publishedStartMs in skippedStarts && it.endMs > it.startMs }
+            .map { app.hushcast.automute.dsp.SkipAwareSeekCalculator.SkipRange(it.startMs, it.endMs) }
+    }
 
     fun updateSkippedChapterRanges(
         episodeId: String,
@@ -99,6 +118,7 @@ object HushCastEngineBridge {
     }
 
     fun clearSkippedChapterRanges() {
+        currentResolvedChapters = emptyList()
         skippedChapterRanges = emptyList()
     }
 

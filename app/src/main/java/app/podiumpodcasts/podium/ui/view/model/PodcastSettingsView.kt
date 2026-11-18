@@ -474,9 +474,14 @@ fun PodcastSettingsView(
                 val globalPolicy by settingsRepository.hushCast.adPolicyMode.collectAsState(
                     initial = app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP
                 )
-                val effectivePolicy = policyEntity?.policyMode?.let {
+                val overridePolicy = policyEntity?.policyMode?.let {
                     runCatching { app.hushcast.automute.dsp.AdPolicyMode.valueOf(it) }.getOrNull()
-                } ?: globalPolicy
+                }
+                val globalLabel = when (globalPolicy) {
+                    app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP -> "Auto-skip"
+                    app.hushcast.automute.dsp.AdPolicyMode.MARK_ONLY -> "Mark only"
+                    app.hushcast.automute.dsp.AdPolicyMode.OFF -> "Off"
+                }
 
                 SettingsListItem(
                     icon = {
@@ -490,7 +495,8 @@ fun PodcastSettingsView(
                         Column {
                             Text("Choose how HushCast handles sponsor segments in this podcast")
                             Spacer(Modifier.height(12.dp))
-                            val options = listOf(
+                            val options = listOf<Pair<app.hushcast.automute.dsp.AdPolicyMode?, String>>(
+                                null to "Default ($globalLabel)",
                                 app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP to "Auto-Skip",
                                 app.hushcast.automute.dsp.AdPolicyMode.MARK_ONLY to "Mark Only",
                                 app.hushcast.automute.dsp.AdPolicyMode.OFF to "Off"
@@ -500,20 +506,24 @@ fun PodcastSettingsView(
                             ) {
                                 options.forEachIndexed { idx, (mode, label) ->
                                     SegmentedButton(
-                                        selected = effectivePolicy == mode,
+                                        selected = overridePolicy == mode,
                                         onClick = {
                                             scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                                autoMuteDb.dao().upsertPodcastAdPolicy(
-                                                    app.hushcast.automute.storage.PodcastAdPolicyEntity(
-                                                        podcastOrigin = podcast.origin,
-                                                        policyMode = mode.name
+                                                if (mode == null) {
+                                                    autoMuteDb.dao().deletePodcastAdPolicy(podcast.origin)
+                                                } else {
+                                                    autoMuteDb.dao().upsertPodcastAdPolicy(
+                                                        app.hushcast.automute.storage.PodcastAdPolicyEntity(
+                                                            podcastOrigin = podcast.origin,
+                                                            policyMode = mode.name
+                                                        )
                                                     )
-                                                )
+                                                }
                                             }
                                         },
                                         shape = SegmentedButtonDefaults.itemShape(idx, options.size)
                                     ) {
-                                        Text(label, maxLines = 1)
+                                        Text(label, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
                             }

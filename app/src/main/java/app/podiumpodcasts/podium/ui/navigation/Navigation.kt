@@ -86,7 +86,7 @@ data object OpmlImporting : PodiumNavKey(showNavBar = false, showMediaPlayer = f
 @Serializable
 data object Unknown : PodiumNavKey()
 
-@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@OptIn(ExperimentalMaterial3AdaptiveApi::class, androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun Navigation(
     backStack: NavBackStack<NavKey>,
@@ -108,6 +108,10 @@ fun Navigation(
         }
     }
 
+    val navSpatial = MaterialTheme.motionScheme.defaultSpatialSpec<androidx.compose.ui.unit.IntOffset>()
+    val navEffects = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
+    val navScaleSpec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+
     NavDisplay(
         modifier = Modifier
             .fillMaxSize()
@@ -118,48 +122,28 @@ fun Navigation(
             rememberSaveableStateHolderNavEntryDecorator()
         ),
         transitionSpec = {
-            (slideInHorizontally(
-                animationSpec = tween(
-                    durationMillis = 200,
-                    easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
-                )
-            ) { it / 12 } + fadeIn(animationSpec = tween(110)))
+            (slideInHorizontally(animationSpec = navSpatial) { it / 12 } + fadeIn(animationSpec = navEffects))
                 .togetherWith(
-                    slideOutHorizontally(
-                        animationSpec = tween(
-                            durationMillis = 200,
-                            easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
-                        )
-                    ) { -it / 16 }
+                    slideOutHorizontally(animationSpec = navSpatial) { -it / 16 } + fadeOut(animationSpec = navEffects)
                 )
         },
         popTransitionSpec = {
-            (slideInHorizontally(
-                animationSpec = tween(
-                    durationMillis = 200,
-                    easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
-                )
-            ) { -it / 14 })
+            (slideInHorizontally(animationSpec = navSpatial) { -it / 14 } + fadeIn(animationSpec = navEffects))
                 .togetherWith(
-                    slideOutHorizontally(
-                        animationSpec = tween(
-                            durationMillis = 200,
-                            easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0.0f, 0.0f, 1.0f)
-                        )
-                    ) { it / 10 } + fadeOut(animationSpec = tween(140))
+                    slideOutHorizontally(animationSpec = navSpatial) { it / 10 } + fadeOut(animationSpec = navEffects)
                 ).apply {
                     targetContentZIndex = -1f
                 }
         },
         predictivePopTransitionSpec = { swipeEdge ->
             val fromLeft = swipeEdge == BackEventCompat.EDGE_LEFT
-            (slideInHorizontally(animationSpec = tween(easing = LinearEasing)) { if (fromLeft) -it / 16 else it / 16 } +
-                    scaleIn(initialScale = 0.97f, animationSpec = tween(easing = LinearEasing)) +
-                    fadeIn(initialAlpha = 0.80f, animationSpec = tween(easing = LinearEasing)))
+            (slideInHorizontally(animationSpec = navSpatial) { if (fromLeft) -it / 16 else it / 16 } +
+                    scaleIn(initialScale = 0.96f, animationSpec = navScaleSpec) +
+                    fadeIn(initialAlpha = 0.80f, animationSpec = navEffects))
                 .togetherWith(
-                    slideOutHorizontally(animationSpec = tween(easing = LinearEasing)) { if (fromLeft) it / 12 else -it / 12 } +
-                            scaleOut(targetScale = 0.85f, animationSpec = tween(easing = LinearEasing)) +
-                            fadeOut(targetAlpha = 0.45f, animationSpec = tween(easing = LinearEasing))
+                    slideOutHorizontally(animationSpec = navSpatial) { if (fromLeft) it / 12 else -it / 12 } +
+                            scaleOut(targetScale = 0.90f, animationSpec = navScaleSpec) +
+                            fadeOut(targetAlpha = 0.0f, animationSpec = navEffects)
                 ).apply {
                     targetContentZIndex = -1f
                 }
@@ -269,7 +253,8 @@ fun Navigation(
 
                 is AddPodcast -> NavEntry(key) {
                     AddPodcastRoute(
-                        onOpenPodcast = onClickPodcast
+                        onOpenPodcast = onClickPodcast,
+                        onImportOpml = { backStack.add(OpmlImporting) }
                     ) {
                         backStack.removeLastOrNull()
                     }

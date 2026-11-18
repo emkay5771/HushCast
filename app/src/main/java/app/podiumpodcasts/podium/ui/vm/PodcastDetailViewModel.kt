@@ -67,7 +67,7 @@ class PodcastDetailViewModel(
         }
             .distinctUntilChanged()
             .flatMapLatest { q ->
-                Pager(PagingConfig(pageSize = 15)) {
+                Pager(PagingConfig(pageSize = 30, prefetchDistance = 30)) {
                     val query = db.podcastEpisodes().buildQuery(
                         origin = podcast.origin,
                         searchQuery = q.search,

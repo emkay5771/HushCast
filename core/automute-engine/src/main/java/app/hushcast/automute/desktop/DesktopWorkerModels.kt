@@ -12,7 +12,12 @@ data class DesktopHealthResponse(
     val modelsReady: Boolean = false,
     val whisperModel: String = "",
     val chatModelReady: Boolean = false,
-    val cachedEpisodes: Int = 0
+    val cachedEpisodes: Int = 0,
+    val apiVersion: Int = 1,
+    val pipelineVersion: Int = 1,
+    val deployment: String = "local",
+    val gpuName: String? = null,
+    val modelsLoaded: Boolean = false
 )
 
 @Serializable
@@ -22,6 +27,10 @@ data class DesktopJobRequest(
     val title: String = "",
     val feedTranscriptRaw: String? = null,
     val feedTranscriptMime: String = "",
+    val feedTranscriptUrl: String? = null,
+    val feedChaptersUrl: String? = null,
+    val feedChaptersType: String? = null,
+    val language: String? = null,
     val force: Boolean = false,
     val reprocessStage: String? = null
 )
@@ -34,7 +43,14 @@ data class DesktopJobResponse(
     val progressPercent: Int = 0,
     val stageLabel: String = "",
     val fileSha256: String? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val stage: String? = null,
+    val stageProgress: Float = 0f,
+    val errorCode: String? = null,
+    val retryable: Boolean = false,
+    val queuePosition: Int = 0,
+    val etaSec: Int? = null,
+    val rev: Long = 0L
 )
 
 @Serializable

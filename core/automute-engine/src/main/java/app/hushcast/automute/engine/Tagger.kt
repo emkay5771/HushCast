@@ -11,14 +11,25 @@ import java.nio.FloatBuffer
  * and one 28-float feature row per segment; output: 5 probabilities per segment, row-major,
  * columns in [Decoder.CLASSES] order.  Small and fast; CPU is fine.
  */
-class Tagger(modelBytes: ByteArray) : AutoCloseable {
-    constructor(modelFile: File) : this(modelFile.readBytes())
+class Tagger private constructor(
+    private val env: OrtEnvironment,
+    private val session: OrtSession,
+) : AutoCloseable {
+    constructor(modelBytes: ByteArray) : this(
+        OrtEnvironment.getEnvironment(),
+        OrtSession.SessionOptions().use { opts ->
+            opts.setIntraOpNumThreads(CpuTopology.performanceCoreCount())
+            OrtEnvironment.getEnvironment().createSession(modelBytes, opts)
+        }
+    )
 
-    private val env = OrtEnvironment.getEnvironment()
-    private val session = OrtSession.SessionOptions().use { opts ->
-        opts.setIntraOpNumThreads(CpuTopology.performanceCoreCount())
-        env.createSession(modelBytes, opts)
-    }
+    constructor(modelFile: File) : this(
+        OrtEnvironment.getEnvironment(),
+        OrtSession.SessionOptions().use { opts ->
+            opts.setIntraOpNumThreads(CpuTopology.performanceCoreCount())
+            OrtEnvironment.getEnvironment().createSession(modelFile.absolutePath, opts)
+        }
+    )
 
     fun probs(emb: FloatArray, feats: FloatArray): FloatArray {
         val n = feats.size / SegmentFeatures.COUNT

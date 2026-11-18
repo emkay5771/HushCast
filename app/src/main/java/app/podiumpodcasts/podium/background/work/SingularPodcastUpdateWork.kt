@@ -32,12 +32,12 @@ class SingularPodcastUpdateWork(
             }
 
             val podcast =
-                response.rssChannel.toPodcast(oldPodcast.origin, response.fileSize, oldPodcast)
+                response.rssChannel.toPodcast(oldPodcast.origin, response.fileSize, oldPodcast, response.extras.language)
             db.podcasts().update(podcast)
 
             val candidateEpisodes = response.rssChannel.items
                 .filter { !episodeIds.contains(it.computeEpisodeId(podcast.origin)) }
-                .map { it.toPodcastEpisode(podcast = podcast, new = true) }
+                .map { it.toPodcastEpisode(podcast = podcast, new = true, extras = response.extras) }
 
             val inserted = db.podcastEpisodes()
                 .insertAllAndUpdateNewEpisodesCount(

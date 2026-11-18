@@ -133,11 +133,11 @@ fun PodcastPreviewView(
                                         Icon(
                                             modifier = Modifier.size(FloatingActionButtonDefaults.LargeIconSize),
                                             imageVector = Icons.Rounded.Add,
-                                            contentDescription = stringResource(R.string.common_action_add)
+                                            contentDescription = "Subscribe"
                                         )
                                     },
                                     text = {
-                                        Text(stringResource(R.string.common_action_add))
+                                        Text("Subscribe")
                                     },
                                     onClick = {
                                         vm.add()

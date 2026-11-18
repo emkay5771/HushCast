@@ -18,6 +18,7 @@ import app.podiumpodcasts.podium.ui.view.model.AddPodcastView
 @Composable
 fun AddPodcastRoute(
     onOpenPodcast: (origin: String) -> Unit,
+    onImportOpml: (() -> Unit)? = null,
     onBack: () -> Unit
 ) {
     Scaffold(
@@ -37,7 +38,9 @@ fun AddPodcastRoute(
         Box(
             Modifier.padding(inset)
         ) {
-            AddPodcastView {
+            AddPodcastView(
+                onImportOpml = onImportOpml
+            ) {
                 onOpenPodcast(it)
                 onBack()
             }

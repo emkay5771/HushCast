@@ -50,11 +50,11 @@ Java_app_hushcast_automute_nativebridge_LlamaJni_load(JNIEnv * env, jclass, jstr
     llama_context_params cp = llama_context_default_params();
     cp.embeddings = true;
     cp.pooling_type = LLAMA_POOLING_TYPE_LAST;
-    cp.n_ctx = 2048;
-    cp.n_batch = 2048;
+    cp.n_ctx = 1024;
+    cp.n_batch = 1024;
     // 512 keeps the attention/compute buffer ~4x smaller than 2048 with little speed cost on CPU
     cp.n_ubatch = 512;
-    cp.n_seq_max = 64;
+    cp.n_seq_max = 32;
     cp.kv_unified = true;
     cp.n_threads = std::max(1, (int) threads);
     cp.n_threads_batch = cp.n_threads;
@@ -115,7 +115,7 @@ Java_app_hushcast_automute_nativebridge_LlamaJni_embed(JNIEnv * env, jclass, jlo
     llama_batch batch = llama_batch_init(e->n_batch, 0, 1);
     int i = 0;
     while (i < n) {
-        llama_memory_clear(llama_get_memory(e->ctx), true);
+        llama_memory_clear(llama_get_memory(e->ctx), false);
         batch.n_tokens = 0;
         const int first = i;
         int seq = 0;

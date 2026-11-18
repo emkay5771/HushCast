@@ -29,6 +29,11 @@ dev = [
     "pytest>=8.0.0",
 ]
 
+[dependency-groups]
+deploy = [
+    "modal==1.6.4",
+]
+
 [project.scripts]
 hushcast-worker = "hushcast_worker.cli:main"
 

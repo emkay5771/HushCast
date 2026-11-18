@@ -31,11 +31,43 @@ class PodcastEpisodeDownloadWork(
 ) {
     companion object {
         private val transferSemaphore = Semaphore(2)
-        private val desktopOffloadSemaphore = Semaphore(1)
-        private const val PROGRESS_THROTTLE_MS = 250L
+        private val desktopOffloadSemaphore = Semaphore(4)
+        private const val PROGRESS_THROTTLE_MS = 500L
     }
 
     private var lastProgressUpdate = 0L
+
+    private suspend fun fetchFeedTranscriptRaw(url: String): String? {
+        if (url.isBlank()) return null
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                val conn = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 10_000
+                    readTimeout = 15_000
+                    instanceFollowRedirects = true
+                }
+                try {
+                    if (conn.responseCode !in 200..299) return@runCatching null
+                    val bytes = conn.inputStream.use { input ->
+                        val out = java.io.ByteArrayOutputStream()
+                        val buf = ByteArray(8192)
+                        var total = 0
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n <= 0) break
+                            total += n
+                            if (total > 5 * 1024 * 1024) return@runCatching null
+                            out.write(buf, 0, n)
+                        }
+                        out.toByteArray()
+                    }
+                    bytes.decodeToString()
+                } finally {
+                    conn.disconnect()
+                }
+            }.getOrNull()
+        }
+    }
 
     suspend fun doWork(
         episodeId: String,
@@ -50,6 +82,7 @@ class PodcastEpisodeDownloadWork(
         val bundle = db.podcastEpisodes().getSyncNullable(episodeId)
             ?: return DownloadWorkOutcome.PermanentFailure
         val episode = bundle.episode
+        val podcastLanguage = runCatching { db.podcasts().getSync(episode.origin)?.languageCode }.getOrNull().orEmpty()
 
         if (bundle.download == null) {
             return DownloadWorkOutcome.PermanentFailure
@@ -106,6 +139,11 @@ class PodcastEpisodeDownloadWork(
                         destFile = file,
                         workerUrl = workerUrl,
                         token = app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerToken(context),
+                        feedTranscriptUrl = episode.transcriptUrl.ifBlank { null },
+                        feedTranscriptMime = episode.transcriptType,
+                        feedChaptersUrl = episode.chaptersUrl.ifBlank { null },
+                        feedChaptersType = episode.chaptersType.ifBlank { null },
+                        language = podcastLanguage.ifBlank { null },
                         forceReprocess = forceReprocess && !isRetry,
                         reprocessStage = reprocessStage,
                         resetStatusOnError = downloadMethod != app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP || isFinalAttempt,
@@ -182,23 +220,42 @@ class PodcastEpisodeDownloadWork(
                             val sha256 = withContext(Dispatchers.IO) {
                                 app.hushcast.automute.hash.StreamingSha256.hashFile(file)
                             }
-                            val chargingOnly = app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context)
-                            if (isAuto && chargingOnly) {
-                                app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueBackgroundCharging(
-                                    context = context,
-                                    episodeId = episodeId,
-                                    audioPath = file.absolutePath,
-                                    knownSha256 = sha256,
-                                    episodeTitle = episode.title
-                                )
-                            } else {
-                                app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueAnalyzeNow(
-                                    context = context,
-                                    episodeId = episodeId,
-                                    audioPath = file.absolutePath,
-                                    knownSha256 = sha256,
-                                    episodeTitle = episode.title
-                                )
+                            val existingForHash = runCatching {
+                                app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
+                                    .dao()
+                                    .getStatus(episodeId)
+                            }.getOrNull()
+                            val alreadyAnalyzedAtCurrentVersion = !forceReprocess &&
+                                existingForHash != null &&
+                                existingForHash.fileSha256 == sha256 &&
+                                existingForHash.pipelineVersion >= app.hushcast.automute.pipeline.AutoMuteAnalyzer.CURRENT_PIPELINE_VERSION &&
+                                existingForHash.badge == app.hushcast.automute.dsp.ReadinessBadge.READY.name
+                            if (!alreadyAnalyzedAtCurrentVersion) {
+                                val feedTranscriptRaw = if (episode.transcriptUrl.isNotBlank()) {
+                                    fetchFeedTranscriptRaw(episode.transcriptUrl)
+                                } else null
+                                val chargingOnly = app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context)
+                                if (isAuto && chargingOnly) {
+                                    app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueBackgroundCharging(
+                                        context = context,
+                                        episodeId = episodeId,
+                                        audioPath = file.absolutePath,
+                                        knownSha256 = sha256,
+                                        episodeTitle = episode.title,
+                                        feedTranscriptRaw = feedTranscriptRaw,
+                                        feedTranscriptMime = episode.transcriptType
+                                    )
+                                } else {
+                                    app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueAnalyzeNow(
+                                        context = context,
+                                        episodeId = episodeId,
+                                        audioPath = file.absolutePath,
+                                        knownSha256 = sha256,
+                                        episodeTitle = episode.title,
+                                        feedTranscriptRaw = feedTranscriptRaw,
+                                        feedTranscriptMime = episode.transcriptType
+                                    )
+                                }
                             }
                         }
                         outcome = DownloadWorkOutcome.Success
@@ -273,6 +330,11 @@ class PodcastEpisodeDownloadWork(
         destFile: File,
         workerUrl: String,
         token: String,
+        feedTranscriptUrl: String? = null,
+        feedTranscriptMime: String = "",
+        feedChaptersUrl: String? = null,
+        feedChaptersType: String? = null,
+        language: String? = null,
         forceReprocess: Boolean = false,
         reprocessStage: String? = null,
         resetStatusOnError: Boolean = true,
@@ -302,6 +364,7 @@ class PodcastEpisodeDownloadWork(
                 }
             }
             var trackedJobId: String? = null
+            var completedSuccessfully = false
             try {
                 val existing = runCatching { autoMuteDb.dao().getStatus(episodeId) }.getOrNull()
                 val resumeAnalyzing = !forceReprocess &&
@@ -327,6 +390,11 @@ class PodcastEpisodeDownloadWork(
                         episodeId = episodeId,
                         audioUrl = audioUrl,
                         title = title,
+                        feedTranscriptMime = feedTranscriptMime,
+                        feedTranscriptUrl = feedTranscriptUrl,
+                        feedChaptersUrl = feedChaptersUrl,
+                        feedChaptersType = feedChaptersType,
+                        language = language,
                         force = forceReprocess,
                         reprocessStage = reprocessStage
                     )
@@ -357,7 +425,7 @@ class PodcastEpisodeDownloadWork(
                     val friendlyStage = friendlyWorkerStage(status.stageLabel.ifBlank { status.state })
                     val now = System.currentTimeMillis()
                     if ((unifiedPct != lastPollNotifyPct || friendlyStage != lastFriendlyStage) &&
-                        (now - lastPollNotifyMs >= 450L || unifiedPct >= 70 || friendlyStage != lastFriendlyStage)
+                        (now - lastPollNotifyMs >= 500L || unifiedPct >= 70 || friendlyStage != lastFriendlyStage)
                     ) {
                         lastPollNotifyMs = now
                         lastPollNotifyPct = unifiedPct
@@ -370,34 +438,42 @@ class PodcastEpisodeDownloadWork(
                 val sha256 = ready.fileSha256 ?: return@coroutineScope false
                 Log.i("HushCastDesktop", "Job ${job.jobId} READY ep=$episodeId sha=${sha256.take(12)}")
 
-                highestPct = maxOf(highestPct, 72)
-                statusChannel.trySend(highestPct to "Saving to phone…")
-                onProgressUpdate?.invoke(title, "Saving to phone…", highestPct)
-                var lastStatusUpdateMs = 0L
-                var lastTransferNotifyMs = 0L
-                var lastTransferNotifyPct = highestPct
-                app.hushcast.automute.desktop.DesktopWorkerClient.downloadAudioAndVerifySha256(
-                    baseUrl = workerUrl,
-                    token = token,
-                    expectedSha256 = sha256,
-                    destFile = destFile
-                ) { received, total ->
-                    if (total > 0L) {
-                        val now = System.currentTimeMillis()
-                        val rawPct = (72 + ((received * 26L) / total).toInt()).coerceIn(72, 98)
-                        val unifiedPct = maxOf(highestPct, rawPct)
-                        highestPct = unifiedPct
-                        if (unifiedPct != lastTransferNotifyPct && (now - lastTransferNotifyMs >= 250L || unifiedPct >= 98)) {
-                            lastTransferNotifyMs = now
-                            lastTransferNotifyPct = unifiedPct
-                            DownloadTracker.update(episodeId, unifiedPct.toLong(), 100L, "Saving to phone…")
-                            onProgressUpdate?.invoke(title, "Saving to phone…", unifiedPct)
-                        }
-                        if (now - lastStatusUpdateMs >= 450L) {
-                            lastStatusUpdateMs = now
-                            statusChannel.trySend(
-                                unifiedPct to "Saving to phone (${(received * 100L / total).toInt()}%)"
-                            )
+                val localAlreadyMatches = withContext(Dispatchers.IO) {
+                    destFile.exists() && destFile.length() > 0L &&
+                        runCatching { app.hushcast.automute.hash.StreamingSha256.hashFile(destFile) == sha256 }
+                            .getOrDefault(false)
+                }
+
+                if (!localAlreadyMatches) {
+                    highestPct = maxOf(highestPct, 72)
+                    statusChannel.trySend(highestPct to "Saving to phone…")
+                    onProgressUpdate?.invoke(title, "Saving to phone…", highestPct)
+                    var lastStatusUpdateMs = 0L
+                    var lastTransferNotifyMs = 0L
+                    var lastTransferNotifyPct = highestPct
+                    app.hushcast.automute.desktop.DesktopWorkerClient.downloadAudioAndVerifySha256(
+                        baseUrl = workerUrl,
+                        token = token,
+                        expectedSha256 = sha256,
+                        destFile = destFile
+                    ) { received, total ->
+                        if (total > 0L) {
+                            val now = System.currentTimeMillis()
+                            val rawPct = (72 + ((received * 26L) / total).toInt()).coerceIn(72, 98)
+                            val unifiedPct = maxOf(highestPct, rawPct)
+                            highestPct = unifiedPct
+                            if (unifiedPct != lastTransferNotifyPct && (now - lastTransferNotifyMs >= 500L || unifiedPct >= 98)) {
+                                lastTransferNotifyMs = now
+                                lastTransferNotifyPct = unifiedPct
+                                DownloadTracker.update(episodeId, unifiedPct.toLong(), 100L, "Saving to phone…")
+                                onProgressUpdate?.invoke(title, "Saving to phone…", unifiedPct)
+                            }
+                            if (now - lastStatusUpdateMs >= 500L) {
+                                lastStatusUpdateMs = now
+                                statusChannel.trySend(
+                                    unifiedPct to "Saving to phone (${(received * 100L / total).toInt()}%)"
+                                )
+                            }
                         }
                     }
                 }
@@ -424,14 +500,29 @@ class PodcastEpisodeDownloadWork(
 
                 db.podcastEpisodeDownloads().registerDownload(episodeId, destFile.absolutePath, destFile.length())
                 app.podiumpodcasts.podium.background.PlaybackService.notifyEpisodeDownloaded(episodeId)
+                completedSuccessfully = true
                 true
             } catch (c: CancellationException) {
                 statusChannel.close()
                 statusWriter.cancel()
+                trackedJobId?.let { jobId ->
+                    withContext(kotlinx.coroutines.NonCancellable) {
+                        runCatching {
+                            app.hushcast.automute.desktop.DesktopWorkerClient.cancelJob(workerUrl, token, jobId)
+                        }
+                    }
+                }
                 throw c
             } catch (t: Throwable) {
                 statusChannel.close()
                 statusWriter.cancel()
+                trackedJobId?.let { jobId ->
+                    withContext(kotlinx.coroutines.NonCancellable) {
+                        runCatching {
+                            app.hushcast.automute.desktop.DesktopWorkerClient.cancelJob(workerUrl, token, jobId)
+                        }
+                    }
+                }
                 val errMsg = t.message ?: t.javaClass.simpleName
                 Log.w("HushCastDesktop", "Desktop worker offload failed for $episodeId: $errMsg", t)
                 if (resetStatusOnError) {
@@ -464,7 +555,11 @@ class PodcastEpisodeDownloadWork(
                 false
             } finally {
                 trackedJobId?.let {
-                    app.hushcast.automute.desktop.DesktopWorkerClient.clearActiveJob(episodeId, it)
+                    if (!completedSuccessfully) {
+                        app.hushcast.automute.desktop.DesktopWorkerClient.clearActiveJob(episodeId, it)
+                    } else {
+                        app.hushcast.automute.desktop.DesktopWorkerClient.clearActiveJob(episodeId, it)
+                    }
                 }
             }
         }

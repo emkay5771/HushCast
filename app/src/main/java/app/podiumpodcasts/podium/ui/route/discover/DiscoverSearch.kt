@@ -1,6 +1,7 @@
 package app.podiumpodcasts.podium.ui.route.discover
 
 import androidx.compose.animation.AnimatedContent
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -29,7 +30,9 @@ import androidx.compose.material3.SearchBarValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSearchBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -70,15 +73,17 @@ fun DiscoverSearch(
     val db = LocalDatabase.current
 
     val vm = viewModel(key = countryCode) { DiscoverSearchViewModel(countryCode, db) }
+    val disableAppleApi = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
+        .privacy.disableApplePodcastsApi.collectAsStateWithLifecycle(false).value
 
     @OptIn(FlowPreview::class)
-    androidx.compose.runtime.LaunchedEffect(searchBarState.currentValue) {
+    androidx.compose.runtime.LaunchedEffect(searchBarState.currentValue, disableAppleApi) {
         if (searchBarState.currentValue == SearchBarValue.Expanded) {
             androidx.compose.runtime.snapshotFlow { textFieldState.text.toString() }
                 .debounce(250L)
                 .distinctUntilChanged()
                 .collectLatest { query ->
-                    if (query.isNotBlank()) vm.search(query)
+                    if (query.isNotBlank()) vm.search(query, disableAppleApi)
                 }
         }
     }
@@ -95,12 +100,14 @@ fun DiscoverSearch(
                 enabled = searchBarState.currentValue == SearchBarValue.Expanded,
                 textFieldState = textFieldState,
                 searchBarState = searchBarState,
-                onSearch = { vm.search(it) }
+                onSearch = { vm.search(it, disableAppleApi) }
             )
         },
         navigationIcon = navigationIcon,
         actions = actions
     )
+
+    var directFeedUrl by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
 
     ExpandedFullScreenContainedSearchBar(
         state = searchBarState,
@@ -109,7 +116,7 @@ fun DiscoverSearch(
                 enabled = searchBarState.currentValue == SearchBarValue.Expanded,
                 textFieldState = textFieldState,
                 searchBarState = searchBarState,
-                onSearch = { vm.search(it) }
+                onSearch = { vm.search(it, disableAppleApi) }
             )
         },
         colors = appBarWithSearchColors.searchBarColors,
@@ -118,8 +125,30 @@ fun DiscoverSearch(
             Modifier.fillMaxSize()
         ) {
             SearchContent(
-                vm = vm
+                vm = vm,
+                queryText = textFieldState.text.toString(),
+                disableAppleApi = disableAppleApi,
+                onAddRssUrl = { url -> directFeedUrl = url }
             )
+        }
+    }
+
+    directFeedUrl?.let { url ->
+        androidx.compose.material3.ModalBottomSheet(
+            onDismissRequest = { directFeedUrl = null }
+        ) {
+            Box(modifier = Modifier.fillMaxSize(0.85f)) {
+                app.podiumpodcasts.podium.ui.view.model.AddPodcastView(
+                    predefinedUrl = url,
+                    onBack = { origin ->
+                        directFeedUrl = null
+                        scope.launch {
+                            searchBarState.animateToCollapsed()
+                            onClickPodcast(origin)
+                        }
+                    }
+                )
+            }
         }
     }
 
@@ -136,70 +165,138 @@ fun DiscoverSearch(
 
 @Composable
 private fun BoxScope.SearchContent(
-    vm: DiscoverSearchViewModel
+    vm: DiscoverSearchViewModel,
+    queryText: String,
+    disableAppleApi: Boolean,
+    onAddRssUrl: (String) -> Unit
 ) {
-    AnimatedContent(
-        targetState = vm.state.value
-    ) { state ->
-        when(state) {
-            is DiscoverSearchState.Idle -> {
-                InfoLayout(
-                    icon = Icons.Rounded.Explore,
-                    title = { stringResource(R.string.route_discover_search_title) }
+    val trimmedQuery = queryText.trim()
+    val looksLikeUrl = trimmedQuery.startsWith("http://", ignoreCase = true) ||
+        trimmedQuery.startsWith("https://", ignoreCase = true)
+
+    androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
+        if (looksLikeUrl) {
+            androidx.compose.material3.Surface(
+                onClick = { onAddRssUrl(trimmedQuery) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                color = androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer
+            ) {
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        text = stringResource(R.string.route_discover_search_text),
-                        textAlign = TextAlign.Center
+                    androidx.compose.material3.Icon(
+                        imageVector = androidx.compose.material.icons.Icons.Rounded.Explore,
+                        contentDescription = null,
+                        tint = androidx.compose.material3.MaterialTheme.colorScheme.onPrimaryContainer
                     )
-                }
-            }
-
-            is DiscoverSearchState.Loading -> {
-                LoadingLayout()
-            }
-
-            is DiscoverSearchState.Empty -> {
-                InfoLayout(
-                    icon = Icons.Rounded.SearchOff,
-                    title = { stringResource(R.string.route_discover_search_empty_title) }
-                ) {
-                    Text(
-                        text = stringResource(R.string.route_discover_search_empty_text),
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-
-            is DiscoverSearchState.Done -> {
-                LazyVerticalGrid(
-                    state = vm.gridState,
-                    columns = GridCells.Adaptive(100.dp),
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    items(state.result.size) {
-                        val podcast = state.result[it]
-
-                        PodcastPreviewCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            podcast = podcast,
-                            onClick = {
-                                vm.podcastPreviewBottomSheetState.show(podcast)
-                            }
+                    androidx.compose.foundation.layout.Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Add this feed",
+                            style = androidx.compose.material3.MaterialTheme.typography.titleSmall,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        Text(
+                            text = trimmedQuery,
+                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
-
-                    item(
-                        span = { GridItemSpan(maxLineSpan) }
-                    ) {
-                        Spacer(Modifier.height(64.dp))
-                    }
                 }
             }
+        }
 
-            is DiscoverSearchState.Error -> {
-                ErrorLayout {
-                    Text(state.error)
+        AnimatedContent(
+            targetState = vm.state.value,
+            modifier = Modifier.weight(1f)
+        ) { state ->
+            when(state) {
+                is DiscoverSearchState.Idle -> {
+                    InfoLayout(
+                        icon = Icons.Rounded.Explore,
+                        title = { stringResource(R.string.route_discover_search_title) }
+                    ) {
+                        Text(
+                            text = stringResource(R.string.route_discover_search_text),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+
+                is DiscoverSearchState.Loading -> {
+                    LoadingLayout()
+                }
+
+                is DiscoverSearchState.Empty -> {
+                    InfoLayout(
+                        icon = Icons.Rounded.SearchOff,
+                        title = { stringResource(R.string.route_discover_search_empty_title) }
+                    ) {
+                        Text(
+                            text = stringResource(R.string.route_discover_search_empty_text),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+
+                is DiscoverSearchState.Done -> {
+                    androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
+                        if (state.isSearching) {
+                            androidx.compose.material3.LinearProgressIndicator(
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        LazyVerticalGrid(
+                            state = vm.gridState,
+                            columns = GridCells.Adaptive(100.dp),
+                            contentPadding = PaddingValues(16.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            items(state.result.size) {
+                                val podcast = state.result[it]
+
+                                PodcastPreviewCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    podcast = podcast,
+                                    onClick = {
+                                        vm.podcastPreviewBottomSheetState.show(podcast)
+                                    }
+                                )
+                            }
+
+                            item(
+                                span = { GridItemSpan(maxLineSpan) }
+                            ) {
+                                Spacer(Modifier.height(64.dp))
+                            }
+                        }
+                    }
+                }
+
+                is DiscoverSearchState.Error -> {
+                    ErrorLayout(
+                        title = {
+                            if (state.isNetworkError) "No connection" else "Search failed"
+                        }
+                    ) {
+                        Text(
+                            text = state.error,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        androidx.compose.material3.Button(
+                            onClick = { vm.search(vm.lastQuery, disableAppleApi) }
+                        ) {
+                            Text(stringResource(R.string.common_action_retry))
+                        }
+                    }
                 }
             }
         }
