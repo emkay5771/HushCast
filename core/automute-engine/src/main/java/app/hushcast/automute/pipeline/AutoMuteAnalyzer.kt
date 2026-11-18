@@ -160,21 +160,22 @@ class AutoMuteAnalyzer(
         }
         val effectiveQuickWordMuteOnly = quickWordMuteOnly || !modelManager.areAdModelsReady()
 
-        writeStatus(2, "Verifying audio file", ReadinessBadge.ANALYZING)
         val sha256 = knownSha256?.takeIf { it.isNotBlank() } ?: StreamingSha256.hashFile(audioFile)
         currentSha = sha256
 
         // R2: Skip full run if already READY for this sha256 at current pipeline version
         val existingIndex = dao.getWordIndex(sha256)
         val existingStatus = dao.getStatus(episodeId)
-        if (existingIndex != null &&
-            existingStatus != null &&
-            existingStatus.fileSha256 == sha256 &&
-            existingStatus.badge == ReadinessBadge.READY.name &&
-            existingStatus.pipelineVersion >= CURRENT_PIPELINE_VERSION &&
-            (effectiveQuickWordMuteOnly || dao.getAdSegments(sha256).isNotEmpty())
+        val hasAdSegments = dao.getAdSegments(sha256).isNotEmpty()
+        if (shouldSkipFullAnalysis(
+                existingIndex = existingIndex,
+                existingStatus = existingStatus,
+                sha256 = sha256,
+                quickWordMuteOnly = effectiveQuickWordMuteOnly,
+                hasAdSegments = hasAdSegments
+            )
         ) {
-            val blob = BlobCodec.decompress(existingIndex.compressedBlob)
+            val blob = BlobCodec.decompress(existingIndex!!.compressedBlob)
             val muteCount = applyWordRules(sha256, episodeId, blob.words, prePadMs, postPadMs, defaultActionMode)
             dao.clearAnalysisForOtherHashes(episodeId, sha256)
             val adCount = dao.getAdSegments(sha256).size
@@ -183,12 +184,14 @@ class AutoMuteAnalyzer(
             return AnalysisResult(sha256, ReadinessBadge.READY, blob.words.size, muteCount, adCount, peakRssMb, elapsed)
         }
 
+        writeStatus(2, "Verifying audio file", ReadinessBadge.ANALYZING)
+
         var words: List<Word>
         var segments: List<Segment>
         var frames: Frames? = null
         val daiCandidateSpans = ArrayList<Pair<Double, Double>>()
 
-        if (existingIndex != null) {
+        if (existingIndex != null && (existingStatus?.pipelineVersion ?: 0) >= CURRENT_PIPELINE_VERSION) {
             val blob = BlobCodec.decompress(existingIndex.compressedBlob)
             words = blob.words
             segments = blob.segments
@@ -243,18 +246,22 @@ class AutoMuteAnalyzer(
                         isTiny = useFastModel
                     )
                     val daiResult = try {
-                        DaiRetimer.retimeTranscript(
-                            audioPath = audioFile.absolutePath,
-                            durationSec = durSec,
-                            parsedFeed = parsedFeed,
-                            transcriber = transcriber,
-                            vadModelPath = vadModelStr,
-                            enabledRules = enabledRules,
-                            shouldAbort = shouldAbort
-                        ) { subPct ->
-                            val pct = (5 + (subPct * 35) / 100).coerceIn(5, 40)
-                            onProgress(AnalysisProgress(pct, "Aligning transcript ($pct%)", ReadinessBadge.ANALYZING))
-                        }
+                        runCatching {
+                            DaiRetimer.retimeTranscript(
+                                audioPath = audioFile.absolutePath,
+                                durationSec = durSec,
+                                parsedFeed = parsedFeed,
+                                transcriber = transcriber,
+                                vadModelPath = vadModelStr,
+                                enabledRules = enabledRules,
+                                shouldAbort = shouldAbort
+                            ) { subPct ->
+                                val pct = (5 + (subPct * 35) / 100).coerceIn(5, 40)
+                                onProgress(AnalysisProgress(pct, "Aligning transcript ($pct%)", ReadinessBadge.ANALYZING))
+                            }
+                        }.onFailure { err ->
+                            android.util.Log.w("HushCastPerf", "DAI retimer failed, falling back to Whisper: ${err.message}")
+                        }.getOrNull()
                     } finally {
                         transcriber.close()
                     }
@@ -627,5 +634,20 @@ class AutoMuteAnalyzer(
         private const val STATUS_WRITE_INTERVAL_MS = 5_000L
         private const val HIGH_CONFIDENCE_THRESHOLD = 0.80
         private const val MIN_FEED_CHECK_DUR_SEC = 90.0
+
+        internal fun shouldSkipFullAnalysis(
+            existingIndex: EpisodeWordIndexEntity?,
+            existingStatus: EpisodeAnalysisStatusEntity?,
+            sha256: String,
+            quickWordMuteOnly: Boolean,
+            hasAdSegments: Boolean
+        ): Boolean {
+            return existingIndex != null &&
+                existingStatus != null &&
+                existingStatus.fileSha256 == sha256 &&
+                existingStatus.badge == ReadinessBadge.READY.name &&
+                existingStatus.pipelineVersion >= CURRENT_PIPELINE_VERSION &&
+                (quickWordMuteOnly || hasAdSegments)
+        }
     }
 }

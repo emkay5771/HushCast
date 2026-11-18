@@ -67,6 +67,8 @@ import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ContainedLoadingIndicator
@@ -127,6 +129,7 @@ import app.hushcast.automute.dsp.MuteActionMode
 import app.hushcast.automute.dsp.ReadinessBadge
 import app.hushcast.automute.dsp.SkipAwareSeekCalculator
 import app.hushcast.automute.engine.DownloadAnalysisMethod
+import app.hushcast.automute.engine.HushCastPrefs
 import app.hushcast.automute.engine.Word
 import app.hushcast.automute.storage.AutoMuteDatabase
 import app.hushcast.automute.storage.EpisodeAnalysisStatusEntity
@@ -331,6 +334,19 @@ fun MediaPlayerBottomSheet(
 
     fun triggerAnalyzeNow() {
         if (episodeId.isBlank()) return
+        val hasDesktopWorker = HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+        if (hasDesktopWorker) {
+            scope.launch(Dispatchers.IO) {
+                DownloadManager.downloadEpisode(
+                    context = context,
+                    db = appDb,
+                    episodeId = episodeId,
+                    downloadMethod = DownloadAnalysisMethod.DESKTOP,
+                    forceReprocess = true
+                )
+            }
+            return
+        }
         val localFile = currentEpisodeBundle?.episode?.craftDownloadFile(context)
         if (isDownloaded && localFile != null && localFile.exists()) {
             scope.launch(Dispatchers.IO) {
@@ -506,10 +522,20 @@ fun MediaPlayerBottomSheet(
                                 .size(48.dp),
                             onClick = { showQueueBottomSheet = true }
                         ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
-                                contentDescription = "Up Next (${vm.queue.size})"
-                            )
+                            BadgedBox(
+                                badge = {
+                                    if (vm.queue.isNotEmpty()) {
+                                        Badge {
+                                            Text(vm.queue.size.toString())
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                                    contentDescription = "Up Next (${vm.queue.size})"
+                                )
+                            }
                         }
                     }
                 }
@@ -528,303 +554,312 @@ fun MediaPlayerBottomSheet(
                     ) { pageIndex ->
                         when (visibleTabs.getOrNull(pageIndex) ?: MediaPlayerTab.PLAYER) {
                             MediaPlayerTab.PLAYER -> {
-                                Box(modifier = Modifier.fillMaxSize()) {
-                                    Column(
+                                Column(
+                                    modifier = Modifier.fillMaxSize(),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    // Top area: Artwork + Titles + Skip pill (or TranscriptOverlay when open)
+                                    Box(
                                         modifier = Modifier
-                                            .fillMaxSize()
-                                            .padding(horizontal = 24.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.SpaceBetween
+                                            .weight(1f)
+                                            .fillMaxWidth()
                                     ) {
-                                        // Banners & Artwork + Titles (fades out when transcript opens)
                                         Column(
                                             modifier = Modifier
-                                                .weight(1f)
-                                                .fillMaxWidth()
+                                                .fillMaxSize()
+                                                .padding(horizontal = 20.dp)
                                                 .graphicsLayer { alpha = chromeAlpha },
                                             horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.Center
+                                            verticalArrangement = Arrangement.SpaceBetween
                                         ) {
-                                            AnimatedVisibility(visible = isCastingExternal) {
-                                                CastingBypassNoticeBanner(modifier = Modifier.padding(bottom = 8.dp))
-                                            }
-
-                                            // Artwork with chapter image cross-fade & link button (C3) + swipe-up for Up Next (M4)
-                                            Box(
+                                            Column(
                                                 modifier = Modifier
-                                                    .pointerInput(Unit) {
-                                                        val thresholdPx = 64.dp.toPx()
-                                                        awaitEachGesture {
-                                                            val down = awaitFirstDown(requireUnconsumed = true)
-                                                            var totalDy = 0f
-                                                            var triggered = false
-                                                            while (true) {
-                                                                val event = awaitPointerEvent()
-                                                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                                                if (!change.pressed) break
-                                                                totalDy += (change.position.y - change.previousPosition.y)
-                                                                if (!triggered && totalDy < -thresholdPx) {
-                                                                    triggered = true
-                                                                    change.consume()
-                                                                    showQueueBottomSheet = true
+                                                    .weight(1f)
+                                                    .fillMaxWidth(),
+                                                horizontalAlignment = Alignment.CenterHorizontally,
+                                                verticalArrangement = Arrangement.Center
+                                            ) {
+                                                AnimatedVisibility(visible = isCastingExternal) {
+                                                    CastingBypassNoticeBanner(modifier = Modifier.padding(bottom = 8.dp))
+                                                }
+
+                                                // Artwork with chapter image cross-fade & link button (C3) + swipe-up for Up Next (M4)
+                                                Box(
+                                                    modifier = Modifier
+                                                        .pointerInput(Unit) {
+                                                            val thresholdPx = 64.dp.toPx()
+                                                            awaitEachGesture {
+                                                                val down = awaitFirstDown(requireUnconsumed = true)
+                                                                var totalDy = 0f
+                                                                var triggered = false
+                                                                while (true) {
+                                                                    val event = awaitPointerEvent()
+                                                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                                                    if (!change.pressed) break
+                                                                    totalDy += (change.position.y - change.previousPosition.y)
+                                                                    if (!triggered && totalDy < -thresholdPx) {
+                                                                        triggered = true
+                                                                        change.consume()
+                                                                        showQueueBottomSheet = true
+                                                                    }
                                                                 }
                                                             }
-                                                        }
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                val artSize = if (compactLayout) 112.dp else 248.dp
-                                                val artUri = currentChapter?.imageUrl?.takeIf { it.isNotBlank() }
-                                                    ?: vm.mediaMetadata?.artworkUri?.toString()
+                                                        },
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    val artSize = if (compactLayout) 128.dp else 300.dp
+                                                    val artUri = currentChapter?.imageUrl?.takeIf { it.isNotBlank() }
+                                                        ?: vm.mediaMetadata?.artworkUri?.toString()
 
-                                                AnimatedContent(
-                                                    targetState = vm.isLoading to artUri,
-                                                    label = "playerArtwork"
-                                                ) { (loading, uri) ->
-                                                    if (loading) {
-                                                        Box(
-                                                            modifier = Modifier.size(artSize),
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            ContainedLoadingIndicator(Modifier.size(artSize / 2))
+                                                    AnimatedContent(
+                                                        targetState = vm.isLoading to artUri,
+                                                        label = "playerArtwork"
+                                                    ) { (loading, uri) ->
+                                                        if (loading) {
+                                                            Box(
+                                                                modifier = Modifier.size(artSize),
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                ContainedLoadingIndicator(Modifier.size(artSize / 2))
+                                                            }
+                                                        } else {
+                                                            ShimmerAsyncImage(
+                                                                modifier = Modifier
+                                                                    .size(artSize)
+                                                                    .clip(RoundedCornerShape(if (compactLayout) 16.dp else 28.dp)),
+                                                                model = uri,
+                                                                contentDescription = null,
+                                                                contentScale = ContentScale.Crop
+                                                            )
                                                         }
-                                                    } else {
-                                                        ShimmerAsyncImage(
+                                                    }
+
+                                                    val chapterUrl = currentChapter?.linkUrl
+                                                    if (!chapterUrl.isNullOrBlank()) {
+                                                        FilledTonalIconButton(
+                                                            onClick = { runCatching { uriHandler.openUri(chapterUrl) } },
                                                             modifier = Modifier
-                                                                .size(artSize)
-                                                                .clip(RoundedCornerShape(if (compactLayout) 16.dp else 24.dp)),
-                                                            model = uri,
-                                                            contentDescription = null,
-                                                            contentScale = ContentScale.Crop
-                                                        )
-                                                    }
-                                                }
-
-                                                val chapterUrl = currentChapter?.linkUrl
-                                                if (!chapterUrl.isNullOrBlank()) {
-                                                    FilledTonalIconButton(
-                                                        onClick = { runCatching { uriHandler.openUri(chapterUrl) } },
-                                                        modifier = Modifier
-                                                            .align(Alignment.BottomEnd)
-                                                            .padding(8.dp)
-                                                            .size(48.dp)
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
-                                                            contentDescription = "Open chapter link"
-                                                        )
-                                                    }
-                                                }
-                                            }
-
-                                            Spacer(Modifier.height(if (compactLayout) 8.dp else 16.dp))
-
-                                            // Episode title
-                                            Text(
-                                                text = vm.mediaMetadata?.title?.toString() ?: "",
-                                                style = if (compactLayout) Typography.titleMediumEmphasized else Typography.titleLargeEmphasized,
-                                                maxLines = 2,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-
-                                            Spacer(Modifier.height(4.dp))
-
-                                            // Podcast name + single-line streaming notice (I11)
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.Center,
-                                                modifier = Modifier
-                                                    .clickable(enabled = onOpenPodcast != null && vm.metadataOrigin != null) {
-                                                        val origin = vm.metadataOrigin
-                                                        if (onOpenPodcast != null && origin != null) {
-                                                            dismissGracefully { onOpenPodcast(origin) }
+                                                                .align(Alignment.BottomEnd)
+                                                                .padding(8.dp)
+                                                                .size(48.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
+                                                                contentDescription = "Open chapter link"
+                                                            )
                                                         }
                                                     }
-                                            ) {
+                                                }
+
+                                                Spacer(Modifier.height(if (compactLayout) 10.dp else 20.dp))
+
+                                                // Episode title
                                                 Text(
-                                                    text = vm.mediaMetadata?.artist?.toString() ?: "",
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 1,
+                                                    text = vm.mediaMetadata?.title?.toString() ?: "",
+                                                    style = if (compactLayout) Typography.titleMediumEmphasized else Typography.headlineSmall,
+                                                    maxLines = 2,
                                                     overflow = TextOverflow.Ellipsis
                                                 )
-                                                if (vm.mediaSourceType is SourceTypeState.Streaming && !downloadBannerDismissedForEp) {
-                                                    Text(
-                                                        text = " · Streaming",
-                                                        style = MaterialTheme.typography.bodyMedium,
-                                                        color = MaterialTheme.colorScheme.primary,
-                                                        maxLines = 1,
-                                                        modifier = Modifier.clickable {
-                                                            triggerDownloadNow()
-                                                            downloadBannerDismissedForEp = true
-                                                        }
-                                                    )
-                                                }
-                                            }
 
-                                            // C2: Chapter line ‹ Chapter title · 3 of 12 › + 28dp progress ring + time left
-                                            if (currentChapter != null && resolvedChapters.isNotEmpty()) {
                                                 Spacer(Modifier.height(6.dp))
-                                                ChapterNavigationLine(
-                                                    chapters = resolvedChapters,
-                                                    currentChapter = currentChapter,
-                                                    currentIndex = currentChapterIndex,
-                                                    skippedStarts = skippedChapterStarts,
-                                                    positionMs = livePosMs,
-                                                    speed = vm.speed,
-                                                    adjustForSpeed = adjustRemainingForSpeed,
-                                                    onSeekToMs = { vm.seek(it) },
-                                                    onOpenChaptersTab = {
-                                                        if (MediaPlayerTab.CHAPTERS in visibleTabs) {
-                                                            selectedTab = MediaPlayerTab.CHAPTERS
+
+                                                // Podcast name + single-line streaming notice (I11)
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.Center,
+                                                    modifier = Modifier
+                                                        .clickable(enabled = onOpenPodcast != null && vm.metadataOrigin != null) {
+                                                            val origin = vm.metadataOrigin
+                                                            if (onOpenPodcast != null && origin != null) {
+                                                                dismissGracefully { onOpenPodcast(origin) }
+                                                            }
+                                                        }
+                                                ) {
+                                                    Text(
+                                                        text = vm.mediaMetadata?.artist?.toString() ?: "",
+                                                        style = MaterialTheme.typography.bodyLarge,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    if (vm.mediaSourceType is SourceTypeState.Streaming && !downloadBannerDismissedForEp) {
+                                                        Text(
+                                                            text = " · Streaming",
+                                                            style = MaterialTheme.typography.bodyLarge,
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            maxLines = 1,
+                                                            modifier = Modifier.clickable {
+                                                                triggerDownloadNow()
+                                                                downloadBannerDismissedForEp = true
+                                                            }
+                                                        )
+                                                    }
+                                                }
+
+                                                // C2: Chapter line ‹ Chapter title · 3 of 12 › + 28dp progress ring + time left
+                                                if (currentChapter != null && resolvedChapters.isNotEmpty()) {
+                                                    Spacer(Modifier.height(8.dp))
+                                                    ChapterNavigationLine(
+                                                        chapters = resolvedChapters,
+                                                        currentChapter = currentChapter,
+                                                        currentIndex = currentChapterIndex,
+                                                        skippedStarts = skippedChapterStarts,
+                                                        positionMs = livePosMs,
+                                                        speed = vm.speed,
+                                                        adjustForSpeed = adjustRemainingForSpeed,
+                                                        onSeekToMs = { vm.seek(it) },
+                                                        onOpenChaptersTab = {
+                                                            if (MediaPlayerTab.CHAPTERS in visibleTabs) {
+                                                                selectedTab = MediaPlayerTab.CHAPTERS
+                                                            }
+                                                        }
+                                                    )
+                                                }
+                                            }
+
+                                            // Fixed-height skip/undo pill slot (M7, D1)
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(48.dp)
+                                                    .semantics { liveRegion = LiveRegionMode.Polite },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                val activeAd = remember(livePosMs, adWindows) {
+                                                    adWindows.firstOrNull { livePosMs in it.startMs..it.endMs }
+                                                }
+                                                val undo = pendingUndo
+                                                when {
+                                                    undo != null -> {
+                                                        OneTapUndoAdSkipBanner(
+                                                            event = undo,
+                                                            onUndo = {
+                                                                HushCastEngineBridge.adSkipObserver.bypassAd(undo.adWindow.startMs)
+                                                                vm.seek(undo.adWindow.startMs)
+                                                                HushCastEngineBridge.clearPendingUndo()
+                                                            },
+                                                            onDismiss = { HushCastEngineBridge.clearPendingUndo() }
+                                                        )
+                                                    }
+                                                    activeAd != null -> {
+                                                        FilledTonalButton(
+                                                            onClick = {
+                                                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                                                vm.seek(activeAd.endMs)
+                                                            },
+                                                            modifier = Modifier.height(40.dp)
+                                                        ) {
+                                                            Icon(Icons.Rounded.SkipNext, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                            Spacer(Modifier.width(6.dp))
+                                                            Text("Skip ${formatAdDisplayLabel(activeAd)}")
                                                         }
                                                     }
-                                                )
-                                            }
-                                        }
-
-                                        // Fixed-height skip/undo pill slot (M7, D1)
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(48.dp)
-                                                .graphicsLayer { alpha = chromeAlpha }
-                                                .semantics { liveRegion = LiveRegionMode.Polite },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            val activeAd = remember(livePosMs, adWindows) {
-                                                adWindows.firstOrNull { livePosMs in it.startMs..it.endMs }
-                                            }
-                                            val undo = pendingUndo
-                                            when {
-                                                undo != null -> {
-                                                    OneTapUndoAdSkipBanner(
-                                                        event = undo,
-                                                        onUndo = {
-                                                            HushCastEngineBridge.adSkipObserver.bypassAd(undo.adWindow.startMs)
-                                                            vm.seek(undo.adWindow.startMs)
-                                                            HushCastEngineBridge.clearPendingUndo()
-                                                        },
-                                                        onDismiss = { HushCastEngineBridge.clearPendingUndo() }
-                                                    )
-                                                }
-                                                activeAd != null -> {
-                                                    FilledTonalButton(
-                                                        onClick = {
-                                                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                                                            vm.seek(activeAd.endMs)
-                                                        },
-                                                        modifier = Modifier.height(40.dp)
-                                                    ) {
-                                                        Icon(Icons.Rounded.SkipNext, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                        Spacer(Modifier.width(6.dp))
-                                                        Text("Skip sponsor")
-                                                    }
                                                 }
                                             }
                                         }
 
-                                        // Seek bar & Transport (stay pinned when TranscriptOverlay is open, scaled 80% in graphicsLayer per T2)
-                                        Column(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .graphicsLayer {
-                                                    scaleX = transportScale
-                                                    scaleY = transportScale
-                                                },
-                                            horizontalAlignment = Alignment.CenterHorizontally
-                                        ) {
-                                            PlayerSeekBar(
-                                                positionMs = livePosMs,
-                                                durationMs = durationMs,
-                                                playbackSpeed = vm.speed,
-                                                adjustRemainingForSpeed = adjustRemainingForSpeed,
-                                                muteWindows = muteWindows,
-                                                adWindows = adWindows,
-                                                onSeekToMs = { vm.seek(it) },
-                                                onSkipAd = { ad -> vm.seek(ad.endMs) },
-                                                compact = showTranscriptOverlay
+                                        // T2: TranscriptOverlay fills only the top area above the pinned seek bar & transport
+                                        androidx.compose.animation.AnimatedVisibility(
+                                            visible = showTranscriptOverlay,
+                                            enter = slideInVertically(
+                                                animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                                            ) { it / 6 } + fadeIn(
+                                                animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
+                                            ),
+                                            exit = slideOutVertically(
+                                                animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                                            ) { it / 6 } + fadeOut(
+                                                animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
                                             )
-
-                                            Spacer(Modifier.height(if (showTranscriptOverlay) 4.dp else 8.dp))
-
-                                            PlayerTransportControls(
+                                        ) {
+                                            TranscriptOverlay(
+                                                state = transcriptState,
+                                                episodeTitle = vm.mediaMetadata?.title?.toString() ?: "",
+                                                currentPositionMs = livePosMs,
                                                 isPlaying = vm.isPlaying,
-                                                seekBackMs = vm.seekBackIncrement,
-                                                seekForwardMs = vm.seekForwardIncrement,
-                                                onSeekBack = {
-                                                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                                                    val target = SkipAwareSeekCalculator.computeBackTargetMs(
-                                                        fromMs = vm.livePositionNowMs(),
-                                                        incrementMs = vm.seekBackIncrement,
-                                                        skipRanges = HushCastEngineBridge.getActiveSkipRanges()
+                                                muteWindows = muteWindows,
+                                                onClose = { showTranscriptOverlay = false },
+                                                onSeekToMs = { vm.seek(it) },
+                                                onMuteWord = { word -> pendingWordMute = word },
+                                                onShareTxt = { lines ->
+                                                    playerVm.shareTranscriptTxt(
+                                                        context = context,
+                                                        episodeTitle = vm.mediaMetadata?.title?.toString() ?: "Episode",
+                                                        lines = lines
                                                     )
-                                                    vm.seek(target)
                                                 },
-                                                onTogglePlay = {
-                                                    haptic.performHapticFeedback(
-                                                        if (vm.isPlaying) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn
-                                                    )
-                                                    if (vm.isPlaying) vm.pause() else vm.play()
+                                                onRetry = { playerVm.retryPublisherTranscript() },
+                                                onProcessNow = {
+                                                    showTranscriptOverlay = false
+                                                    triggerAnalyzeNow()
                                                 },
-                                                onSeekForward = {
-                                                    haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                                                    val target = SkipAwareSeekCalculator.computeForwardTargetMs(
-                                                        fromMs = vm.livePositionNowMs(),
-                                                        incrementMs = vm.seekForwardIncrement,
-                                                        durationMs = vm.currentDuration,
-                                                        skipRanges = HushCastEngineBridge.getActiveSkipRanges()
-                                                    )
-                                                    vm.seek(target)
-                                                }
+                                                onDownloadNow = {
+                                                    showTranscriptOverlay = false
+                                                    triggerDownloadNow()
+                                                },
+                                                bottomControlsPadding = 12.dp
                                             )
                                         }
-
-                                        Spacer(Modifier.height(8.dp))
                                     }
 
-                                    // T2: TranscriptOverlay slides up over Playing page, leaving pinned seek bar & transport at bottom
-                                    androidx.compose.animation.AnimatedVisibility(
-                                        visible = showTranscriptOverlay,
-                                        enter = slideInVertically(
-                                            animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
-                                        ) { it / 6 } + fadeIn(
-                                            animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
-                                        ),
-                                        exit = slideOutVertically(
-                                            animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
-                                        ) { it / 6 } + fadeOut(
-                                            animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
-                                        )
+                                    // Seek bar & Transport (always pinned & clickable below TranscriptOverlay)
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 20.dp)
+                                            .graphicsLayer {
+                                                scaleX = transportScale
+                                                scaleY = transportScale
+                                            },
+                                        horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
-                                        TranscriptOverlay(
-                                            state = transcriptState,
-                                            episodeTitle = vm.mediaMetadata?.title?.toString() ?: "",
-                                            currentPositionMs = livePosMs,
-                                            isPlaying = vm.isPlaying,
+                                        PlayerSeekBar(
+                                            positionMs = livePosMs,
+                                            durationMs = durationMs,
+                                            playbackSpeed = vm.speed,
+                                            adjustRemainingForSpeed = adjustRemainingForSpeed,
                                             muteWindows = muteWindows,
-                                            onClose = { showTranscriptOverlay = false },
+                                            adWindows = adWindows,
                                             onSeekToMs = { vm.seek(it) },
-                                            onMuteWord = { word -> pendingWordMute = word },
-                                            onShareTxt = { lines ->
-                                                playerVm.shareTranscriptTxt(
-                                                    context = context,
-                                                    episodeTitle = vm.mediaMetadata?.title?.toString() ?: "Episode",
-                                                    lines = lines
+                                            onSkipAd = { ad -> vm.seek(ad.endMs) },
+                                            compact = showTranscriptOverlay
+                                        )
+
+                                        Spacer(Modifier.height(if (showTranscriptOverlay) 4.dp else 10.dp))
+
+                                        PlayerTransportControls(
+                                            isPlaying = vm.isPlaying,
+                                            seekBackMs = vm.seekBackIncrement,
+                                            seekForwardMs = vm.seekForwardIncrement,
+                                            onSeekBack = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                                val target = SkipAwareSeekCalculator.computeBackTargetMs(
+                                                    fromMs = vm.livePositionNowMs(),
+                                                    incrementMs = vm.seekBackIncrement,
+                                                    skipRanges = HushCastEngineBridge.getActiveSkipRanges()
                                                 )
+                                                vm.seek(target)
                                             },
-                                            onRetry = { playerVm.retryPublisherTranscript() },
-                                            onProcessNow = {
-                                                showTranscriptOverlay = false
-                                                triggerAnalyzeNow()
+                                            onTogglePlay = {
+                                                haptic.performHapticFeedback(
+                                                    if (vm.isPlaying) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn
+                                                )
+                                                if (vm.isPlaying) vm.pause() else vm.play()
                                             },
-                                            onDownloadNow = {
-                                                showTranscriptOverlay = false
-                                                triggerDownloadNow()
-                                            },
-                                            bottomControlsPadding = 148.dp
+                                            onSeekForward = {
+                                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                                val target = SkipAwareSeekCalculator.computeForwardTargetMs(
+                                                    fromMs = vm.livePositionNowMs(),
+                                                    incrementMs = vm.seekForwardIncrement,
+                                                    durationMs = vm.currentDuration,
+                                                    skipRanges = HushCastEngineBridge.getActiveSkipRanges()
+                                                )
+                                                vm.seek(target)
+                                            }
                                         )
                                     }
+
+                                    Spacer(Modifier.height(10.dp))
                                 }
                             }
 
@@ -1121,11 +1156,16 @@ fun MediaPlayerBottomSheet(
                     onClick = {
                         showNotDownloadedDialog = false
                         scope.launch {
+                            val method = if (HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()) {
+                                DownloadAnalysisMethod.AUTO
+                            } else {
+                                DownloadAnalysisMethod.ON_DEVICE
+                            }
                             DownloadManager.downloadEpisode(
                                 context = context,
                                 db = appDb,
                                 episodeId = episodeId,
-                                downloadMethod = DownloadAnalysisMethod.ON_DEVICE
+                                downloadMethod = method
                             )
                         }
                     }
@@ -1171,26 +1211,54 @@ fun MediaPlayerBottomSheet(
 
     pendingWordMute?.let { word ->
         val cleanWord = word.text.trim().trim { !it.isLetterOrDigit() && it != '\'' && it != '-' }
-        AlertDialog(
-            onDismissRequest = { pendingWordMute = null },
-            title = { Text("Mute \"$cleanWord\"?") },
-            text = { Text("Add \"$cleanWord\" to your HushCast word mute list so it is muted across episodes.") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        pendingWordMute = null
-                        playerVm.addMuteWordRule(cleanWord, HushCastEngineBridge.defaultActionMode)
+        val wStartMs = (word.start * 1000.0).toLong()
+        val wEndMs = (word.end * 1000.0).toLong()
+        val existingMute = muteEntities.firstOrNull { m ->
+            m.enabled && wEndMs >= m.startMs && wStartMs <= m.endMs
+        }
+        if (existingMute != null) {
+            AlertDialog(
+                onDismissRequest = { pendingWordMute = null },
+                title = { Text("Unmute \"$cleanWord\"?") },
+                text = { Text("Restore audio for this word in the current episode.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            pendingWordMute = null
+                            playerVm.toggleMuteSegment(existingMute.id, false)
+                        }
+                    ) {
+                        Text("Unmute")
                     }
-                ) {
-                    Text("Mute word")
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingWordMute = null }) {
+                        Text("Cancel")
+                    }
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingWordMute = null }) {
-                    Text("Cancel")
+            )
+        } else {
+            AlertDialog(
+                onDismissRequest = { pendingWordMute = null },
+                title = { Text("Mute \"$cleanWord\"?") },
+                text = { Text("Add \"$cleanWord\" to your HushCast word mute list so it is muted across episodes.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            pendingWordMute = null
+                            playerVm.addMuteWordRule(cleanWord, HushCastEngineBridge.defaultActionMode)
+                        }
+                    ) {
+                        Text("Mute word")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingWordMute = null }) {
+                        Text("Cancel")
+                    }
                 }
-            }
-        )
+            )
+        }
     }
 }
 
@@ -1328,12 +1396,12 @@ private fun PlayerTransportControls(
     ) {
         FilledTonalIconButton(
             onClick = onSeekBack,
-            modifier = Modifier.size(56.dp)
+            modifier = Modifier.size(60.dp)
         ) {
             Icon(
                 imageVector = backIcon,
                 contentDescription = "Seek back ${seekBackMs / 1000L} seconds",
-                modifier = Modifier.size(28.dp)
+                modifier = Modifier.size(30.dp)
             )
         }
 
@@ -1341,23 +1409,23 @@ private fun PlayerTransportControls(
             checked = isPlaying,
             onCheckedChange = { onTogglePlay() },
             shapes = IconButtonDefaults.toggleableShapes(),
-            modifier = Modifier.size(width = 88.dp, height = 64.dp)
+            modifier = Modifier.size(width = 96.dp, height = 68.dp)
         ) {
             Icon(
                 imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                 contentDescription = if (isPlaying) "Pause" else "Play",
-                modifier = Modifier.size(34.dp)
+                modifier = Modifier.size(38.dp)
             )
         }
 
         FilledTonalIconButton(
             onClick = onSeekForward,
-            modifier = Modifier.size(56.dp)
+            modifier = Modifier.size(60.dp)
         ) {
             Icon(
                 imageVector = forwardIcon,
                 contentDescription = "Seek forward ${seekForwardMs / 1000L} seconds",
-                modifier = Modifier.size(28.dp)
+                modifier = Modifier.size(30.dp)
             )
         }
     }
@@ -1436,7 +1504,6 @@ private fun PlayerActionToolbar(
                 }
 
                 val badgeText = when (action) {
-                    PlayerToolbarAction.SPEED -> formatPlaybackSpeed(speed)
                     PlayerToolbarAction.SLEEP -> sleepTimerMinutes?.let { "${it}m" }
                     else -> null
                 }

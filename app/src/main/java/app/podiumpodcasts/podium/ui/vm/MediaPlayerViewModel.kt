@@ -676,6 +676,13 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
                     controller.addMediaItems(queueMediaItems)
                 }
 
+                if (controller.mediaItemCount > 0) {
+                    if (controller.playbackState == Player.STATE_IDLE) {
+                        controller.prepare()
+                    }
+                    isPlayerVisible = true
+                }
+
                 syncQueue(persist = false)
             } finally {
                 isRestoringQueue = false
@@ -749,7 +756,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             this@MediaPlayerViewModel.playbackState = playbackState
-            this@MediaPlayerViewModel.isPlayerVisible = playbackState != Player.STATE_IDLE
+            this@MediaPlayerViewModel.isPlayerVisible = (mediaController?.mediaItemCount ?: 0) > 0 || playbackState != Player.STATE_IDLE
             super.onPlaybackStateChanged(playbackState)
         }
     }
@@ -783,7 +790,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         this@MediaPlayerViewModel.sleepTimerTrigger = initialTimer.takeIf { it != 0L }
 
         this@MediaPlayerViewModel.playbackState = mediaController.playbackState
-        this@MediaPlayerViewModel.isPlayerVisible = mediaController.playbackState != Player.STATE_IDLE
+        this@MediaPlayerViewModel.isPlayerVisible = mediaController.mediaItemCount > 0 || mediaController.playbackState != Player.STATE_IDLE
 
         syncQueue()
 

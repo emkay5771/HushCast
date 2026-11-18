@@ -443,23 +443,44 @@ fun TranscriptOverlay(
                                     }
                                 }
 
+                                var textLayoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+                                val wordRanges = remember(line.words) {
+                                    val ranges = ArrayList<Pair<IntRange, Word>>(line.words.size)
+                                    var cursor = 0
+                                    line.words.forEachIndexed { wIdx, w ->
+                                        if (wIdx > 0 && !w.text.startsWith(" ")) {
+                                            cursor += 1
+                                        }
+                                        val start = cursor
+                                        cursor += w.text.length
+                                        ranges.add((start until cursor) to w)
+                                    }
+                                    ranges
+                                }
+
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(bgColor)
-                                        .combinedClickable(
-                                            onClickLabel = "Play from here",
-                                            onClick = {
-                                                if (line.startMs > 0L || idx == 0) {
-                                                    onSeekToMs(line.startMs)
-                                                }
-                                            },
-                                            onLongClick = {
-                                                if (firstMutableWord != null) {
-                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                    onMuteWord(firstMutableWord)
-                                                }
+                                        .then(
+                                            if (line.words.isEmpty()) {
+                                                Modifier.combinedClickable(
+                                                    onClickLabel = "Play from here",
+                                                    onClick = {
+                                                        if (line.startMs > 0L || idx == 0) {
+                                                            onSeekToMs(line.startMs)
+                                                        }
+                                                    },
+                                                    onLongClick = {
+                                                        if (firstMutableWord != null) {
+                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                            onMuteWord(firstMutableWord)
+                                                        }
+                                                    }
+                                                )
+                                            } else {
+                                                Modifier
                                             }
                                         )
                                         .then(rowSemantics)
@@ -477,7 +498,10 @@ fun TranscriptOverlay(
 
                                     if (line.words.isNotEmpty()) {
                                         val annotated = buildAnnotatedString {
-                                            for (w in line.words) {
+                                            line.words.forEachIndexed { wIdx, w ->
+                                                if (wIdx > 0 && !w.text.startsWith(" ")) {
+                                                    append(" ")
+                                                }
                                                 val wStartMs = (w.start * 1000.0).toLong()
                                                 val wEndMs = (w.end * 1000.0).toLong()
                                                 val isSpoken = isActive && currentPositionMs in wStartMs..wEndMs
@@ -504,7 +528,38 @@ fun TranscriptOverlay(
                                         Text(
                                             text = annotated,
                                             style = MaterialTheme.typography.bodyLarge,
-                                            fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal
+                                            fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                                            onTextLayout = { textLayoutResult = it },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .pointerInput(wordRanges, line.startMs, idx) {
+                                                    detectTapGestures(
+                                                        onTap = {
+                                                            if (line.startMs > 0L || idx == 0) {
+                                                                onSeekToMs(line.startMs)
+                                                            }
+                                                        },
+                                                        onLongPress = { offset ->
+                                                            val layout = textLayoutResult
+                                                            val charIdx = layout?.getOffsetForPosition(offset)
+                                                            val hitWord = if (charIdx != null) {
+                                                                wordRanges.firstOrNull { (range, _) -> charIdx in range }?.second
+                                                                    ?: wordRanges.minByOrNull { (range, _) ->
+                                                                        kotlin.math.min(
+                                                                            kotlin.math.abs(charIdx - range.first),
+                                                                            kotlin.math.abs(charIdx - range.last)
+                                                                        )
+                                                                    }?.second
+                                                            } else null
+                                                            val target = (hitWord ?: firstMutableWord)
+                                                                ?.takeIf { it.text.trim().isNotEmpty() }
+                                                            if (target != null) {
+                                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                                onMuteWord(target)
+                                                            }
+                                                        }
+                                                    )
+                                                }
                                         )
                                     } else {
                                         Text(

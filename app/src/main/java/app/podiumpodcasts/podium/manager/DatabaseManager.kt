@@ -31,7 +31,7 @@ const val HUSHCAST_CONFIG_BACKUP_NAME = "hushcast_config.json"
 const val DATABASE_EXTENSION = "podiumdb"
 
 private const val MAX_APP_DB_VERSION = 20
-private const val MAX_AUTOMUTE_DB_VERSION = 3
+internal const val MAX_AUTOMUTE_DB_VERSION = 4
 
 val DATABASE_BACKUP_FILES = arrayOf(
     DATABASE_NAME,

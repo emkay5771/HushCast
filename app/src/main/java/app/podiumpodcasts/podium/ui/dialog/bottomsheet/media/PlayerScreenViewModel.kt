@@ -19,6 +19,7 @@ import app.hushcast.automute.storage.EpisodeAnalysisStatusEntity
 import app.hushcast.automute.storage.MuteRuleEntity
 import app.hushcast.automute.storage.MuteSegmentEntity
 import app.hushcast.automute.storage.WordIndexBlob
+import app.hushcast.automute.storage.toDomain
 import app.hushcast.automute.transcript.TranscriptParser
 import app.hushcast.automute.worker.RuleReevaluationWorker
 import app.podiumpodcasts.podium.SettingsRepository
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -203,19 +205,32 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
     init {
         viewModelScope.launch {
             combine(_episodeId, episodeBundle, wordIndexBlob, _feedTranscriptRetry) { id, bundle, blob, retry ->
-                Triple(id, bundle, blob to retry)
-            }.collect { (id, bundle, blobRetry) ->
-                val (blob, _) = blobRetry
-                val url = bundle?.episode?.transcriptUrl.orEmpty()
-                val type = bundle?.episode?.transcriptType.orEmpty()
-                if (id.isNotBlank() && blob == null && url.isNotBlank()) {
-                    _publisherTranscript.value = id to TranscriptLoadState.Loading
-                    val loaded = fetchAndParsePublisherTranscript(url, type)
-                    _publisherTranscript.value = id to loaded
-                }
+                TranscriptFetchKey(
+                    id = id,
+                    url = bundle?.episode?.transcriptUrl.orEmpty(),
+                    type = bundle?.episode?.transcriptType.orEmpty(),
+                    hasBlob = blob != null,
+                    retry = retry
+                )
             }
+                .distinctUntilChanged()
+                .collect { key ->
+                    if (key.id.isNotBlank() && !key.hasBlob && key.url.isNotBlank()) {
+                        _publisherTranscript.value = key.id to TranscriptLoadState.Loading
+                        val loaded = fetchAndParsePublisherTranscript(key.url, key.type)
+                        _publisherTranscript.value = key.id to loaded
+                    }
+                }
         }
     }
+
+    private data class TranscriptFetchKey(
+        val id: String,
+        val url: String,
+        val type: String,
+        val hasBlob: Boolean,
+        val retry: Int
+    )
 
     fun retryPublisherTranscript() {
         _feedTranscriptRetry.value += 1
@@ -411,6 +426,7 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
     fun addMuteWordRule(wordRaw: String, actionMode: MuteActionMode) {
         val cleaned = wordRaw.trim().trim { !it.isLetterOrDigit() && it != '\'' && it != '-' }
         if (cleaned.isBlank()) return
+        val epId = _episodeId.value
         viewModelScope.launch(Dispatchers.IO) {
             autoMuteDb.dao().upsertRuleIfNew(
                 MuteRuleEntity(
@@ -422,7 +438,35 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
                     category = "Custom"
                 )
             )
-            RuleReevaluationWorker.enqueue(getApplication())
+            if (HushCastEngineBridge.currentEpisodeId == epId) {
+                val sha = analysisStatus.value?.fileSha256
+                if (!sha.isNullOrBlank()) {
+                    val precision = app.hushcast.automute.engine.HushCastPrefs.getMuteTimingPrecision(getApplication())
+                    val rules = autoMuteDb.dao().getEnabledRules().map { it.toDomain() }
+                    val compiled = app.hushcast.automute.matcher.WordMatcher.compileRules(rules, actionMode)
+                    app.hushcast.automute.pipeline.AutoMuteAnalyzer(getApplication(), autoMuteDb)
+                        .reevaluateMuteRulesWithCompiled(
+                            fileSha256 = sha,
+                            episodeId = epId,
+                            prePadMs = precision.prePadMs,
+                            postPadMs = precision.postPadMs,
+                            compiled = compiled
+                        )
+                    val updated = autoMuteDb.dao().getMuteSegments(sha).map {
+                        MuteWindow(
+                            startMs = it.startMs,
+                            endMs = it.endMs,
+                            word = it.word,
+                            ruleId = it.ruleId,
+                            actionMode = runCatching { MuteActionMode.valueOf(it.actionMode) }
+                                .getOrDefault(HushCastEngineBridge.defaultActionMode),
+                            enabled = it.enabled
+                        )
+                    }
+                    HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
+                }
+            }
+            RuleReevaluationWorker.enqueue(getApplication(), defaultActionMode = actionMode)
         }
     }
 

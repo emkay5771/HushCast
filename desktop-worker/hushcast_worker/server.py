@@ -368,6 +368,7 @@ def create_app(
     @app.post(
         "/v1/jobs",
         response_model=DesktopJobResponse,
+        response_model_exclude_none=True,
         dependencies=[Depends(verify_auth)],
     )
     async def submit_job(req: DesktopJobRequest) -> DesktopJobResponse:
@@ -644,12 +645,16 @@ def create_app(
                 if job_id in gpu_queue_order:
                     gpu_queue_order.remove(job_id)
                 try:
+                    ml_start_ts = time.monotonic()
+
                     def on_ml_progress(state: JobState, pct: int, stage: str) -> None:
                         if cancel_event.is_set():
                             raise _JobCancelledError()
                         cli_log.update(state, pct, stage)
-                        eta_fn = getattr(backend, "estimate_eta_sec", None)
-                        eta_val = eta_fn(pct) if callable(eta_fn) else None
+                        elapsed = time.monotonic() - ml_start_ts
+                        eta_val: Optional[int] = None
+                        if 5 <= pct < 100 and elapsed >= 1.5:
+                            eta_val = max(1, int(round(elapsed * (100 - pct) / pct)))
                         _update_job(
                             job_id,
                             state=state,
@@ -733,6 +738,7 @@ def create_app(
     @app.get(
         "/v1/jobs/{job_id}",
         response_model=DesktopJobResponse,
+        response_model_exclude_none=True,
         dependencies=[Depends(verify_auth)],
     )
     async def get_job(
@@ -783,6 +789,7 @@ def create_app(
     @app.delete(
         "/v1/jobs/{job_id}",
         response_model=DesktopJobResponse,
+        response_model_exclude_none=True,
         dependencies=[Depends(verify_auth)],
     )
     async def cancel_job(job_id: str) -> DesktopJobResponse:

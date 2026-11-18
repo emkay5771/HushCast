@@ -360,8 +360,13 @@ class LocalMlBackend:
             and any(k in p.name.lower() for k in ("instruct", "chat", "qwen2.5", "qwen3", "llama-3", "gemma", "mistral"))
         ]
         if candidates:
-            # Prefer 3B/1.5B if present alongside 7B? No, pick exact matching or smallest sufficient, or sort by size
-            candidates.sort(key=lambda p: p.stat().st_size, reverse=True)
+            candidates.sort(
+                key=lambda p: (
+                    "3b" not in p.name.lower(),
+                    "1.5b" not in p.name.lower(),
+                    p.stat().st_size,
+                )
+            )
             return candidates[0]
         return None
 

@@ -89,6 +89,16 @@ class WorkerCache:
             return sha
         return None
 
+    def lookup_by_episode_id(self, episode_id: str, audio_url: str = "") -> Optional[str]:
+        if audio_url:
+            sha = self._index["by_url"].get(audio_url)
+            if sha and self.has_bundle(sha):
+                return sha
+        for sha, meta in self._index["by_sha"].items():
+            if meta.get("episodeId") == episode_id and self.has_bundle(sha):
+                return sha
+        return None
+
     def get_bundle(self, sha256: str) -> Optional[DesktopAnalysisBundle]:
         path = self.bundle_path(sha256)
         if not path.exists():

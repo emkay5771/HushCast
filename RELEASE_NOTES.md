@@ -1,3 +1,26 @@
+# HushCast v1.0.29-hushcast
+
+## What's New
+- **Player & UI Fixes**:
+  - **Action Bar Alignment**: Removed the `2.0x` text label beneath the playback speed icon in `PlayerActionToolbar` so all action bar icons align evenly.
+  - **Queue Count Badge**: Restored the Up Next queue count badge (`BadgedBox`) on the player top bar.
+  - **Player Space & Controls**: Increased player artwork (`300.dp`) and transport control sizing for better use of screen space.
+  - **Precise Scrubber & Sponsor Names**: Restored vertical-drag variable-speed scrubbing (`1x`, `½x`, `1/5x`, `1/10x`) with the zoomed ±90s mini timeline pill in `PlayerSeekBar`, and restored sponsor names on the Skip button (`Skip <Sponsor>`).
+  - **Transcript Fixes**: Fixed missing spaces between words in `TranscriptOverlay`, restored exact word hit-testing on long-press (`getOffsetForPosition`), added unmute support for already-muted words, and fixed `TranscriptOverlay` layout so `PlayerSeekBar` and `PlayerTransportControls` remain pinned and clickable below it.
+  - **Startup Screen Picker**: Fixed the oversized `AlertDialog` box in `SettingsAppearancePane` by using `fillMaxWidth()` and `verticalScroll(...)`.
+  - **Mini Player on Relaunch**: Restored mini player visibility after app relaunch (`controller.prepare()` and `mediaItemCount > 0`).
+- **Cloud / Modal Worker & Reprocessing Fixes**:
+  - **Modal `POST /v1/jobs` & Reprocessing**: Fixed `422` (`loc: ["query", "req"]`) and `ForwardRef` schema errors in `modal_app.py`, fixed `stage_audio` keyword arguments, added `lookup_by_episode_id` for `reprocessStage`, and avoided unnecessary `volume.reload()` calls.
+  - **Phone/Worker JSON Compatibility**: Enabled `coerceInputValues = true` and `explicitNulls = false` in `DesktopWorkerClient` and `response_model_exclude_none=True` on worker endpoints.
+  - **Reprocess Routing**: Routed player "Analyze / Reprocess" actions through `DownloadManager` (`DESKTOP` + `forceReprocess`) when a Desktop/Cloud worker URL is configured instead of failing on missing on-device models.
+  - **Worker Model & ETA**: Preferred the 3B Qwen2.5 `.gguf` chat model over 7B when both exist, wired `find_ad_candidates` into `decode_ad_segments`, and fixed worker ETA calculation.
+- **Phone Engine & Stability Fixes**:
+  - **Publisher Transcript Hand-off & Skip Check**: Fixed `EpisodeAnalysisWorker` to read `KEY_FEED_TRANSCRIPT_PATH` (and clean up temp files), moved `AutoMuteAnalyzer`'s `READY` + `pipelineVersion` skip check before writing `ANALYZING`, and added fallback to full Whisper if `DaiRetimer` throws.
+  - **Live Muting & Episode Isolation**: Restored **Duck** and **Micro-skip** in `PlayerHushCastSheet` with live updates to `AutoMuteAudioProcessor`, applied new word mute rules immediately to the playing episode, scoped `PlayerScreenViewModel` per episode in `PodcastEpisodeDetailView`, and prevented 60s play-state saves from flickering the transcript.
+  - **Crash & Backup Fixes**: Fixed `DiscoverSearchViewModel` crash when Apple search fails (`supervisorScope`), fixed `LibrarySearch` crash on `%` in transcript snippets, and bumped `MAX_AUTOMUTE_DB_VERSION = 4` so backups restore properly.
+
+---
+
 # HushCast v1.0.28-hushcast
 
 ## What's New

@@ -46,7 +46,7 @@ class EpisodeAnalysisWorker(
         val episodeTitle = inputData.getString(KEY_EPISODE_TITLE).orEmpty()
         val knownSha256 = inputData.getString(KEY_KNOWN_SHA256)
         val quickMode = inputData.getBoolean(KEY_QUICK_MODE, false)
-        val feedTranscriptRaw = inputData.getString(KEY_FEED_TRANSCRIPT_RAW)
+        val feedTranscriptRaw = readFeedTranscriptFromInput(inputData)
         val feedTranscriptMime = inputData.getString(KEY_FEED_TRANSCRIPT_MIME).orEmpty()
         val actionMode = runCatching {
             MuteActionMode.valueOf(inputData.getString(KEY_ACTION_MODE) ?: MuteActionMode.HARD_SILENCE.name)
@@ -231,6 +231,19 @@ class EpisodeAnalysisWorker(
                 val file = File(dir, "$safeName.txt")
                 file.writeText(raw)
                 file.absolutePath
+            }.getOrNull()
+        }
+
+        internal fun readFeedTranscriptFromInput(inputData: androidx.work.Data, deleteTempFile: Boolean = true): String? {
+            val inlineRaw = inputData.getString(KEY_FEED_TRANSCRIPT_RAW)
+            if (!inlineRaw.isNullOrBlank()) return inlineRaw
+            val path = inputData.getString(KEY_FEED_TRANSCRIPT_PATH)?.takeIf { it.isNotBlank() } ?: return null
+            val file = File(path)
+            if (!file.exists()) return null
+            return runCatching {
+                file.readText()
+            }.also {
+                if (deleteTempFile) runCatching { file.delete() }
             }.getOrNull()
         }
 

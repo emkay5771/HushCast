@@ -330,15 +330,33 @@ fun PlayerHushCastSheet(
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(
                             MuteActionMode.HARD_SILENCE to "Silence",
+                            MuteActionMode.VOLUME_DUCK to "Duck",
                             MuteActionMode.BEEP to "Bleep",
+                            MuteActionMode.SAMPLE_DROP_MICRO_SKIP to "Micro-skip",
                             MuteActionMode.CUSTOM_SOUND to "Custom"
                         ).forEach { (mode, label) ->
                             FilterChip(
                                 selected = muteActionMode == mode,
                                 onClick = {
-                                    scope.launch {
+                                    scope.launch(Dispatchers.IO) {
                                         settingsRepository.hushCast.setMuteActionMode(mode)
                                         HushCastEngineBridge.defaultActionMode = mode
+                                        if (HushCastEngineBridge.currentEpisodeId == episodeId) {
+                                            val sha = analysisStatus?.fileSha256
+                                            if (!sha.isNullOrBlank()) {
+                                                val updated = autoMuteDb.dao().getMuteSegments(sha).map { seg ->
+                                                    app.hushcast.automute.dsp.MuteWindow(
+                                                        startMs = seg.startMs,
+                                                        endMs = seg.endMs,
+                                                        word = seg.word,
+                                                        ruleId = seg.ruleId,
+                                                        actionMode = mode,
+                                                        enabled = seg.enabled
+                                                    )
+                                                }
+                                                HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
+                                            }
+                                        }
                                     }
                                 },
                                 label = { Text(label) }

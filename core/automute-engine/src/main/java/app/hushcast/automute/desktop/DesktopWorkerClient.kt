@@ -33,9 +33,11 @@ import javax.net.ssl.X509TrustManager
  * Downloads pre-analyzed audio + WordIndexBlob + AdSegments keyed by fileSha256.
  */
 object DesktopWorkerClient {
-    private val json = Json {
+    internal val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
+        coerceInputValues = true
+        explicitNulls = false
     }
 
     private fun defaultTimeoutMs(normalizedUrl: String): Int =

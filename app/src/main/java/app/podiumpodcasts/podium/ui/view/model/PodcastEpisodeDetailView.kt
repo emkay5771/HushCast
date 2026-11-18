@@ -221,7 +221,9 @@ fun PodcastEpisodeDetailView(
                 }
             }
 
-            val detailPlayerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.PlayerScreenViewModel>()
+            val detailPlayerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.PlayerScreenViewModel>(
+                key = "detail_${episode.id}"
+            )
             val detailMediaVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
             androidx.compose.runtime.LaunchedEffect(episode.id, episode.duration) {
                 detailPlayerVm.bindEpisode(episode.id, episode.duration * 1000L)

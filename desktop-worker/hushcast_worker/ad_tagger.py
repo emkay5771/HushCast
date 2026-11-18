@@ -708,4 +708,6 @@ def decode_ad_segments(probs: np.ndarray, segments: Sequence[SegmentDto]) -> lis
                 adClass=cls_name,
             )
         )
+    out.extend(find_ad_candidates(probs, segments))
+    out.sort(key=lambda a: a.startMs)
     return out

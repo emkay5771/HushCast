@@ -214,7 +214,7 @@ private fun SearchContent(
                             val m = totalSec / 60L
                             val s = totalSec % 60L
                             Text(
-                                text = "${hit.episodeTitle.ifBlank { hit.episodeId }} • %02d:%02d — ${hit.text}".format(m, s),
+                                text = "${hit.episodeTitle.ifBlank { hit.episodeId }} • ${"%02d:%02d".format(m, s)} — ${hit.text}",
                                 style = MaterialTheme.typography.bodySmall,
                                 maxLines = 2,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,

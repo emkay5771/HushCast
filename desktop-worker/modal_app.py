@@ -14,8 +14,6 @@ Quickstart:
     modal deploy modal_app.py
 """
 
-from __future__ import annotations
-
 import hashlib
 import logging
 import os
@@ -270,9 +268,13 @@ class GpuWorker:
             )
 
         try:
-            volume.reload()
             if req.reprocessStage:
-                existing = self.cache.get_bundle(req.episodeId)
+                sha = self.cache.lookup_by_episode_id(req.episodeId, req.audioUrl)
+                if sha is None:
+                    volume.reload()
+                    self.cache._index = self.cache._load_index()
+                    sha = self.cache.lookup_by_episode_id(req.episodeId, req.audioUrl)
+                existing = self.cache.get_bundle(sha) if sha else None
                 if existing is None:
                     raise RuntimeError("No cached transcript found for reprocessing")
                 audio_path = self.cache.audio_path(existing.fileSha256)
@@ -324,7 +326,14 @@ class GpuWorker:
             sha256, content_type = asyncio.run(
                 download_audio_streaming_sha256(req.audioUrl, tmp_path, on_bytes=_dl_cb, allow_lan_feeds=False)
             )
-            audio_path = self.cache.stage_audio(tmp_path, sha256)
+            audio_path = self.cache.stage_audio(
+                sha256=sha256,
+                audio_tmp_path=tmp_path,
+                content_type=content_type,
+                audio_url=req.audioUrl,
+                title=req.title,
+                episode_id=req.episodeId,
+            )
             _update_state(fileSha256=sha256)
 
             existing = None if req.force else self.cache.get_bundle(sha256)
@@ -407,7 +416,7 @@ class GpuWorker:
 def fastapi_app():
     """Lightweight CPU-only FastAPI app for health, polling, search, and cached bundle/audio serving."""
     import asyncio
-    from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+    from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request
     from fastapi.middleware.gzip import GZipMiddleware
     from fastapi.responses import FileResponse, Response
     from hushcast_worker import __version__
@@ -450,7 +459,6 @@ def fastapi_app():
 
     @web.get("/v1/health", response_model=DesktopHealthResponse)
     def health() -> DesktopHealthResponse:
-        volume.reload()
         cache_bytes, disk_free_bytes = cache.cache_stats()
         return DesktopHealthResponse(
             version=__version__,
@@ -470,14 +478,15 @@ def fastapi_app():
             diskFreeBytes=disk_free_bytes,
         )
 
-    @web.post("/v1/jobs", response_model=DesktopJobResponse)
-    def submit_job(req: DesktopJobRequest, _: None = Depends(_require_auth)) -> DesktopJobResponse:
+    @web.post("/v1/jobs", response_model=DesktopJobResponse, response_model_exclude_none=True)
+    def submit_job(req: DesktopJobRequest = Body(...), _: None = Depends(_require_auth)) -> DesktopJobResponse:
         if req.reprocessStage:
-            existing = cache.get_bundle(req.episodeId)
-            if existing is None:
+            sha = cache.lookup_by_episode_id(req.episodeId, req.audioUrl)
+            if sha is None:
                 volume.reload()
-                existing = cache.get_bundle(req.episodeId)
-            if existing is None:
+                cache._index = cache._load_index()
+                sha = cache.lookup_by_episode_id(req.episodeId, req.audioUrl)
+            if sha is None:
                 raise HTTPException(status_code=404, detail="No cached transcript found for episode")
 
         job_id = uuid.uuid4().hex[:16]
@@ -495,7 +504,7 @@ def fastapi_app():
         GpuWorker().run_job.spawn(job_id, req.model_dump())
         return DesktopJobResponse(**initial)
 
-    @web.get("/v1/jobs/{job_id}", response_model=DesktopJobResponse)
+    @web.get("/v1/jobs/{job_id}", response_model=DesktopJobResponse, response_model_exclude_none=True)
     async def get_job(
         job_id: str,
         waitMs: int = Query(default=0, ge=0, le=30000),
@@ -510,12 +519,10 @@ def fastapi_app():
             state = data.get("state")
             rev = int(data.get("rev", 0))
             if waitMs <= 0 or state in ("READY", "FAILED", "CANCELLED") or rev > sinceRev or time.monotonic() >= deadline:
-                if state == "READY":
-                    volume.reload()
                 return DesktopJobResponse(**data)
             await asyncio.sleep(0.35)
 
-    @web.delete("/v1/jobs/{job_id}", response_model=DesktopJobResponse)
+    @web.delete("/v1/jobs/{job_id}", response_model=DesktopJobResponse, response_model_exclude_none=True)
     def cancel_job(job_id: str, _: None = Depends(_require_auth)) -> DesktopJobResponse:
         data = job_dict.get(job_id)
         if data is None:

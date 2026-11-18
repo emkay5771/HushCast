@@ -57,24 +57,26 @@ class DiscoverSearchViewModel(
                 DiscoverSearchState.Loading()
             }
             state.value = try {
-                val piDeferred = async {
-                    if(podcastIndexClient.isConfigured()) {
-                        runCatching { podcastIndexClient.search(query) }.getOrDefault(emptyList())
-                    } else emptyList()
-                }
-                val appleDeferred = if (disableAppleApi) {
-                    null
-                } else {
-                    async<List<PodcastPreviewModel>> {
-                        applePodcastClient.search.search(
-                            query = query,
-                            countryCode = countryCode
-                        )
+                val combined = kotlinx.coroutines.supervisorScope {
+                    val piDeferred = async {
+                        if(podcastIndexClient.isConfigured()) {
+                            runCatching { podcastIndexClient.search(query) }.getOrDefault(emptyList())
+                        } else emptyList()
                     }
-                }
+                    val appleDeferred = if (disableAppleApi) {
+                        null
+                    } else {
+                        async<List<PodcastPreviewModel>> {
+                            applePodcastClient.search.search(
+                                query = query,
+                                countryCode = countryCode
+                            )
+                        }
+                    }
 
-                val combined = (piDeferred.await() + (appleDeferred?.await() ?: emptyList()))
-                    .distinctBy { it.fetchUrl.trimEnd('/') }
+                    (piDeferred.await() + (appleDeferred?.await() ?: emptyList()))
+                        .distinctBy { it.fetchUrl.trimEnd('/') }
+                }
 
                 if(combined.isEmpty())
                     DiscoverSearchState.Empty()
