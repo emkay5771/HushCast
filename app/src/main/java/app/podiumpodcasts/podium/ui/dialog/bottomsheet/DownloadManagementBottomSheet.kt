@@ -134,16 +134,26 @@ fun DownloadManagementBottomSheet(
             }
 
             item {
-                Button(
-                    onClick = {
-                        scope.launch {
-                            DownloadManager.deleteEpisodeDownload(
-                                context = context,
-                                db = db,
-                                episode = bundle.episode
-                            )
+                var showDeleteConfirm = remember { mutableStateOf(false) }
+                if (showDeleteConfirm.value) {
+                    app.podiumpodcasts.podium.ui.dialog.DeleteConfirmationDialog(
+                        onDismiss = { showDeleteConfirm.value = false },
+                        itemName = bundle.episode.title,
+                        additionalText = "This will delete the downloaded audio file from your device.",
+                        onConfirm = {
+                            scope.launch {
+                                DownloadManager.deleteEpisodeDownload(
+                                    context = context,
+                                    db = db,
+                                    episode = bundle.episode
+                                )
+                                onDismiss()
+                            }
                         }
-                    },
+                    )
+                }
+                Button(
+                    onClick = { showDeleteConfirm.value = true },
                     shapes = ButtonDefaults.shapes(),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error,

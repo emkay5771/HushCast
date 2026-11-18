@@ -22,7 +22,8 @@ data class DesktopJobRequest(
     val title: String = "",
     val feedTranscriptRaw: String? = null,
     val feedTranscriptMime: String = "",
-    val force: Boolean = false
+    val force: Boolean = false,
+    val reprocessStage: String? = null
 )
 
 @Serializable

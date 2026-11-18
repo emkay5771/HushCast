@@ -382,21 +382,24 @@ fun PodcastSettingsView(
                                 1.5f to "1.5x",
                                 2.0f to "2.0x"
                             )
-                            SingleChoiceSegmentedButtonRow(
-                                modifier = Modifier.fillMaxWidth()
+                            @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                            androidx.compose.foundation.layout.FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
-                                speeds.forEachIndexed { idx, (speedVal, label) ->
-                                    SegmentedButton(
+                                speeds.forEach { (speedVal, label) ->
+                                    androidx.compose.material3.FilterChip(
                                         selected = kotlin.math.abs(podcastSpeed - speedVal) < 0.01f,
                                         onClick = {
                                             scope.launch {
                                                 settingsRepository.behavior.setPodcastPlaybackSpeed(podcast.origin, speedVal)
                                             }
                                         },
-                                        shape = SegmentedButtonDefaults.itemShape(idx, speeds.size)
-                                    ) {
-                                        Text(label, maxLines = 1)
-                                    }
+                                        label = {
+                                            Text(label, maxLines = 1, softWrap = false)
+                                        }
+                                    )
                                 }
                             }
                         }

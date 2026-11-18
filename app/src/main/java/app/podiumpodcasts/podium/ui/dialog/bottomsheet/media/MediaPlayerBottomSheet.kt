@@ -42,6 +42,7 @@ import androidx.compose.material.icons.rounded.Done
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadForOffline
 import androidx.compose.material.icons.rounded.Forward10
+import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.Forward30
 import androidx.compose.material.icons.rounded.Forward5
 import androidx.compose.material.icons.rounded.Info
@@ -229,16 +230,35 @@ fun MediaPlayerBottomSheet(
         episodeChapters = decodedChapters
     }
 
-    val visibleTabs = remember(episodeChapters.isNotEmpty(), transcriptBlob != null) {
-        buildList {
-            add(MediaPlayerTab.PLAYER)
-            add(MediaPlayerTab.NOTES)
-            if (episodeChapters.isNotEmpty()) add(MediaPlayerTab.CHAPTERS)
-            if (transcriptBlob != null) add(MediaPlayerTab.TRANSCRIPT)
-        }
+    val playerTabsConfig by settingsRepository.behavior.playerTabsConfig.collectAsState(
+        initial = listOf(
+            app.podiumpodcasts.podium.PlayerTabConfig("PLAYER", true),
+            app.podiumpodcasts.podium.PlayerTabConfig("NOTES", true),
+            app.podiumpodcasts.podium.PlayerTabConfig("CHAPTERS", true),
+            app.podiumpodcasts.podium.PlayerTabConfig("TRANSCRIPT", true)
+        )
+    )
+    val devMode by settingsRepository.hushCast.devMode.collectAsState(initial = false)
+    var showCustomizeTabsDialog by remember { mutableStateOf(false) }
+    var showDeleteDownloadConfirm by remember { mutableStateOf(false) }
+    var downloadBannerDismissedForEp by remember(episodeId) { mutableStateOf(false) }
+
+    val visibleTabs = remember(playerTabsConfig, episodeChapters.isNotEmpty(), transcriptBlob != null) {
+        val mapped = playerTabsConfig
+            .filter { it.visible }
+            .mapNotNull { cfg ->
+                when (cfg.id) {
+                    "PLAYER" -> MediaPlayerTab.PLAYER
+                    "NOTES" -> MediaPlayerTab.NOTES
+                    "CHAPTERS" -> if (episodeChapters.isNotEmpty()) MediaPlayerTab.CHAPTERS else null
+                    "TRANSCRIPT" -> if (transcriptBlob != null) MediaPlayerTab.TRANSCRIPT else null
+                    else -> null
+                }
+            }
+        mapped.ifEmpty { listOf(MediaPlayerTab.PLAYER) }
     }
     LaunchedEffect(visibleTabs) {
-        if (selectedTab !in visibleTabs) selectedTab = MediaPlayerTab.PLAYER
+        if (selectedTab !in visibleTabs) selectedTab = visibleTabs.first()
     }
 
     val chapterSkipModel by remember(episodeId) {
@@ -381,14 +401,10 @@ fun MediaPlayerBottomSheet(
             }
             PlayerToolbarAction.DOWNLOAD -> {
                 val ep = currentEpisodeBundle?.episode ?: return
-                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                    if (isDownloaded) {
-                        app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
-                            context = context,
-                            db = appDb,
-                            episode = ep
-                        )
-                    } else {
+                if (isDownloaded) {
+                    showDeleteDownloadConfirm = true
+                } else {
+                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                         app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
                             context = context,
                             db = appDb,
@@ -534,6 +550,17 @@ fun MediaPlayerBottomSheet(
                     }
 
                     IconButton(
+                        onClick = { showCustomizeTabsDialog = true }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Tune,
+                            contentDescription = "Customize tabs",
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    IconButton(
                         modifier = Modifier.padding(end = 4.dp),
                         onClick = { showQueueBottomSheet = true }
                     ) {
@@ -613,6 +640,33 @@ fun MediaPlayerBottomSheet(
                                 )
                             }
                             Spacer(Modifier.height(16.dp))
+                            if (!episodeSummary.isNullOrBlank()) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "AI Summary",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                        SelectionContainer {
+                                            Text(
+                                                text = episodeSummary!!,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.height(16.dp))
+                            }
                             val desc = currentEpisodeBundle?.episode?.description.orEmpty()
                             if (desc.isBlank()) {
                                 Text(
@@ -1002,34 +1056,64 @@ fun MediaPlayerBottomSheet(
                                     CastingBypassNoticeBanner()
                                 }
 
+                                val cloudProcessingConfigured = remember(episodeId) {
+                                    app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) &&
+                                        app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+                                }
                                 if (vm.mediaSourceType is SourceTypeState.Streaming &&
+                                    !cloudProcessingConfigured &&
+                                    !downloadBannerDismissedForEp &&
                                     analysisStatus?.badge != ReadinessBadge.READY.name &&
                                     analysisStatus?.badge != ReadinessBadge.WORD_MUTE_READY.name &&
                                     episodeId.isNotBlank()
                                 ) {
-                                    Surface(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        shape = RoundedCornerShape(14.dp),
-                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        shadowElevation = 4.dp
+                                    val dismissState = androidx.compose.material3.rememberSwipeToDismissBoxState(
+                                        confirmValueChange = { value ->
+                                            if (value != androidx.compose.material3.SwipeToDismissBoxValue.Settled) {
+                                                downloadBannerDismissedForEp = true
+                                                true
+                                            } else false
+                                        }
+                                    )
+                                    androidx.compose.material3.SwipeToDismissBox(
+                                        state = dismissState,
+                                        backgroundContent = {}
                                     ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        Surface(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            shape = RoundedCornerShape(14.dp),
+                                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            shadowElevation = 4.dp
                                         ) {
-                                            Text(
-                                                text = "Download to enable HushCast muting & sponsor skipping",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                            androidx.compose.material3.TextButton(
-                                                onClick = { triggerAnalyzeNow() }
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
                                             ) {
-                                                Text("Download")
+                                                Text(
+                                                    text = "Download to enable HushCast muting & sponsor skipping",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                androidx.compose.material3.TextButton(
+                                                    onClick = { triggerAnalyzeNow() }
+                                                ) {
+                                                    Text("Download")
+                                                }
+                                                IconButton(
+                                                    onClick = { downloadBannerDismissedForEp = true },
+                                                    modifier = Modifier.size(28.dp)
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.Close,
+                                                        contentDescription = "Dismiss",
+                                                        modifier = Modifier.size(16.dp),
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
                                             }
                                         }
                                     }
@@ -1088,6 +1172,17 @@ fun MediaPlayerBottomSheet(
                                     Icon(
                                         imageVector = if (vm.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                         contentDescription = if (vm.isPlaying) "Pause" else "Play"
+                                    )
+                                }
+                                IconButton(onClick = { vm.seekForward() }) {
+                                    Icon(
+                                        imageVector = when(vm.seekForwardIncrement) {
+                                            5000L -> Icons.Rounded.Forward5
+                                            10000L -> Icons.Rounded.Forward10
+                                            30000L -> Icons.Rounded.Forward30
+                                            else -> Icons.Rounded.FastForward
+                                        },
+                                        contentDescription = stringResource(R.string.common_action_seek_forward)
                                     )
                                 }
                             }
@@ -1503,6 +1598,121 @@ fun MediaPlayerBottomSheet(
             )
         }
 
+        if (showDeleteDownloadConfirm) {
+            val ep = currentEpisodeBundle?.episode
+            if (ep != null) {
+                app.podiumpodcasts.podium.ui.dialog.DeleteConfirmationDialog(
+                    onDismiss = { showDeleteDownloadConfirm = false },
+                    itemName = ep.title,
+                    additionalText = "This will delete the downloaded audio file from your device.",
+                    onConfirm = {
+                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
+                                context = context,
+                                db = appDb,
+                                episode = ep
+                            )
+                        }
+                    }
+                )
+            } else {
+                showDeleteDownloadConfirm = false
+            }
+        }
+
+        if (showCustomizeTabsDialog) {
+            var editableTabs by remember(playerTabsConfig) { mutableStateOf(playerTabsConfig) }
+            AlertDialog(
+                onDismissRequest = { showCustomizeTabsDialog = false },
+                title = { Text("Customize Player Tabs") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Reorder or hide tabs in the player.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        editableTabs.forEachIndexed { idx, tabCfg ->
+                            val label = when (tabCfg.id) {
+                                "PLAYER" -> MediaPlayerTab.PLAYER.label
+                                "NOTES" -> MediaPlayerTab.NOTES.label
+                                "CHAPTERS" -> MediaPlayerTab.CHAPTERS.label
+                                "TRANSCRIPT" -> MediaPlayerTab.TRANSCRIPT.label
+                                else -> tabCfg.id
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    androidx.compose.material3.Checkbox(
+                                        checked = tabCfg.visible,
+                                        onCheckedChange = { checked ->
+                                            val visibleCount = editableTabs.count { it.visible }
+                                            if (!checked && visibleCount <= 1) return@Checkbox
+                                            editableTabs = editableTabs.toMutableList().also {
+                                                it[idx] = tabCfg.copy(visible = checked)
+                                            }
+                                        }
+                                    )
+                                    Text(label, style = MaterialTheme.typography.bodyMedium)
+                                }
+                                Row {
+                                    IconButton(
+                                        enabled = idx > 0,
+                                        onClick = {
+                                            if (idx > 0) {
+                                                val copy = editableTabs.toMutableList()
+                                                val item = copy.removeAt(idx)
+                                                copy.add(idx - 1, item)
+                                                editableTabs = copy
+                                            }
+                                        }
+                                    ) {
+                                        Icon(Icons.Rounded.KeyboardArrowUp, contentDescription = "Move up")
+                                    }
+                                    IconButton(
+                                        enabled = idx < editableTabs.lastIndex,
+                                        onClick = {
+                                            if (idx < editableTabs.lastIndex) {
+                                                val copy = editableTabs.toMutableList()
+                                                val item = copy.removeAt(idx)
+                                                copy.add(idx + 1, item)
+                                                editableTabs = copy
+                                            }
+                                        }
+                                    ) {
+                                        Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = "Move down")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                settingsRepository.behavior.setPlayerTabsConfig(editableTabs)
+                            }
+                            showCustomizeTabsDialog = false
+                        }
+                    ) {
+                        Text("Save")
+                    }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { showCustomizeTabsDialog = false }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
         if(showSleepTimerBottomSheet) MediaPlayerSleepTimerBottomSheet {
             showSleepTimerBottomSheet = false
         }
@@ -1773,7 +1983,47 @@ fun MediaPlayerBottomSheet(
                                         Spacer(Modifier.width(8.dp))
                                         Text("Refresh AI Analysis")
                                     }
-                                    androidx.compose.material3.OutlinedButton(
+                                    if (devMode) {
+                                        val desktopConfigured = app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) &&
+                                            app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+                                        if (desktopConfigured && episodeId.isNotBlank()) {
+                                            Text(
+                                                text = "Dev: Reprocess Specific Stage (Cloud)",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                                            androidx.compose.foundation.layout.FlowRow(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                listOf(
+                                                    "SUMMARY_CHAPTERS" to "Summary & Chapters",
+                                                    "ADS_AND_SUMMARY" to "Ads & Summary",
+                                                    "ALIGN_WORDS" to "Align Words"
+                                                ).forEach { (stageKey, stageTitle) ->
+                                                    androidx.compose.material3.OutlinedButton(
+                                                        onClick = {
+                                                            showHushCastSheet = false
+                                                            scope.launch {
+                                                                app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                                                    context = context,
+                                                                    db = appDb,
+                                                                    episodeId = episodeId,
+                                                                    downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP,
+                                                                    forceReprocess = true,
+                                                                    reprocessStage = stageKey
+                                                                )
+                                                            }
+                                                        }
+                                                    ) {
+                                                        Text(stageTitle, style = MaterialTheme.typography.labelSmall)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        androidx.compose.material3.OutlinedButton(
                                         onClick = {
                                             scope.launch {
                                                 val shareUri = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -1871,6 +2121,7 @@ fun MediaPlayerBottomSheet(
                                     ) {
                                         Text("Export Timeline Data (Debug)")
                                     }
+                                    }
                                 }
                                 else -> {
                                     Text(
@@ -1932,22 +2183,6 @@ fun MediaPlayerBottomSheet(
                                 )
                             }
                             if (wordMutingEnabled) {
-                                val muteCustomSoundUri by settingsRepository.hushCast.muteCustomSoundUri.collectAsState(initial = null)
-                                val muteSoundPicker = androidx.activity.compose.rememberLauncherForActivityResult(
-                                    contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
-                                ) { uri ->
-                                    if (uri != null) {
-                                        runCatching {
-                                            context.contentResolver.takePersistableUriPermission(
-                                                uri,
-                                                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                                            )
-                                        }
-                                        val uriStr = uri.toString()
-                                        HushCastEngineBridge.loadCustomMuteSound(context, uriStr)
-                                        scope.launch { settingsRepository.hushCast.setMuteCustomSoundUri(uriStr) }
-                                    }
-                                }
                                 Text(
                                     text = "Mute style",
                                     style = MaterialTheme.typography.labelMedium,
@@ -1988,31 +2223,6 @@ fun MediaPlayerBottomSheet(
                                             },
                                             label = { Text(label) }
                                         )
-                                    }
-                                }
-                                if (muteActionMode == app.hushcast.automute.dsp.MuteActionMode.CUSTOM_SOUND) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = if (muteCustomSoundUri != null) "Custom sound active" else "Default bleep (no file chosen)",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        androidx.compose.material3.TextButton(onClick = { muteSoundPicker.launch(arrayOf("audio/*")) }) {
-                                            Text(if (muteCustomSoundUri != null) "Change" else "Choose file")
-                                        }
-                                        if (muteCustomSoundUri != null) {
-                                            androidx.compose.material3.TextButton(onClick = {
-                                                HushCastEngineBridge.loadCustomMuteSound(context, null)
-                                                scope.launch { settingsRepository.hushCast.setMuteCustomSoundUri(null) }
-                                            }) {
-                                                Text("Clear")
-                                            }
-                                        }
                                     }
                                 }
                             }

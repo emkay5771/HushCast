@@ -29,7 +29,8 @@ class DownloadManager {
             episodeId: String,
             auto: Boolean = false,
             downloadMethod: app.hushcast.automute.engine.DownloadAnalysisMethod? = null,
-            forceReprocess: Boolean = false
+            forceReprocess: Boolean = false,
+            reprocessStage: String? = null
         ) {
             val existing = db.podcastEpisodeDownloads().getSync(episodeId)
             if (existing == null) {
@@ -46,7 +47,8 @@ class DownloadManager {
                 episodeId = episodeId,
                 auto = auto,
                 downloadMethod = downloadMethod,
-                forceReprocess = forceReprocess
+                forceReprocess = forceReprocess,
+                reprocessStage = reprocessStage
             )
         }
 

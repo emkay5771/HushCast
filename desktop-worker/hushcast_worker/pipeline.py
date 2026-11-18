@@ -552,6 +552,107 @@ class LocalMlBackend:
         )
         return bundle, emb_2d
 
+    def reprocess_bundle(
+        self,
+        *,
+        stage: str,
+        existing_bundle: DesktopAnalysisBundle,
+        audio_path: Optional[Path],
+        existing_embeddings: Optional[object],
+        on_progress: ProgressCallback,
+    ) -> tuple[DesktopAnalysisBundle, Optional[object]]:
+        import numpy as np
+
+        t0 = time.monotonic()
+        stage_upper = stage.strip().upper()
+        words = [w.model_copy() for w in existing_bundle.wordIndexBlob.words]
+        segments = [s.model_copy() for s in existing_bundle.wordIndexBlob.segments]
+        ad_segments = [a.model_copy() for a in existing_bundle.adSegments]
+        summary = existing_bundle.summary
+        chapters = [c.model_copy() for c in existing_bundle.chapters]
+        emb_2d = existing_embeddings
+
+        if stage_upper == "ALIGN_WORDS":
+            if audio_path is not None and audio_path.exists() and words and segments:
+                on_progress(JobState.TRANSCRIBING, 30, "Decoding audio for word alignment")
+                pcm_16k, _ = decode_audio_16k_mono(audio_path)
+                if len(pcm_16k) > 0 and self._forced_aligner.is_available():
+                    on_progress(JobState.TRANSCRIBING, 60, f"Re-aligning {len(words)} words (MMS_FA)")
+                    n_aligned = self._forced_aligner.align_words(pcm_16k, segments, words)
+                    for i in range(len(words) - 1):
+                        if words[i + 1].start > words[i].start and words[i].end > words[i + 1].start:
+                            words[i].end = words[i + 1].start
+                    on_progress(JobState.TAGGING, 95, f"Aligned {n_aligned}/{len(words)} words")
+        elif stage_upper == "ADS_AND_SUMMARY":
+            pcm_16k = np.zeros(0, dtype=np.float32)
+            duration_sec = existing_bundle.durationSec
+            if audio_path is not None and audio_path.exists():
+                on_progress(JobState.EMBEDDING, 25, "Decoding audio for ad detection")
+                pcm_16k, duration_sec = decode_audio_16k_mono(audio_path)
+            texts = [s.text for s in segments]
+            if texts:
+                if emb_2d is None or getattr(emb_2d, "shape", (0,))[0] != len(texts):
+                    on_progress(JobState.EMBEDDING, 45, f"Embedding {len(texts)} segments")
+                    emb_list = []
+                    with self._model_lock:
+                        llm = self._get_embedding_llm()
+                        for t in texts:
+                            vec = np.asarray(llm.embed(t), dtype=np.float32)
+                            if vec.ndim == 2:
+                                vec = vec[-1]
+                            elif vec.ndim > 2:
+                                vec = vec.reshape(-1, vec.shape[-1])[-1]
+                            norm = np.linalg.norm(vec)
+                            if norm > 1e-12:
+                                vec = vec / norm
+                            emb_list.append(vec)
+                    emb_2d = np.stack(emb_list, axis=0)
+                emb = emb_2d[None, :, :]
+                on_progress(JobState.TAGGING, 75, "Re-running ad detector")
+                frames = extract_audio_frames(pcm_16k) if len(pcm_16k) > 0 else None
+                feats = compute_segment_features(frames, segments, duration_sec=duration_sec)[None, :, :]
+                sess = self._get_ort_session()
+                probs = sess.run(None, {"emb": emb, "feats": feats})[0][0]
+                ad_segments = decode_ad_segments(probs, segments)
+
+                chat_path = self.chat_model_path()
+                sum_mode = f"LLM ({chat_path.name})" if (chat_path and chat_path.exists()) else "Extractive summary"
+                on_progress(JobState.TAGGING, 90, f"Generating chapters & {sum_mode}")
+                summary, chapters = generate_chapters_and_summary(
+                    segments=segments,
+                    embeddings=emb_2d,
+                    ad_segments=ad_segments,
+                    chat_model_path=chat_path,
+                    audio_path=audio_path,
+                )
+        elif stage_upper == "SUMMARY_CHAPTERS":
+            chat_path = self.chat_model_path()
+            sum_mode = f"LLM ({chat_path.name})" if (chat_path and chat_path.exists()) else "Extractive summary"
+            on_progress(JobState.TAGGING, 70, f"Regenerating chapters & {sum_mode}")
+            summary, chapters = generate_chapters_and_summary(
+                segments=segments,
+                embeddings=emb_2d,
+                ad_segments=ad_segments,
+                chat_model_path=chat_path,
+                audio_path=audio_path,
+            )
+            on_progress(JobState.TAGGING, 95, f"Generated {len(chapters)} chapters")
+
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        bundle = DesktopAnalysisBundle(
+            fileSha256=existing_bundle.fileSha256,
+            episodeId=existing_bundle.episodeId,
+            durationSec=existing_bundle.durationSec,
+            wordIndexBlob=WordIndexBlobDto(words=words, segments=segments),
+            adSegments=ad_segments,
+            summary=summary,
+            chapters=chapters,
+            whisperModel=existing_bundle.whisperModel or self.whisper_model.name,
+            analysisDurationMs=elapsed_ms,
+            workerAccelerator=detect_accelerator(),
+        )
+        return bundle, emb_2d
+
 
 _DTW_PRESET_TABLE: tuple[tuple[str, str, int], ...] = (
     ("large-v3-turbo", "WHISPER_AHEADS_LARGE_V3_TURBO", 14),

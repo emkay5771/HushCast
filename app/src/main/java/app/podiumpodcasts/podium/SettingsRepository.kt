@@ -103,6 +103,19 @@ enum class PlayerToolbarAction(val label: String) {
     ANALYZE("Analyze with HushCast AI")
 }
 
+@kotlinx.serialization.Serializable
+data class CustomSoundPreset(
+    val id: String,
+    val name: String,
+    val uri: String
+)
+
+@kotlinx.serialization.Serializable
+data class PlayerTabConfig(
+    val id: String,
+    val visible: Boolean = true
+)
+
 object SettingsKeys {
     val APPEARANCE_THEME_MODE = stringPreferencesKey("appearance_theme_mode")
     val APPEARANCE_DARK_THEME_STYLE = stringPreferencesKey("appearance_dark_theme_style")
@@ -153,6 +166,8 @@ object SettingsKeys {
         stringPreferencesKey("behavior_speed_presets")
     val BEHAVIOR_PLAYER_TOOLBAR_ACTIONS =
         stringPreferencesKey("behavior_player_toolbar_actions")
+    val BEHAVIOR_PLAYER_TABS_CONFIG =
+        stringPreferencesKey("behavior_player_tabs_config")
     val BEHAVIOR_UPDATE_PODCASTS_IN_ROAMING =
         booleanPreferencesKey("behavior_update_podcasts_in_roaming")
     val BEHAVIOR_UPDATE_PODCASTS_INTERVAL_MINUTES =
@@ -182,6 +197,8 @@ object SettingsKeys {
     val HUSHCAST_FAST_MODEL = booleanPreferencesKey("hushcast_fast_model")
     val HUSHCAST_FAST_ATTENTION = booleanPreferencesKey("hushcast_fast_attention")
     val HUSHCAST_ANALYZE_CHARGING_ONLY = booleanPreferencesKey("hushcast_analyze_charging_only")
+    val HUSHCAST_CUSTOM_SOUNDS_JSON = stringPreferencesKey("hushcast_custom_sounds_json")
+    val HUSHCAST_DEV_MODE = booleanPreferencesKey("hushcast_dev_mode")
 
     val SYNC_ENABLE = booleanPreferencesKey("sync_enable")
     val SYNC_INTERVAL_MINUTES = intPreferencesKey("sync_interval_minutes")
@@ -628,6 +645,48 @@ class SettingsRepository(val context: Context) {
             preferences[SettingsKeys.BEHAVIOR_PLAYER_TOOLBAR_ACTIONS] = actions.distinct().joinToString(",") { it.name }
         }
 
+        val playerTabsConfig: Flow<List<PlayerTabConfig>> = dataStore.data
+            .map { preferences ->
+                val defaults = listOf(
+                    PlayerTabConfig("PLAYER", visible = true),
+                    PlayerTabConfig("NOTES", visible = true),
+                    PlayerTabConfig("CHAPTERS", visible = true),
+                    PlayerTabConfig("TRANSCRIPT", visible = true)
+                )
+                val raw = preferences[SettingsKeys.BEHAVIOR_PLAYER_TABS_CONFIG]
+                val parsed = if (raw.isNullOrBlank()) {
+                    defaults
+                } else {
+                    runCatching {
+                        kotlinx.serialization.json.Json.decodeFromString<List<PlayerTabConfig>>(raw)
+                    }.getOrNull().orEmpty()
+                }
+                val validIds = setOf("PLAYER", "NOTES", "CHAPTERS", "TRANSCRIPT")
+                val deduped = parsed.filter { it.id in validIds }.distinctBy { it.id }.toMutableList()
+                defaults.forEach { def ->
+                    if (deduped.none { it.id == def.id }) {
+                        deduped.add(def)
+                    }
+                }
+                if (deduped.none { it.visible }) {
+                    val idx = deduped.indexOfFirst { it.id == "PLAYER" }.takeIf { it >= 0 } ?: 0
+                    deduped[idx] = deduped[idx].copy(visible = true)
+                }
+                deduped
+            }
+
+        suspend fun setPlayerTabsConfig(tabs: List<PlayerTabConfig>) = dataStore.edit { preferences ->
+            val sanitized = tabs.distinctBy { it.id }.toMutableList()
+            if (sanitized.none { it.visible }) {
+                val idx = sanitized.indexOfFirst { it.id == "PLAYER" }.takeIf { it >= 0 } ?: 0
+                if (idx in sanitized.indices) {
+                    sanitized[idx] = sanitized[idx].copy(visible = true)
+                }
+            }
+            preferences[SettingsKeys.BEHAVIOR_PLAYER_TABS_CONFIG] =
+                kotlinx.serialization.json.Json.encodeToString(sanitized)
+        }
+
         val trimSilence: Flow<Boolean> = dataStore.data
             .map { preferences ->
                 preferences[SettingsKeys.BEHAVIOR_TRIM_SILENCE] ?: false
@@ -769,6 +828,112 @@ class SettingsRepository(val context: Context) {
             dataStore.edit { preferences ->
                 if (enabled == null) preferences.remove(key)
                 else preferences[key] = enabled
+            }
+        }
+
+        val devMode: Flow<Boolean> = dataStore.data.map { preferences ->
+            preferences[SettingsKeys.HUSHCAST_DEV_MODE] ?: false
+        }
+
+        suspend fun setDevMode(enabled: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.HUSHCAST_DEV_MODE] = enabled
+        }
+
+        val customSounds: Flow<List<CustomSoundPreset>> = dataStore.data.map { preferences ->
+            val raw = preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON]
+            val parsed = if (raw.isNullOrBlank()) {
+                emptyList()
+            } else {
+                runCatching {
+                    kotlinx.serialization.json.Json.decodeFromString<List<CustomSoundPreset>>(raw)
+                }.getOrNull().orEmpty()
+            }.toMutableList()
+            // Migrate any legacy single custom sound URI if not yet in list
+            val legacyMute = preferences[SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI]?.takeIf { it.isNotBlank() }
+            if (legacyMute != null && parsed.none { it.uri == legacyMute }) {
+                parsed.add(
+                    CustomSoundPreset(
+                        id = "legacy_mute_${legacyMute.hashCode()}",
+                        name = "Custom Mute Sound",
+                        uri = legacyMute
+                    )
+                )
+            }
+            val legacySkip = preferences[SettingsKeys.HUSHCAST_SPONSOR_SKIP_SOUND_URI]?.takeIf { it.isNotBlank() }
+            if (legacySkip != null && parsed.none { it.uri == legacySkip }) {
+                parsed.add(
+                    CustomSoundPreset(
+                        id = "legacy_skip_${legacySkip.hashCode()}",
+                        name = "Custom Skip Chime",
+                        uri = legacySkip
+                    )
+                )
+            }
+            parsed
+        }
+
+        suspend fun addCustomSound(name: String, uri: String): CustomSoundPreset {
+            val preset = CustomSoundPreset(
+                id = java.util.UUID.randomUUID().toString(),
+                name = name.trim().ifEmpty { "Custom Sound" },
+                uri = uri
+            )
+            dataStore.edit { preferences ->
+                val raw = preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON]
+                val current = if (raw.isNullOrBlank()) {
+                    emptyList()
+                } else {
+                    runCatching {
+                        kotlinx.serialization.json.Json.decodeFromString<List<CustomSoundPreset>>(raw)
+                    }.getOrNull().orEmpty()
+                }.toMutableList()
+                current.add(preset)
+                preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON] =
+                    kotlinx.serialization.json.Json.encodeToString(current)
+            }
+            return preset
+        }
+
+        suspend fun renameCustomSound(id: String, newName: String) {
+            val trimmed = newName.trim()
+            if (trimmed.isEmpty()) return
+            dataStore.edit { preferences ->
+                val raw = preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON]
+                val current = if (raw.isNullOrBlank()) {
+                    emptyList()
+                } else {
+                    runCatching {
+                        kotlinx.serialization.json.Json.decodeFromString<List<CustomSoundPreset>>(raw)
+                    }.getOrNull().orEmpty()
+                }
+                val updated = current.map { if (it.id == id) it.copy(name = trimmed) else it }
+                preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON] =
+                    kotlinx.serialization.json.Json.encodeToString(updated)
+            }
+        }
+
+        suspend fun removeCustomSound(id: String) {
+            dataStore.edit { preferences ->
+                val raw = preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON]
+                val current = if (raw.isNullOrBlank()) {
+                    emptyList()
+                } else {
+                    runCatching {
+                        kotlinx.serialization.json.Json.decodeFromString<List<CustomSoundPreset>>(raw)
+                    }.getOrNull().orEmpty()
+                }
+                val removed = current.firstOrNull { it.id == id }
+                val updated = current.filterNot { it.id == id }
+                preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON] =
+                    kotlinx.serialization.json.Json.encodeToString(updated)
+                if (removed != null) {
+                    if (preferences[SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI] == removed.uri) {
+                        preferences.remove(SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI)
+                    }
+                    if (preferences[SettingsKeys.HUSHCAST_SPONSOR_SKIP_SOUND_URI] == removed.uri) {
+                        preferences.remove(SettingsKeys.HUSHCAST_SPONSOR_SKIP_SOUND_URI)
+                    }
+                }
             }
         }
     }

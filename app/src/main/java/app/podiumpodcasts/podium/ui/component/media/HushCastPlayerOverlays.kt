@@ -765,7 +765,6 @@ fun SyncedTranscriptCard(
     }
 
     var searchQuery by remember { mutableStateOf("") }
-    var showInsights by remember { mutableStateOf(false) }
     val filteredSegments = remember(segments, searchQuery) {
         val q = searchQuery.trim()
         if (q.isEmpty()) segments
@@ -776,82 +775,6 @@ fun SyncedTranscriptCard(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        if (!summary.isNullOrBlank() || chapters.isNotEmpty()) {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { showInsights = !showInsights }
-            ) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = buildString {
-                                append("AI Summary")
-                                if (chapters.isNotEmpty()) {
-                                    val isPodcast = chapters.any { it.source == "podcast" }
-                                    append(if (isPodcast) " • ${chapters.size} Podcast Chapters" else " • ${chapters.size} Auto-Created Chapters")
-                                }
-                            },
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                        Text(
-                            text = if (showInsights) "Hide" else "Show",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    if (showInsights) {
-                        if (!summary.isNullOrBlank()) {
-                            Spacer(Modifier.height(6.dp))
-                            Text(
-                                text = summary,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                        if (chapters.isNotEmpty()) {
-                            Spacer(Modifier.height(8.dp))
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                chapters.forEach { ch ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .clickable { onSeekToMs(ch.startMs) }
-                                            .padding(vertical = 4.dp, horizontal = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Text(
-                                            text = formatTranscriptTimestamp(ch.startMs),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                        Text(
-                                            text = ch.title,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,

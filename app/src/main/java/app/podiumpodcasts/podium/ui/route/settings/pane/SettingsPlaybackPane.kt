@@ -728,8 +728,8 @@ private fun swipeActionColors(
 private fun swipeActionIcon(
     action: app.podiumpodcasts.podium.EpisodeSwipeAction
 ): androidx.compose.ui.graphics.vector.ImageVector = when (action) {
-    app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT -> androidx.compose.material.icons.Icons.AutoMirrored.Rounded.PlaylistPlay
-    app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST -> androidx.compose.material.icons.Icons.AutoMirrored.Rounded.PlaylistAdd
+    app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_NEXT -> androidx.compose.material.icons.Icons.Rounded.VerticalAlignTop
+    app.podiumpodcasts.podium.EpisodeSwipeAction.PLAY_LAST -> androidx.compose.material.icons.Icons.Rounded.VerticalAlignBottom
     app.podiumpodcasts.podium.EpisodeSwipeAction.DOWNLOAD -> androidx.compose.material.icons.Icons.Rounded.Download
     app.podiumpodcasts.podium.EpisodeSwipeAction.MARK_PLAYED -> androidx.compose.material.icons.Icons.Rounded.DoneAll
     app.podiumpodcasts.podium.EpisodeSwipeAction.NONE -> androidx.compose.material.icons.Icons.Rounded.Block

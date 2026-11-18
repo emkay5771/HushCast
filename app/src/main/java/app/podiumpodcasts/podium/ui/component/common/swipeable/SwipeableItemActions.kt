@@ -9,18 +9,22 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.PlaylistRemove
 import androidx.compose.material.icons.rounded.RemoveDone
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.VerticalAlignBottom
 import androidx.compose.material.icons.rounded.VerticalAlignTop
 import androidx.compose.material.icons.rounded.WatchLater
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.api.db.model.SystemLists
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
+import kotlinx.coroutines.launch
 
 data class SwipeableItemActionStyle(
     val icon: ImageVector,
@@ -109,7 +113,7 @@ interface SwipeableItemActions {
                 }.let {
                     if (inQueue) androidx.compose.material.icons.Icons.Rounded.PlaylistRemove
                     else if (playNext) androidx.compose.material.icons.Icons.Rounded.VerticalAlignTop
-                    else androidx.compose.material.icons.Icons.AutoMirrored.Rounded.PlaylistAdd
+                    else androidx.compose.material.icons.Icons.Rounded.VerticalAlignBottom
                 },
                 backgroundColor = MaterialTheme.colorScheme.primaryContainer,
                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -175,24 +179,32 @@ interface SwipeableItemActions {
         onActionHandler = actionHandler@{
             val context = androidx.compose.ui.platform.LocalContext.current
             val db = LocalDatabase.current
+            val scope = androidx.compose.runtime.rememberCoroutineScope()
+            var showDeleteConfirm by androidx.compose.runtime.remember(bundle.episode.id) {
+                androidx.compose.runtime.mutableStateOf(false)
+            }
+            if (showDeleteConfirm) {
+                app.podiumpodcasts.podium.ui.dialog.DeleteConfirmationDialog(
+                    onDismiss = { showDeleteConfirm = false },
+                    itemName = bundle.episode.title,
+                    additionalText = "This will delete the downloaded audio file from your device.",
+                    onConfirm = {
+                        scope.launch {
+                            app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
+                                context = context,
+                                db = db,
+                                episode = bundle.episode
+                            )
+                        }
+                    }
+                )
+            }
             return@actionHandler {
                 val isDownloaded = bundle.episode.craftDownloadFile(context).exists()
                 if (isDownloaded) {
-                    app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
-                        context = context,
-                        db = db,
-                        episode = bundle.episode
-                    )
+                    showDeleteConfirm = true
                     SwipeableItemActionResult(
-                        isDismissed = false,
-                        message = "Download deleted",
-                        onUndo = {
-                            app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
-                                context = context,
-                                db = db,
-                                episodeId = bundle.episode.id
-                            )
-                        }
+                        isDismissed = false
                     )
                 } else {
                     app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(

@@ -74,6 +74,7 @@ class DesktopJobRequest(BaseModel):
     feedTranscriptRaw: Optional[str] = None
     feedTranscriptMime: str = ""
     force: bool = False
+    reprocessStage: Optional[str] = None
 
 
 class DesktopJobResponse(BaseModel):

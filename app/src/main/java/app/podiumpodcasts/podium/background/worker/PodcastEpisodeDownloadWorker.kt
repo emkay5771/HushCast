@@ -30,6 +30,7 @@ const val KEY_EPISODE_ID = "KEY_EPISODE_ID"
 const val KEY_DOWNLOAD_METHOD = "KEY_DOWNLOAD_METHOD"
 const val KEY_IS_AUTO = "KEY_IS_AUTO"
 const val KEY_FORCE_REPROCESS = "KEY_FORCE_REPROCESS"
+const val KEY_REPROCESS_STAGE = "KEY_REPROCESS_STAGE"
 
 class PodcastEpisodeDownloadWorker(
     context: Context,
@@ -45,9 +46,10 @@ class PodcastEpisodeDownloadWorker(
         } ?: app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO
         val isAuto = inputData.getBoolean(KEY_IS_AUTO, false)
         val forceReprocess = inputData.getBoolean(KEY_FORCE_REPROCESS, false)
+        val reprocessStage = inputData.getString(KEY_REPROCESS_STAGE)
         android.util.Log.i(
             "HushCastDesktop",
-            "Worker start ep=$episodeId attempt=$runAttemptCount method=$method auto=$isAuto force=$forceReprocess"
+            "Worker start ep=$episodeId attempt=$runAttemptCount method=$method auto=$isAuto force=$forceReprocess stage=$reprocessStage"
         )
 
         return try {
@@ -71,6 +73,7 @@ class PodcastEpisodeDownloadWorker(
                 downloadMethod = method,
                 isAuto = isAuto,
                 forceReprocess = forceReprocess,
+                reprocessStage = reprocessStage,
                 isFinalAttempt = isFinalAttempt,
                 isRetry = runAttemptCount > 0
             ) { title, sourceLabel, pct ->
@@ -298,7 +301,8 @@ class PodcastEpisodeDownloadWorker(
             settingsRepository: SettingsRepository = SettingsRepository(context),
             auto: Boolean = false,
             downloadMethod: app.hushcast.automute.engine.DownloadAnalysisMethod? = null,
-            forceReprocess: Boolean = false
+            forceReprocess: Boolean = false,
+            reprocessStage: String? = null
         ) {
             val downloadMetered = settingsRepository.behavior.downloadMetered.first()
             val downloadInRoaming = settingsRepository.behavior.downloadInRoaming.first()
@@ -313,7 +317,8 @@ class PodcastEpisodeDownloadWorker(
                 KEY_EPISODE_ID to episodeId,
                 KEY_DOWNLOAD_METHOD to effectiveMethod.name,
                 KEY_IS_AUTO to auto,
-                KEY_FORCE_REPROCESS to forceReprocess
+                KEY_FORCE_REPROCESS to forceReprocess,
+                KEY_REPROCESS_STAGE to reprocessStage
             )
 
             val networkType = when (downloadMetered) {

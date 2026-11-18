@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.content.Context
 import android.os.Process
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -13,18 +14,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -37,6 +42,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -44,6 +50,7 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -105,6 +112,23 @@ fun SettingsHushCastPane(
     val muteCustomSoundUri by settingsRepository.hushCast.muteCustomSoundUri.collectAsState(initial = null)
     val sponsorSkipSoundEnabled by settingsRepository.hushCast.sponsorSkipSoundEnabled.collectAsState(initial = HushCastEngineBridge.sponsorSkipSoundEnabled)
     val sponsorSkipSoundUri by settingsRepository.hushCast.sponsorSkipSoundUri.collectAsState(initial = HushCastEngineBridge.sponsorSkipSoundUri)
+    val devMode by settingsRepository.hushCast.devMode.collectAsState(initial = false)
+    val customSounds by settingsRepository.hushCast.customSounds.collectAsState(initial = emptyList())
+
+    var pendingSoundUri by remember { mutableStateOf<String?>(null) }
+    var pendingSoundName by remember { mutableStateOf("") }
+    var pendingSoundTarget by remember { mutableStateOf("MUTE") } // "MUTE" or "SKIP"
+    var renamingSound by remember { mutableStateOf<app.podiumpodcasts.podium.CustomSoundPreset?>(null) }
+    var renameText by remember { mutableStateOf("") }
+
+    fun resolveDisplayName(uri: android.net.Uri): String {
+        val raw = runCatching {
+            context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                if (c.moveToFirst()) c.getString(0) else null
+            }
+        }.getOrNull() ?: uri.lastPathSegment ?: "Custom Sound"
+        return raw.substringBeforeLast('.').ifBlank { "Custom Sound" }
+    }
 
     val muteSoundPicker = androidx.activity.compose.rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
@@ -116,9 +140,9 @@ fun SettingsHushCastPane(
                     android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
             }
-            val uriStr = uri.toString()
-            HushCastEngineBridge.loadCustomMuteSound(context, uriStr)
-            scope.launch { settingsRepository.hushCast.setMuteCustomSoundUri(uriStr) }
+            pendingSoundTarget = "MUTE"
+            pendingSoundName = resolveDisplayName(uri)
+            pendingSoundUri = uri.toString()
         }
     }
 
@@ -132,10 +156,90 @@ fun SettingsHushCastPane(
                     android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
             }
-            val uriStr = uri.toString()
-            HushCastEngineBridge.sponsorSkipSoundUri = uriStr
-            scope.launch { settingsRepository.hushCast.setSponsorSkipSoundUri(uriStr) }
+            pendingSoundTarget = "SKIP"
+            pendingSoundName = resolveDisplayName(uri)
+            pendingSoundUri = uri.toString()
         }
+    }
+
+    if (pendingSoundUri != null) {
+        AlertDialog(
+            onDismissRequest = { pendingSoundUri = null },
+            title = { Text("Name Custom Sound") },
+            text = {
+                OutlinedTextField(
+                    value = pendingSoundName,
+                    onValueChange = { pendingSoundName = it },
+                    label = { Text("Sound name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val uriStr = pendingSoundUri ?: return@Button
+                    val name = pendingSoundName.trim().ifEmpty { "Custom Sound" }
+                    val target = pendingSoundTarget
+                    pendingSoundUri = null
+                    scope.launch {
+                        settingsRepository.hushCast.addCustomSound(name, uriStr)
+                        if (target == "MUTE") {
+                            HushCastEngineBridge.loadCustomMuteSound(context, uriStr)
+                            settingsRepository.hushCast.setMuteCustomSoundUri(uriStr)
+                        } else {
+                            HushCastEngineBridge.sponsorSkipSoundUri = uriStr
+                            settingsRepository.hushCast.setSponsorSkipSoundUri(uriStr)
+                        }
+                    }
+                }) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingSoundUri = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (renamingSound != null) {
+        AlertDialog(
+            onDismissRequest = { renamingSound = null },
+            title = { Text("Rename Custom Sound") },
+            text = {
+                OutlinedTextField(
+                    value = renameText,
+                    onValueChange = { renameText = it },
+                    label = { Text("Sound name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    val target = renamingSound ?: return@Button
+                    val nextName = renameText.trim()
+                    renamingSound = null
+                    if (nextName.isNotEmpty()) {
+                        scope.launch { settingsRepository.hushCast.renameCustomSound(target.id, nextName) }
+                    }
+                }) {
+                    Text("Rename")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { renamingSound = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    var showProcessingSetup by remember {
+        val cloudReady = app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) &&
+            app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+        mutableStateOf(!cloudReady && !modelsReady)
     }
 
     var newPattern by remember { mutableStateOf("") }
@@ -171,6 +275,597 @@ fun SettingsHushCastPane(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            item {
+                Text(
+                    text = "WORD BLEEPING & MUTING",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            // 2. Feature A: Word Auto-Muting Controls
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.AutoMirrored.Rounded.VolumeOff, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Word Auto-Muting", style = MaterialTheme.typography.titleMedium)
+                            }
+                            Switch(
+                                checked = wordMutingEnabled,
+                                onCheckedChange = {
+                                    HushCastEngineBridge.wordMutingEnabled = it
+                                    scope.launch { settingsRepository.hushCast.setWordMutingEnabled(it) }
+                                }
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text("Action Mode", style = MaterialTheme.typography.labelMedium)
+                        Spacer(Modifier.height(6.dp))
+                        val modes = listOf(
+                            MuteActionMode.HARD_SILENCE to "Silence",
+                            MuteActionMode.VOLUME_DUCK to "Duck 10%",
+                            MuteActionMode.SAMPLE_DROP_MICRO_SKIP to "Micro-Skip",
+                            MuteActionMode.BEEP to "Bleep",
+                            MuteActionMode.CUSTOM_SOUND to "Custom"
+                        )
+                        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                        androidx.compose.foundation.layout.FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            modes.forEach { (mode, label) ->
+                                androidx.compose.material3.FilterChip(
+                                    selected = selectedActionMode == mode,
+                                    onClick = {
+                                        HushCastEngineBridge.defaultActionMode = mode
+                                        scope.launch {
+                                            settingsRepository.hushCast.setMuteActionMode(mode)
+                                            withContext(Dispatchers.IO) {
+                                                autoMuteDb.dao().updateAllRulesActionMode(mode.name)
+                                                autoMuteDb.dao().updateAllMuteSegmentsActionMode(mode.name)
+                                                val currentEpId = HushCastEngineBridge.currentEpisodeId
+                                                if (!currentEpId.isNullOrBlank()) {
+                                                    val sha = autoMuteDb.dao().getStatus(currentEpId)?.fileSha256
+                                                    if (!sha.isNullOrBlank()) {
+                                                        val updated = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
+                                                        HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    },
+                                    label = { Text(label) }
+                                )
+                            }
+                        }
+                        if (selectedActionMode == MuteActionMode.CUSTOM_SOUND) {
+                            Spacer(Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Custom Sound Presets",
+                                    style = MaterialTheme.typography.labelMedium
+                                )
+                                TextButton(onClick = { muteSoundPicker.launch(arrayOf("audio/*")) }) {
+                                    Text("+ Add sound")
+                                }
+                            }
+                            if (customSounds.isEmpty()) {
+                                Text(
+                                    text = "No custom sounds saved yet. Default bleep will be used until you add one.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    customSounds.forEach { preset ->
+                                        val isSelected = muteCustomSoundUri == preset.uri
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                                            else MaterialTheme.colorScheme.surfaceContainerLow,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    HushCastEngineBridge.loadCustomMuteSound(context, preset.uri)
+                                                    scope.launch { settingsRepository.hushCast.setMuteCustomSoundUri(preset.uri) }
+                                                }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier.weight(1f)
+                                                ) {
+                                                    RadioButton(
+                                                        selected = isSelected,
+                                                        onClick = {
+                                                            HushCastEngineBridge.loadCustomMuteSound(context, preset.uri)
+                                                            scope.launch { settingsRepository.hushCast.setMuteCustomSoundUri(preset.uri) }
+                                                        }
+                                                    )
+                                                    Text(
+                                                        text = preset.name,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        maxLines = 1,
+                                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                                Row {
+                                                    IconButton(
+                                                        onClick = {
+                                                            renameText = preset.name
+                                                            renamingSound = preset
+                                                        }
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Rounded.Edit,
+                                                            contentDescription = "Rename",
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
+                                                    IconButton(
+                                                        onClick = {
+                                                            if (isSelected) {
+                                                                HushCastEngineBridge.loadCustomMuteSound(context, null)
+                                                            }
+                                                            scope.launch { settingsRepository.hushCast.removeCustomSound(preset.id) }
+                                                        }
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Rounded.Delete,
+                                                            contentDescription = "Delete",
+                                                            modifier = Modifier.size(18.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(10.dp))
+                        var selectedPrecision by remember {
+                            mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.getMuteTimingPrecision(context))
+                        }
+                        Text("Bleep / Mute Timing Precision", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            "Controls pre/post padding around each matched word (applies to both Cloud and On-Device).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+                        androidx.compose.foundation.layout.FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            app.hushcast.automute.engine.MuteTimingPrecision.entries.forEach { precision ->
+                                androidx.compose.material3.FilterChip(
+                                    selected = selectedPrecision == precision,
+                                    onClick = {
+                                        selectedPrecision = precision
+                                        app.hushcast.automute.engine.HushCastPrefs.setMuteTimingPrecision(context, precision)
+                                        app.hushcast.automute.worker.RuleReevaluationWorker.enqueue(
+                                            context = context,
+                                            prePadMs = precision.prePadMs,
+                                            postPadMs = precision.postPadMs,
+                                            defaultActionMode = selectedActionMode
+                                        )
+                                    },
+                                    label = { Text(precision.label) }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 4. Muted Words Dictionary + Presets
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Muted Words Dictionary (${rules.size} rules)", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.height(8.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = newPattern,
+                                onValueChange = { newPattern = it },
+                                label = { Text("Word, phrase, or regex") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Button(
+                                enabled = newPattern.isNotBlank(),
+                                onClick = {
+                                    val pat = newPattern.trim()
+                                    newPattern = ""
+                                    scope.launch {
+                                        autoMuteDb.dao().upsertRuleIfNew(
+                                            MuteRuleEntity(
+                                                pattern = pat,
+                                                isRegex = isRegex,
+                                                actionMode = selectedActionMode.name
+                                            )
+                                        )
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            val analyzer = app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
+                                            val indices = autoMuteDb.dao().getAllWordIndices()
+                                            for (idx in indices) {
+                                                analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, defaultActionMode = HushCastEngineBridge.defaultActionMode)
+                                                if (idx.episodeId == HushCastEngineBridge.currentEpisodeId) {
+                                                    val updated = autoMuteDb.dao().getMuteSegments(idx.fileSha256).map { it.toDomain() }
+                                                    HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Rounded.Add, contentDescription = "Add")
+                            }
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Switch(checked = isRegex, onCheckedChange = { isRegex = it })
+                            Spacer(Modifier.width(6.dp))
+                            Column {
+                                Text("Treat as Regex", style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    "Tip: Use \\bword\\b for exact whole-word matching",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        val existingKeys = remember(rules) {
+                            rules.map { it.pattern.trim().lowercase() to it.isRegex }.toSet()
+                        }
+                        val profanityAdded = remember(existingKeys) {
+                            PresetDictionaries.profanityRules(selectedActionMode).all {
+                                (it.pattern.trim().lowercase() to it.isRegex) in existingKeys
+                            }
+                        }
+                        val explicitAdded = remember(existingKeys) {
+                            PresetDictionaries.explicitRules(selectedActionMode).all {
+                                (it.pattern.trim().lowercase() to it.isRegex) in existingKeys
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                enabled = !profanityAdded,
+                                onClick = {
+                                    scope.launch {
+                                        val entities = PresetDictionaries.profanityRules(selectedActionMode).map {
+                                            MuteRuleEntity(
+                                                pattern = it.pattern,
+                                                isRegex = it.isRegex,
+                                                matchPlurals = it.matchPlurals,
+                                                actionMode = it.actionMode.name,
+                                                category = it.category
+                                            )
+                                        }
+                                        autoMuteDb.dao().upsertRulesIfNew(entities)
+                                    }
+                                }
+                            ) {
+                                Text(if (profanityAdded) "Profanity Added" else "+ Profanity Preset")
+                            }
+                            OutlinedButton(
+                                enabled = !explicitAdded,
+                                onClick = {
+                                    scope.launch {
+                                        val entities = PresetDictionaries.explicitRules(selectedActionMode).map {
+                                            MuteRuleEntity(
+                                                pattern = it.pattern,
+                                                isRegex = it.isRegex,
+                                                matchPlurals = it.matchPlurals,
+                                                actionMode = it.actionMode.name,
+                                                category = it.category
+                                            )
+                                        }
+                                        autoMuteDb.dao().upsertRulesIfNew(entities)
+                                    }
+                                }
+                            ) {
+                                Text(if (explicitAdded) "Explicit Added" else "+ Explicit Preset")
+                            }
+                        }
+                        if (rules.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = { wordListExpanded = !wordListExpanded },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    if (wordListExpanded) "Hide Word List (${rules.size})"
+                                    else "Show Word List (${rules.size})"
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Icon(
+                                    if (wordListExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                                    contentDescription = null
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (wordListExpanded) {
+                items(rules, key = { it.id }) { rule ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(rule.pattern, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "${rule.category} • ${rule.actionMode}${if (rule.isRegex) " • Regex" else ""}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = rule.enabled,
+                                onCheckedChange = { enabled ->
+                                    scope.launch {
+                                        autoMuteDb.dao().setRuleEnabled(rule.id, enabled)
+                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                            val analyzer = app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
+                                            val indices = autoMuteDb.dao().getAllWordIndices()
+                                            for (idx in indices) {
+                                                analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, defaultActionMode = HushCastEngineBridge.defaultActionMode)
+                                                if (idx.episodeId == HushCastEngineBridge.currentEpisodeId) {
+                                                    val updated = autoMuteDb.dao().getMuteSegments(idx.fileSha256).map { it.toDomain() }
+                                                    HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            )
+                            IconButton(onClick = {
+                                scope.launch {
+                                    autoMuteDb.dao().deleteRule(rule.id)
+                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        val analyzer = app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
+                                        val indices = autoMuteDb.dao().getAllWordIndices()
+                                        for (idx in indices) {
+                                            analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, defaultActionMode = HushCastEngineBridge.defaultActionMode)
+                                            if (idx.episodeId == HushCastEngineBridge.currentEpisodeId) {
+                                                val updated = autoMuteDb.dao().getMuteSegments(idx.fileSha256).map { it.toDomain() }
+                                                HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
+                                            }
+                                        }
+                                    }
+                                }
+                            }) {
+                                Icon(Icons.Rounded.Delete, contentDescription = "Delete rule")
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Text(
+                    text = "AD & SECTION SKIPPING",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            // 3. Feature B: Sponsor / Ad Blocker Controls
+            item {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Shield, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Sponsor & Section Skipping", style = MaterialTheme.typography.titleMedium)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        val policies = listOf(
+                            AdPolicyMode.AUTO_SKIP to "Auto-Skip",
+                            AdPolicyMode.MARK_ONLY to "Mark Only",
+                            AdPolicyMode.OFF to "Off"
+                        )
+                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                            policies.forEachIndexed { idx, (policy, label) ->
+                                SegmentedButton(
+                                    selected = selectedAdPolicy == policy,
+                                    onClick = {
+                                        HushCastEngineBridge.defaultAdPolicy = policy
+                                        HushCastEngineBridge.adSkipObserver.policyMode = policy
+                                        scope.launch { settingsRepository.hushCast.setAdPolicyMode(policy) }
+                                    },
+                                    shape = SegmentedButtonDefaults.itemShape(idx, policies.size)
+                                ) {
+                                    Text(label)
+                                }
+                            }
+                        }
+                        if (selectedAdPolicy == AdPolicyMode.AUTO_SKIP) {
+                            Spacer(Modifier.height(12.dp))
+                            Text("Auto-Skip When", style = MaterialTheme.typography.labelMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = when (selectedAutoSkipScope) {
+                                    app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY ->
+                                        "Only skip high-confidence sponsor reads (80%+). Suggested ads show a Skip button."
+                                    app.hushcast.automute.dsp.AdAutoSkipScope.MODERATE_AND_HIGH ->
+                                        "Skip likely and high-confidence ads (65%+)."
+                                    app.hushcast.automute.dsp.AdAutoSkipScope.ALL_DETECTED ->
+                                        "Skip all detected ads, including suggested ads."
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            val scopes = listOf(
+                                app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY to "High (80%+)",
+                                app.hushcast.automute.dsp.AdAutoSkipScope.MODERATE_AND_HIGH to "Balanced",
+                                app.hushcast.automute.dsp.AdAutoSkipScope.ALL_DETECTED to "All Ads"
+                            )
+                            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                scopes.forEachIndexed { idx, (scopeVal, label) ->
+                                    SegmentedButton(
+                                        selected = selectedAutoSkipScope == scopeVal,
+                                        onClick = {
+                                            HushCastEngineBridge.autoSkipScope = scopeVal
+                                            scope.launch { settingsRepository.hushCast.setAdAutoSkipScope(scopeVal) }
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(idx, scopes.size)
+                                    ) {
+                                        Text(label)
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            Text("Section types to auto-skip", style = MaterialTheme.typography.labelMedium)
+                            Spacer(Modifier.height(4.dp))
+                            val selectedClasses by settingsRepository.hushCast.adAutoSkipClasses.collectAsState(initial = HushCastEngineBridge.autoSkipClasses)
+                            val sectionTypes = listOf(
+                                "sponsor_ad" to "Sponsors / Ads",
+                                "house_promo" to "Show Promos",
+                                "membership_pitch" to "Membership Pitches",
+                                "boilerplate" to "Intros / Outros"
+                            )
+                            androidx.compose.foundation.layout.FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                sectionTypes.forEach { (cls, label) ->
+                                    val checked = cls in selectedClasses
+                                    androidx.compose.material3.FilterChip(
+                                        selected = checked,
+                                        onClick = {
+                                            val updated = if (checked) selectedClasses - cls else selectedClasses + cls
+                                            HushCastEngineBridge.autoSkipClasses = updated
+                                            scope.launch { settingsRepository.hushCast.setAdAutoSkipClasses(updated) }
+                                        },
+                                        label = { Text(label) }
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Sponsor skip indicator sound", style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    text = if (sponsorSkipSoundUri != null) "Custom sound selected" else "Play a subtle chime when an ad is skipped",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = sponsorSkipSoundEnabled,
+                                onCheckedChange = { enabled ->
+                                    HushCastEngineBridge.sponsorSkipSoundEnabled = enabled
+                                    scope.launch { settingsRepository.hushCast.setSponsorSkipSoundEnabled(enabled) }
+                                }
+                            )
+                        }
+                        if (sponsorSkipSoundEnabled) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                androidx.compose.material3.TextButton(onClick = {
+                                    HushCastEngineBridge.playSponsorSkipIndicator(context, forceTest = true)
+                                }) {
+                                    Text("Test chime")
+                                }
+                                androidx.compose.material3.TextButton(onClick = { skipSoundPicker.launch(arrayOf("audio/*")) }) {
+                                    Text(if (sponsorSkipSoundUri != null) "Change sound" else "Custom sound")
+                                }
+                                if (sponsorSkipSoundUri != null) {
+                                    androidx.compose.material3.TextButton(onClick = {
+                                        HushCastEngineBridge.sponsorSkipSoundUri = null
+                                        scope.launch { settingsRepository.hushCast.setSponsorSkipSoundUri(null) }
+                                    }) {
+                                        Text("Reset to chime")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showProcessingSetup = !showProcessingSetup },
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Text(
+                                text = "Processing Setup (Cloud & On-Device)",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            val cloudConfigured = app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) &&
+                                app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+                            Text(
+                                text = when {
+                                    cloudConfigured -> "Cloud/Desktop Worker active • Tap to configure"
+                                    modelsReady -> "On-Device models ready • Tap to configure"
+                                    else -> "Not configured yet • Tap to set up"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Icon(
+                            imageVector = if (showProcessingSetup) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            contentDescription = if (showProcessingSetup) "Collapse" else "Expand"
+                        )
+                    }
+                }
+            }
+
+            if (showProcessingSetup) {
             item {
                 Text(
                     text = "CLOUD / DESKTOP WORKER",
@@ -755,494 +1450,44 @@ fun SettingsHushCastPane(
                 }
             }
 
+            }
+
             item {
                 Text(
-                    text = "WORD BLEEPING & MUTING",
+                    text = "DEVELOPER & DIAGNOSTICS",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
             }
 
-            // 2. Feature A: Word Auto-Muting Controls
             item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.AutoMirrored.Rounded.VolumeOff, contentDescription = null)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Word Auto-Muting", style = MaterialTheme.typography.titleMedium)
-                            }
-                            Switch(
-                                checked = wordMutingEnabled,
-                                onCheckedChange = {
-                                    HushCastEngineBridge.wordMutingEnabled = it
-                                    scope.launch { settingsRepository.hushCast.setWordMutingEnabled(it) }
-                                }
-                            )
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Text("Action Mode", style = MaterialTheme.typography.labelMedium)
-                        Spacer(Modifier.height(6.dp))
-                        val modes = listOf(
-                            MuteActionMode.HARD_SILENCE to "Silence",
-                            MuteActionMode.VOLUME_DUCK to "Duck 10%",
-                            MuteActionMode.SAMPLE_DROP_MICRO_SKIP to "Micro-Skip",
-                            MuteActionMode.BEEP to "Bleep",
-                            MuteActionMode.CUSTOM_SOUND to "Custom"
-                        )
-                        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-                        androidx.compose.foundation.layout.FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            modes.forEach { (mode, label) ->
-                                androidx.compose.material3.FilterChip(
-                                    selected = selectedActionMode == mode,
-                                    onClick = {
-                                        HushCastEngineBridge.defaultActionMode = mode
-                                        scope.launch {
-                                            settingsRepository.hushCast.setMuteActionMode(mode)
-                                            withContext(Dispatchers.IO) {
-                                                autoMuteDb.dao().updateAllRulesActionMode(mode.name)
-                                                autoMuteDb.dao().updateAllMuteSegmentsActionMode(mode.name)
-                                                val currentEpId = HushCastEngineBridge.currentEpisodeId
-                                                if (!currentEpId.isNullOrBlank()) {
-                                                    val sha = autoMuteDb.dao().getStatus(currentEpId)?.fileSha256
-                                                    if (!sha.isNullOrBlank()) {
-                                                        val updated = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
-                                                        HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    },
-                                    label = { Text(label) }
-                                )
-                            }
-                        }
-                        if (selectedActionMode == MuteActionMode.CUSTOM_SOUND) {
-                            Spacer(Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = if (muteCustomSoundUri != null) "Custom sound selected" else "Default bleep (no file chosen)",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                androidx.compose.material3.TextButton(onClick = { muteSoundPicker.launch(arrayOf("audio/*")) }) {
-                                    Text(if (muteCustomSoundUri != null) "Change" else "Choose file")
-                                }
-                                if (muteCustomSoundUri != null) {
-                                    androidx.compose.material3.TextButton(onClick = {
-                                        HushCastEngineBridge.loadCustomMuteSound(context, null)
-                                        scope.launch { settingsRepository.hushCast.setMuteCustomSoundUri(null) }
-                                    }) {
-                                        Text("Clear")
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.height(10.dp))
-                        var selectedPrecision by remember {
-                            mutableStateOf(app.hushcast.automute.engine.HushCastPrefs.getMuteTimingPrecision(context))
-                        }
-                        Text("Bleep / Mute Timing Precision", style = MaterialTheme.typography.labelMedium)
-                        Text(
-                            "Controls pre/post padding around each matched word (applies to both Cloud and On-Device).",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
-                        androidx.compose.foundation.layout.FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            app.hushcast.automute.engine.MuteTimingPrecision.entries.forEach { precision ->
-                                androidx.compose.material3.FilterChip(
-                                    selected = selectedPrecision == precision,
-                                    onClick = {
-                                        selectedPrecision = precision
-                                        app.hushcast.automute.engine.HushCastPrefs.setMuteTimingPrecision(context, precision)
-                                        app.hushcast.automute.worker.RuleReevaluationWorker.enqueue(
-                                            context = context,
-                                            prePadMs = precision.prePadMs,
-                                            postPadMs = precision.postPadMs,
-                                            defaultActionMode = selectedActionMode
-                                        )
-                                    },
-                                    label = { Text(precision.label) }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 4. Muted Words Dictionary + Presets
-            item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text("Muted Words Dictionary (${rules.size} rules)", style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.height(8.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = newPattern,
-                                onValueChange = { newPattern = it },
-                                label = { Text("Word, phrase, or regex") },
-                                singleLine = true,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Button(
-                                enabled = newPattern.isNotBlank(),
-                                onClick = {
-                                    val pat = newPattern.trim()
-                                    newPattern = ""
-                                    scope.launch {
-                                        autoMuteDb.dao().upsertRuleIfNew(
-                                            MuteRuleEntity(
-                                                pattern = pat,
-                                                isRegex = isRegex,
-                                                actionMode = selectedActionMode.name
-                                            )
-                                        )
-                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                            val analyzer = app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
-                                            val indices = autoMuteDb.dao().getAllWordIndices()
-                                            for (idx in indices) {
-                                                analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, defaultActionMode = HushCastEngineBridge.defaultActionMode)
-                                                if (idx.episodeId == HushCastEngineBridge.currentEpisodeId) {
-                                                    val updated = autoMuteDb.dao().getMuteSegments(idx.fileSha256).map { it.toDomain() }
-                                                    HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            ) {
-                                Icon(Icons.Rounded.Add, contentDescription = "Add")
-                            }
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Switch(checked = isRegex, onCheckedChange = { isRegex = it })
-                            Spacer(Modifier.width(6.dp))
-                            Column {
-                                Text("Treat as Regex", style = MaterialTheme.typography.bodySmall)
-                                Text(
-                                    "Tip: Use \\bword\\b for exact whole-word matching",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        val existingKeys = remember(rules) {
-                            rules.map { it.pattern.trim().lowercase() to it.isRegex }.toSet()
-                        }
-                        val profanityAdded = remember(existingKeys) {
-                            PresetDictionaries.profanityRules(selectedActionMode).all {
-                                (it.pattern.trim().lowercase() to it.isRegex) in existingKeys
-                            }
-                        }
-                        val explicitAdded = remember(existingKeys) {
-                            PresetDictionaries.explicitRules(selectedActionMode).all {
-                                (it.pattern.trim().lowercase() to it.isRegex) in existingKeys
-                            }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(
-                                enabled = !profanityAdded,
-                                onClick = {
-                                    scope.launch {
-                                        val entities = PresetDictionaries.profanityRules(selectedActionMode).map {
-                                            MuteRuleEntity(
-                                                pattern = it.pattern,
-                                                isRegex = it.isRegex,
-                                                matchPlurals = it.matchPlurals,
-                                                actionMode = it.actionMode.name,
-                                                category = it.category
-                                            )
-                                        }
-                                        autoMuteDb.dao().upsertRulesIfNew(entities)
-                                    }
-                                }
-                            ) {
-                                Text(if (profanityAdded) "Profanity Added" else "+ Profanity Preset")
-                            }
-                            OutlinedButton(
-                                enabled = !explicitAdded,
-                                onClick = {
-                                    scope.launch {
-                                        val entities = PresetDictionaries.explicitRules(selectedActionMode).map {
-                                            MuteRuleEntity(
-                                                pattern = it.pattern,
-                                                isRegex = it.isRegex,
-                                                matchPlurals = it.matchPlurals,
-                                                actionMode = it.actionMode.name,
-                                                category = it.category
-                                            )
-                                        }
-                                        autoMuteDb.dao().upsertRulesIfNew(entities)
-                                    }
-                                }
-                            ) {
-                                Text(if (explicitAdded) "Explicit Added" else "+ Explicit Preset")
-                            }
-                        }
-                        if (rules.isNotEmpty()) {
-                            Spacer(Modifier.height(8.dp))
-                            OutlinedButton(
-                                onClick = { wordListExpanded = !wordListExpanded },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text(
-                                    if (wordListExpanded) "Hide Word List (${rules.size})"
-                                    else "Show Word List (${rules.size})"
-                                )
-                                Spacer(Modifier.width(6.dp))
-                                Icon(
-                                    if (wordListExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
-                                    contentDescription = null
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (wordListExpanded) {
-                items(rules, key = { it.id }) { rule ->
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(rule.pattern, style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    "${rule.category} • ${rule.actionMode}${if (rule.isRegex) " • Regex" else ""}",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Switch(
-                                checked = rule.enabled,
-                                onCheckedChange = { enabled ->
-                                    scope.launch {
-                                        autoMuteDb.dao().setRuleEnabled(rule.id, enabled)
-                                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                            val analyzer = app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
-                                            val indices = autoMuteDb.dao().getAllWordIndices()
-                                            for (idx in indices) {
-                                                analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, defaultActionMode = HushCastEngineBridge.defaultActionMode)
-                                                if (idx.episodeId == HushCastEngineBridge.currentEpisodeId) {
-                                                    val updated = autoMuteDb.dao().getMuteSegments(idx.fileSha256).map { it.toDomain() }
-                                                    HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            )
-                            IconButton(onClick = {
-                                scope.launch {
-                                    autoMuteDb.dao().deleteRule(rule.id)
-                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                        val analyzer = app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
-                                        val indices = autoMuteDb.dao().getAllWordIndices()
-                                        for (idx in indices) {
-                                            analyzer.reevaluateMuteRules(idx.fileSha256, idx.episodeId, defaultActionMode = HushCastEngineBridge.defaultActionMode)
-                                            if (idx.episodeId == HushCastEngineBridge.currentEpisodeId) {
-                                                val updated = autoMuteDb.dao().getMuteSegments(idx.fileSha256).map { it.toDomain() }
-                                                HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
-                                            }
-                                        }
-                                    }
-                                }
-                            }) {
-                                Icon(Icons.Rounded.Delete, contentDescription = "Delete rule")
-                            }
-                        }
-                    }
-                }
-            }
-
-            item {
-                Text(
-                    text = "AD & SECTION SKIPPING",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-
-            // 3. Feature B: Sponsor / Ad Blocker Controls
-            item {
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Rounded.Shield, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Sponsor & Section Skipping", style = MaterialTheme.typography.titleMedium)
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        val policies = listOf(
-                            AdPolicyMode.AUTO_SKIP to "Auto-Skip",
-                            AdPolicyMode.MARK_ONLY to "Mark Only",
-                            AdPolicyMode.OFF to "Off"
-                        )
-                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                            policies.forEachIndexed { idx, (policy, label) ->
-                                SegmentedButton(
-                                    selected = selectedAdPolicy == policy,
-                                    onClick = {
-                                        HushCastEngineBridge.defaultAdPolicy = policy
-                                        HushCastEngineBridge.adSkipObserver.policyMode = policy
-                                        scope.launch { settingsRepository.hushCast.setAdPolicyMode(policy) }
-                                    },
-                                    shape = SegmentedButtonDefaults.itemShape(idx, policies.size)
-                                ) {
-                                    Text(label)
-                                }
-                            }
-                        }
-                        if (selectedAdPolicy == AdPolicyMode.AUTO_SKIP) {
-                            Spacer(Modifier.height(12.dp))
-                            Text("Auto-Skip When", style = MaterialTheme.typography.labelMedium)
-                            Spacer(Modifier.height(4.dp))
+                        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                            Text("Developer Mode", style = MaterialTheme.typography.titleMedium)
                             Text(
-                                text = when (selectedAutoSkipScope) {
-                                    app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY ->
-                                        "Only skip high-confidence sponsor reads (80%+). Suggested ads show a Skip button."
-                                    app.hushcast.automute.dsp.AdAutoSkipScope.MODERATE_AND_HIGH ->
-                                        "Skip likely and high-confidence ads (65%+)."
-                                    app.hushcast.automute.dsp.AdAutoSkipScope.ALL_DETECTED ->
-                                        "Skip all detected ads, including suggested ads."
-                                },
+                                "Show timeline export, diagnostic logs, and stage-specific cloud reprocessing",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            Spacer(Modifier.height(6.dp))
-                            val scopes = listOf(
-                                app.hushcast.automute.dsp.AdAutoSkipScope.HIGH_CONFIDENCE_ONLY to "High (80%+)",
-                                app.hushcast.automute.dsp.AdAutoSkipScope.MODERATE_AND_HIGH to "Balanced",
-                                app.hushcast.automute.dsp.AdAutoSkipScope.ALL_DETECTED to "All Ads"
-                            )
-                            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                                scopes.forEachIndexed { idx, (scopeVal, label) ->
-                                    SegmentedButton(
-                                        selected = selectedAutoSkipScope == scopeVal,
-                                        onClick = {
-                                            HushCastEngineBridge.autoSkipScope = scopeVal
-                                            scope.launch { settingsRepository.hushCast.setAdAutoSkipScope(scopeVal) }
-                                        },
-                                        shape = SegmentedButtonDefaults.itemShape(idx, scopes.size)
-                                    ) {
-                                        Text(label)
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.height(12.dp))
-                            Text("Section types to auto-skip", style = MaterialTheme.typography.labelMedium)
-                            Spacer(Modifier.height(4.dp))
-                            val selectedClasses by settingsRepository.hushCast.adAutoSkipClasses.collectAsState(initial = HushCastEngineBridge.autoSkipClasses)
-                            val sectionTypes = listOf(
-                                "sponsor_ad" to "Sponsors / Ads",
-                                "house_promo" to "Show Promos",
-                                "membership_pitch" to "Membership Pitches",
-                                "boilerplate" to "Intros / Outros"
-                            )
-                            androidx.compose.foundation.layout.FlowRow(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                sectionTypes.forEach { (cls, label) ->
-                                    val checked = cls in selectedClasses
-                                    androidx.compose.material3.FilterChip(
-                                        selected = checked,
-                                        onClick = {
-                                            val updated = if (checked) selectedClasses - cls else selectedClasses + cls
-                                            HushCastEngineBridge.autoSkipClasses = updated
-                                            scope.launch { settingsRepository.hushCast.setAdAutoSkipClasses(updated) }
-                                        },
-                                        label = { Text(label) }
-                                    )
-                                }
-                            }
                         }
-                        Spacer(Modifier.height(12.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Sponsor skip indicator sound", style = MaterialTheme.typography.bodyMedium)
-                                Text(
-                                    text = if (sponsorSkipSoundUri != null) "Custom sound selected" else "Play a subtle chime when an ad is skipped",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                        Switch(
+                            checked = devMode,
+                            onCheckedChange = { enabled ->
+                                scope.launch { settingsRepository.hushCast.setDevMode(enabled) }
                             }
-                            Switch(
-                                checked = sponsorSkipSoundEnabled,
-                                onCheckedChange = { enabled ->
-                                    HushCastEngineBridge.sponsorSkipSoundEnabled = enabled
-                                    scope.launch { settingsRepository.hushCast.setSponsorSkipSoundEnabled(enabled) }
-                                }
-                            )
-                        }
-                        if (sponsorSkipSoundEnabled) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.End
-                            ) {
-                                androidx.compose.material3.TextButton(onClick = {
-                                    HushCastEngineBridge.playSponsorSkipIndicator(context, forceTest = true)
-                                }) {
-                                    Text("Test chime")
-                                }
-                                androidx.compose.material3.TextButton(onClick = { skipSoundPicker.launch(arrayOf("audio/*")) }) {
-                                    Text(if (sponsorSkipSoundUri != null) "Change sound" else "Custom sound")
-                                }
-                                if (sponsorSkipSoundUri != null) {
-                                    androidx.compose.material3.TextButton(onClick = {
-                                        HushCastEngineBridge.sponsorSkipSoundUri = null
-                                        scope.launch { settingsRepository.hushCast.setSponsorSkipSoundUri(null) }
-                                    }) {
-                                        Text("Reset to chime")
-                                    }
-                                }
-                            }
-                        }
+                        )
                     }
                 }
-            }
-
-            item {
-                Text(
-                    text = "DIAGNOSTICS",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
             }
 
             // 5. On-Device Diagnostics Card
@@ -1276,49 +1521,51 @@ fun SettingsHushCastPane(
                             }) {
                                 Text("Cancel Queue")
                             }
-                            OutlinedButton(onClick = {
-                                scope.launch {
-                                    val logText = withContext(Dispatchers.IO) {
-                                        val pkgInfo = runCatching {
-                                            context.packageManager.getPackageInfo(context.packageName, 0)
-                                        }.getOrNull()
-                                        val verName = pkgInfo?.versionName ?: "unknown"
-                                        val verCode = if (pkgInfo != null) androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(pkgInfo) else 0L
-                                        val statuses = runCatching {
-                                            autoMuteDb.dao().observeAllStatuses().first()
-                                        }.getOrElse { emptyList() }
-                                        val header = buildString {
-                                            appendLine("HushCast Diagnostics")
-                                            appendLine("App: $verName ($verCode)")
-                                            appendLine("Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE}, API ${android.os.Build.VERSION.SDK_INT})")
-                                            appendLine("Perf Cores: ${app.hushcast.automute.engine.CpuTopology.performanceCoreCount()} • Thermal: ${app.hushcast.automute.engine.CpuTopology.thermalStatusLabel(context)}")
-                                            appendLine("PSS: $currentPssMb MB • Models: $downloadedMb MB")
-                                            appendLine("Fast Model: ${app.hushcast.automute.engine.HushCastPrefs.isFastModelEnabled(context)} • Flash Attn: ${app.hushcast.automute.engine.HushCastPrefs.isFastAttentionEnabled(context)} • Charging Only: ${app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context)}")
-                                            appendLine("--- Analysis Statuses (${statuses.size}) ---")
-                                            statuses.takeLast(10).forEach { st ->
-                                                appendLine("${st.episodeId.take(28)}: ${st.badge} ${st.progressPercent}% [${st.stageLabel}] rss=${st.peakRssMb}MB err=${st.errorMessage ?: "none"}")
+                            if (devMode) {
+                                OutlinedButton(onClick = {
+                                    scope.launch {
+                                        val logText = withContext(Dispatchers.IO) {
+                                            val pkgInfo = runCatching {
+                                                context.packageManager.getPackageInfo(context.packageName, 0)
+                                            }.getOrNull()
+                                            val verName = pkgInfo?.versionName ?: "unknown"
+                                            val verCode = if (pkgInfo != null) androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(pkgInfo) else 0L
+                                            val statuses = runCatching {
+                                                autoMuteDb.dao().observeAllStatuses().first()
+                                            }.getOrElse { emptyList() }
+                                            val header = buildString {
+                                                appendLine("HushCast Diagnostics")
+                                                appendLine("App: $verName ($verCode)")
+                                                appendLine("Device: ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} (Android ${android.os.Build.VERSION.RELEASE}, API ${android.os.Build.VERSION.SDK_INT})")
+                                                appendLine("Perf Cores: ${app.hushcast.automute.engine.CpuTopology.performanceCoreCount()} • Thermal: ${app.hushcast.automute.engine.CpuTopology.thermalStatusLabel(context)}")
+                                                appendLine("PSS: $currentPssMb MB • Models: $downloadedMb MB")
+                                                appendLine("Fast Model: ${app.hushcast.automute.engine.HushCastPrefs.isFastModelEnabled(context)} • Flash Attn: ${app.hushcast.automute.engine.HushCastPrefs.isFastAttentionEnabled(context)} • Charging Only: ${app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context)}")
+                                                appendLine("--- Analysis Statuses (${statuses.size}) ---")
+                                                statuses.takeLast(10).forEach { st ->
+                                                    appendLine("${st.episodeId.take(28)}: ${st.badge} ${st.progressPercent}% [${st.stageLabel}] rss=${st.peakRssMb}MB err=${st.errorMessage ?: "none"}")
+                                                }
+                                                appendLine("--- HushCastPerf & Crashes ---")
                                             }
-                                            appendLine("--- HushCastPerf & Crashes ---")
+                                            val perfLogs = runCatching {
+                                                val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-s", "HushCastPerf:V", "HushCastDesktop:V", "AndroidRuntime:E"))
+                                                proc.inputStream.bufferedReader().use { it.readText() }
+                                            }.getOrElse { "perf logcat failed: ${it.message}" }
+                                            val tailLogs = runCatching {
+                                                val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "250"))
+                                                proc.inputStream.bufferedReader().use { it.readText() }
+                                            }.getOrElse { "tail logcat failed: ${it.message}" }
+                                            (header + perfLogs + "\n--- Recent System Tail ---\n" + tailLogs).takeLast(90_000)
                                         }
-                                        val perfLogs = runCatching {
-                                            val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-s", "HushCastPerf:V", "HushCastDesktop:V", "AndroidRuntime:E"))
-                                            proc.inputStream.bufferedReader().use { it.readText() }
-                                        }.getOrElse { "perf logcat failed: ${it.message}" }
-                                        val tailLogs = runCatching {
-                                            val proc = Runtime.getRuntime().exec(arrayOf("logcat", "-d", "-t", "250"))
-                                            proc.inputStream.bufferedReader().use { it.readText() }
-                                        }.getOrElse { "tail logcat failed: ${it.message}" }
-                                        (header + perfLogs + "\n--- Recent System Tail ---\n" + tailLogs).takeLast(90_000)
+                                        val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                            type = "text/plain"
+                                            putExtra(android.content.Intent.EXTRA_SUBJECT, "HushCast Diagnostic Logs")
+                                            putExtra(android.content.Intent.EXTRA_TEXT, logText)
+                                        }
+                                        context.startActivity(android.content.Intent.createChooser(intent, "Export HushCast Logs"))
                                     }
-                                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(android.content.Intent.EXTRA_SUBJECT, "HushCast Diagnostic Logs")
-                                        putExtra(android.content.Intent.EXTRA_TEXT, logText)
-                                    }
-                                    context.startActivity(android.content.Intent.createChooser(intent, "Export HushCast Logs"))
+                                }) {
+                                    Text("Export Logs")
                                 }
-                            }) {
-                                Text("Export Logs")
                             }
                         }
                     }

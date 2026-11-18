@@ -42,6 +42,7 @@ class PodcastEpisodeDownloadWork(
         downloadMethod: app.hushcast.automute.engine.DownloadAnalysisMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO,
         isAuto: Boolean = false,
         forceReprocess: Boolean = false,
+        reprocessStage: String? = null,
         isFinalAttempt: Boolean = true,
         isRetry: Boolean = false,
         onProgressUpdate: ((title: String, sourceLabel: String, percent: Int) -> Unit)? = null
@@ -106,6 +107,7 @@ class PodcastEpisodeDownloadWork(
                         workerUrl = workerUrl,
                         token = app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerToken(context),
                         forceReprocess = forceReprocess && !isRetry,
+                        reprocessStage = reprocessStage,
                         resetStatusOnError = downloadMethod != app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP || isFinalAttempt,
                         onProgressUpdate = onProgressUpdate
                     )
@@ -272,6 +274,7 @@ class PodcastEpisodeDownloadWork(
         workerUrl: String,
         token: String,
         forceReprocess: Boolean = false,
+        reprocessStage: String? = null,
         resetStatusOnError: Boolean = true,
         onProgressUpdate: ((title: String, sourceLabel: String, percent: Int) -> Unit)?
     ): Boolean = desktopOffloadSemaphore.withPermit {
@@ -324,7 +327,8 @@ class PodcastEpisodeDownloadWork(
                         episodeId = episodeId,
                         audioUrl = audioUrl,
                         title = title,
-                        force = forceReprocess
+                        force = forceReprocess,
+                        reprocessStage = reprocessStage
                     )
                 )
                 Log.i(

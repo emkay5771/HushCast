@@ -330,6 +330,69 @@ def create_app(
             async with job_semaphore:
                 if cancel_event.is_set() or (jobs.get(job_id) and jobs[job_id].state == JobState.CANCELLED):
                     return
+
+                stage_req = (req.reprocessStage or "").strip().upper()
+                if req.force and stage_req in ("SUMMARY_CHAPTERS", "ALIGN_WORDS", "ADS_AND_SUMMARY") and hasattr(backend, "reprocess_bundle"):
+                    existing_sha = cache.lookup_by_url(req.audioUrl, require_audio=False)
+                    existing_bundle = cache.get_bundle(existing_sha) if existing_sha else None
+                    audio_ok = (stage_req == "SUMMARY_CHAPTERS") or (existing_sha is not None and cache.has_audio(existing_sha))
+                    if existing_sha and existing_bundle is not None and audio_ok:
+                        cached_audio = cache.audio_path(existing_sha) if cache.has_audio(existing_sha) else None
+                        emb_path = cache.embeddings_path(existing_sha)
+                        existing_emb = None
+                        if emb_path.exists():
+                            try:
+                                import numpy as np
+                                existing_emb = np.load(emb_path, allow_pickle=False)
+                            except Exception:
+                                existing_emb = None
+
+                        def on_reprocess_progress(state: JobState, pct: int, stage_lbl: str) -> None:
+                            if cancel_event.is_set():
+                                raise _JobCancelledError()
+                            cli_log.update(state, pct, stage_lbl)
+                            _update_job(
+                                job_id,
+                                state=state,
+                                progressPercent=pct,
+                                stageLabel=stage_lbl,
+                                fileSha256=existing_sha,
+                            )
+
+                        jobs_in_thread.add(job_id)
+                        try:
+                            bundle, new_emb = await asyncio.to_thread(
+                                backend.reprocess_bundle,
+                                stage=stage_req,
+                                existing_bundle=existing_bundle,
+                                audio_path=cached_audio,
+                                existing_embeddings=existing_emb,
+                                on_progress=on_reprocess_progress,
+                            )
+                        finally:
+                            jobs_in_thread.discard(job_id)
+
+                        if cancel_event.is_set():
+                            return
+
+                        cache.bundle_path(existing_sha).write_text(
+                            bundle.model_dump_json(), encoding="utf-8"
+                        )
+                        if new_emb is not None:
+                            import numpy as np
+                            np.save(cache.embeddings_path(existing_sha), new_emb, allow_pickle=False)
+                        cli_log.finish(f"Reprocessed ({stage_req})")
+                        _update_job(
+                            job_id,
+                            state=JobState.READY,
+                            progressPercent=100,
+                            stageLabel=f"Ready ({stage_req})",
+                            fileSha256=existing_sha,
+                        )
+                        if on_state_change:
+                            await asyncio.to_thread(on_state_change)
+                        return
+
                 cli_log.update(JobState.DOWNLOADING, 5, "Downloading episode audio…")
                 _update_job(
                     job_id,
