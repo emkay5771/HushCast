@@ -44,6 +44,13 @@ class SingularPodcastUpdateWork(
                     podcast.origin, *candidateEpisodes.toTypedArray()
                 )
 
+            app.podiumpodcasts.podium.api.chapters.EpisodeChapterHelper.applyFeedExtrasOnRefresh(
+                db = db,
+                origin = podcast.origin,
+                items = response.rssChannel.items,
+                extras = response.extras
+            )
+
             val subscription = db.podcastSubscriptions().getSync(podcast.origin)
             if (subscription?.enableAutoDownload == true && inserted.isNotEmpty()) {
                 for (episode in inserted) {

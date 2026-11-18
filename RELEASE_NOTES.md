@@ -1,3 +1,21 @@
+# HushCast v1.0.30-hushcast
+
+## What's New
+- **Player, Navigation & UX**:
+  - **Inline Error & Buffering States**: Added inline playback error messages with a **Retry** button in both the full player and floating mini player, and overlaid buffering indicators on artwork (after 300ms) instead of swapping artwork out.
+  - **Exact Sleep Timer**: Wired **End of episode** (`pauseAtEndOfMediaItems`) and **End of chapter** (`createMessage` at chapter end) to exact playback positions instead of wall-clock estimates, and added an active check mark on the selected timer entry.
+  - **Back Navigation & Swipe Polish**: Back on Discover, Library, or custom tabs now returns to Home instead of exiting; Back exits Home reorder mode; Library **Up Next** taps now open the episode; swipe-to-delete removes downloads immediately with an **Undo** snackbar and fixes RTL swipe offsets.
+  - **Streaming, Speed & Chapter Polish**: Labeled the streaming indicator with an explicit **Download** action, defaulted the speed sheet scope to **This podcast** when a per-podcast speed is saved, fixed chapter/transcript start positions on episode detail pages, and named global defaults in per-podcast settings.
+  - **Accessibility & Performance**: Restored TalkBack actions on transcript rows and seek bar progress semantics, replaced hard-coded amber seek bar ad marks with theme-aware `secondary` color, reduced player & transcript recompositions, moved transcript state building off the main thread, pre-bound player state before sheet open, and fixed the episode detail ViewModel leak.
+  - **Settings & Discovery**: Added a **Source code** row in Settings, formatted HushCast action mode labels cleanly, updated queue icons to `QueuePlayNext` / `PlaylistAdd`, replaced text arrows in Appearance settings, and ensured Discover search still shows Podcast Index results when Apple search fails.
+- **Engine, Chapters & Background Work**:
+  - **Live Settings Word-List & Mute Mode**: Settings word-list edits and mute mode changes now update the playing episode's `AutoMuteAudioProcessor` live without overwriting per-rule modes.
+  - **DAI, Chapters & Re-analysis**: Improved `DaiRetimer` break placement and sentence splitting, fixed `OffsetMap` intro/outro false positives, keyed chapter offset maps by `fileSha256`, extracted ID3 chapters at download time, parsed inline Podlove `<psc:chapter>` elements and applied feed extras on refresh, queued background re-analysis when `pipelineVersion` is behind (charging on unmetered Wi-Fi or when a worker is configured), increased stream buffers to 60s/300s, sized notification artwork to 256px, debounced podcast search, and moved pull-to-refresh to WorkManager unique work.
+- **Cloud / Modal & Desktop Worker**:
+  - **Resilience & Liveness**: Throttled Modal `Dict` progress writes with a heartbeat thread and stale-job detection, added `new_segment_callback`, `abort_callback`, and `on_token` progress/cancel support, computed ETA on Modal, disabled whisper.cpp VAD on Mac to keep token timestamps aligned, warmed models at Mac startup, and verified `CUDAExecutionProvider` in the Modal GPU image.
+
+---
+
 # HushCast v1.0.29-hushcast
 
 ## What's New
@@ -45,9 +63,9 @@
   - **Cleaner Appearance Settings**: Reordered items in `SettingsAppearancePane` and replaced the inline **Startup screen** list with a single row opening a clean `AlertDialog` picker.
 - **Processing Efficiency & Cloud Worker Upgrades**:
   - **2–4x Faster Cloud Transcription (`faster-whisper`)**: Switched default Cloud Worker ASR to `faster-whisper` (`large-v3-turbo`, `int8_float16`) with `whisper.cpp` fallback, Silero VAD pre-filtering, separate CPU web container + GPU worker (`modal.Dict` job state), and 3B JSON-mode LLM (`Qwen2.5-3B-Instruct`).
-  - **On-Device Speed & Battery Improvements**: Faster chunked analysis (`CpuTopology` `min(4, cores)` threads, `float32` audio path, `large` vs `tiny.en` model selection), battery/charging gate, and `OPUS` / reduced storage overhead.
+  - **On-Device Speed & Battery Improvements**: Faster chunked analysis (`CpuTopology` `min(4, cores)` threads, `float32` audio path, `large` vs `tiny.en` model selection), battery/charging gate, and reduced storage overhead.
 - **DAI Ad-Retiming Bridge**:
-  - **Cross-Download Dynamic Ad Retiming**: Added `dai_anchor` fingerprint storage on episode bundles and automatic MFCC/DTW retiming (`DaiRetimer`, `OffsetMap`) when a dynamic-ad (DAI) re-download shifts timestamps, preserving transcript, chapter, and ad-window alignment without re-transcribing.
+  - **Cross-Download Dynamic Ad Retiming**: Added automatic retiming (`DaiRetimer`, `OffsetMap`) when a dynamic-ad (DAI) re-download shifts timestamps, preserving transcript, chapter, and ad-window alignment without re-transcribing.
 
 ---
 

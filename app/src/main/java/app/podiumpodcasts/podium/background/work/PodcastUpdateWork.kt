@@ -82,6 +82,13 @@ class PodcastUpdateWork(
                                             podcast.origin, *candidateEpisodes.toTypedArray()
                                         )
 
+                                    app.podiumpodcasts.podium.api.chapters.EpisodeChapterHelper.applyFeedExtrasOnRefresh(
+                                        db = db,
+                                        origin = origin,
+                                        items = response.rssChannel.items,
+                                        extras = response.extras
+                                    )
+
                                     if (subscription.subscription.enableNotifications && inserted.isNotEmpty()) {
                                         val bmp = loadBitmap(response.rssChannel)
                                         for (episode in inserted) {
@@ -142,6 +149,47 @@ class PodcastUpdateWork(
         if (cachedPodcasts.get() >= 2) {
             db.statisticsUpdatePodcastRun().log(dataUsage.get())
         }
+
+        runCatching { queueStalePipelineReruns() }
+    }
+
+    private suspend fun queueStalePipelineReruns() {
+        val isWorkerConfigured = app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+        val bm = context.getSystemService(android.os.BatteryManager::class.java)
+        val isCharging = bm?.isCharging == true
+        val cm = context.getSystemService(android.net.ConnectivityManager::class.java)
+        val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
+        val isUnmeteredWifi = caps != null &&
+            caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED) &&
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)
+
+        if (!app.hushcast.automute.worker.EpisodeAnalysisWorker.isRerunEligible(
+                isCharging = isCharging,
+                isUnmeteredWifi = isUnmeteredWifi,
+                isWorkerConfigured = isWorkerConfigured
+            )
+        ) {
+            return
+        }
+
+        val autoMuteDb = app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
+        val staleStatuses = app.hushcast.automute.worker.EpisodeAnalysisWorker.findStaleEpisodesForRerun(
+            autoMuteDb.dao().getAllStatuses()
+        )
+        for (status in staleStatuses) {
+            val epBundle = db.podcastEpisodes().getSyncNullable(status.episodeId) ?: continue
+            val localFile = epBundle.episode.craftDownloadFile(context)
+            if (!localFile.exists() || localFile.length() <= 0L) continue
+            app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueBackgroundRerun(
+                context = context,
+                episodeId = status.episodeId,
+                audioPath = localFile.absolutePath,
+                knownSha256 = status.fileSha256,
+                actionMode = app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode,
+                episodeTitle = epBundle.episode.title,
+                isWorkerConfigured = isWorkerConfigured
+            )
+        }
     }
 
     suspend fun loadBitmap(rssChannel: RssChannel): Bitmap? {
@@ -151,6 +199,7 @@ class PodcastUpdateWork(
         val loader = SingletonImageLoader.get(context)
         val request = ImageRequest.Builder(context)
             .data(url)
+            .size(256)
             .allowHardware(false)
             .build()
 

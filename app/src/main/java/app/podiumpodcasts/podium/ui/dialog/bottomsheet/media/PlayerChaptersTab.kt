@@ -57,6 +57,7 @@ fun PlayerChaptersTab(
     currentPositionMs: Long,
     onToggleSkip: (publishedStartMs: Long, skip: Boolean) -> Unit,
     onSelectChapter: (chapter: ResolvedChapter, isCurrent: Boolean) -> Unit,
+    targetChapterIndex: Int? = null,
     contentBottomPadding: androidx.compose.ui.unit.Dp = 88.dp,
     modifier: Modifier = Modifier
 ) {
@@ -71,10 +72,11 @@ fun PlayerChaptersTab(
             ?: chapters.indexOfLast { currentPositionMs >= it.startMs }
     }
 
-    // C5: Open scrolled to the current chapter, accounting for the header row (+1)
-    LaunchedEffect(chapters.size) {
-        if (currentChapterIndex >= 0) {
-            val targetIdx = (currentChapterIndex + 1 - 1).coerceAtLeast(0)
+    // C2 & C5: Open scrolled to the target/current chapter, accounting for the header row (+1)
+    LaunchedEffect(chapters.size, targetChapterIndex) {
+        val targetChapter = targetChapterIndex ?: currentChapterIndex
+        if (targetChapter >= 0) {
+            val targetIdx = (targetChapter + 1).coerceIn(0, chapters.size)
             listState.scrollToItem(targetIdx)
         }
     }

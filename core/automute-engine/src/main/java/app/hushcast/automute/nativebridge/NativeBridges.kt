@@ -125,6 +125,9 @@ internal object WhisperJni {
     external fun mp3ReadChunk(handle: Long, midOut: FloatArray, sideOut: FloatArray?): Int
 
     @JvmStatic
+    external fun mp3Seek(handle: Long, frameIndex: Long): Boolean
+
+    @JvmStatic
     external fun mp3Close(handle: Long)
 }
 

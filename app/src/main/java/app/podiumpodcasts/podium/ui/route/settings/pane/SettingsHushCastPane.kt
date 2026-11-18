@@ -361,7 +361,7 @@ fun SettingsHushCastPane(
                         SettingsListItem(
                             icon = { Icon(Icons.AutoMirrored.Rounded.VolumeOff, null) },
                             label = "Muting",
-                            description = if (wordMutingEnabled) "Enabled · ${selectedActionMode.name.lowercase().replace('_', ' ')}" else "Off",
+                            description = if (wordMutingEnabled) "Enabled · ${selectedActionMode.displayLabel()}" else "Off",
                             index = 0,
                             count = 5,
                             onClick = { onNavigate(SettingsHushCastKey(HushCastSettingsSection.MUTING)) }
@@ -464,21 +464,8 @@ fun SettingsHushCastPane(
                                                 enabled = wordMutingEnabled,
                                                 selected = selectedActionMode == mode,
                                                 onClick = {
-                                                    HushCastEngineBridge.defaultActionMode = mode
                                                     scope.launch {
                                                         settingsRepository.hushCast.setMuteActionMode(mode)
-                                                        withContext(Dispatchers.IO) {
-                                                            autoMuteDb.dao().updateAllRulesActionMode(mode.name)
-                                                            autoMuteDb.dao().updateAllMuteSegmentsActionMode(mode.name)
-                                                            val currentEpId = HushCastEngineBridge.currentEpisodeId
-                                                            if (!currentEpId.isNullOrBlank()) {
-                                                                val sha = autoMuteDb.dao().getStatus(currentEpId)?.fileSha256
-                                                                if (!sha.isNullOrBlank()) {
-                                                                    val updated = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
-                                                                    HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
-                                                                }
-                                                            }
-                                                        }
                                                     }
                                                 },
                                                 label = { Text(label) }
@@ -974,8 +961,10 @@ fun SettingsHushCastPane(
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(rule.pattern, style = MaterialTheme.typography.bodyMedium)
+                                        val actionLabel = runCatching { MuteActionMode.valueOf(rule.actionMode).displayLabel() }
+                                            .getOrElse { rule.actionMode.lowercase().replace('_', ' ') }
                                         Text(
-                                            "${rule.category} • ${rule.actionMode}${if (rule.isRegex) " • Regex" else ""}",
+                                            "${rule.category} • $actionLabel${if (rule.isRegex) " • Regex" else ""}",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -1108,7 +1097,11 @@ fun SettingsHushCastPane(
                                                                 desktopStatus = if (authErr != null) {
                                                                     "Server reachable (${health.hostname}), but auth failed: ${authErr.message ?: authErr.javaClass.simpleName}"
                                                                 } else {
-                                                                    "Connected: ${health.hostname} (${health.accelerator.uppercase()}) • ${health.whisperModel}"
+                                                                    val outdatedNote = if (
+                                                                        health.apiVersion < app.hushcast.automute.desktop.DesktopWorkerClient.MIN_WORKER_API_VERSION ||
+                                                                        health.pipelineVersion < app.hushcast.automute.pipeline.AutoMuteAnalyzer.CURRENT_PIPELINE_VERSION
+                                                                    ) " • Worker outdated (update recommended)" else ""
+                                                                    "Connected: ${health.hostname} (${health.accelerator.uppercase()}) • ${health.whisperModel}$outdatedNote"
                                                                 }
                                                             } catch (t: Throwable) {
                                                                 desktopStatus = "Saved QR config, but connection check failed: ${t.message ?: t.javaClass.simpleName}"
@@ -1163,9 +1156,13 @@ fun SettingsHushCastPane(
                                                                 if (health.whisperModel.isNotBlank()) append(" • ${health.whisperModel}")
                                                                 if (health.chatModelReady) append(" • LLM Chat")
                                                             }
+                                                            val outdatedNote = if (
+                                                                health.apiVersion < app.hushcast.automute.desktop.DesktopWorkerClient.MIN_WORKER_API_VERSION ||
+                                                                health.pipelineVersion < app.hushcast.automute.pipeline.AutoMuteAnalyzer.CURRENT_PIPELINE_VERSION
+                                                            ) " • Worker outdated (update recommended)" else ""
                                                             "Connected: ${health.hostname} (${health.accelerator.uppercase()}) • " +
                                                                 (if (health.modelsReady) "Models Ready" else "Models Missing") +
-                                                                "$modelNote • ${health.cachedEpisodes} cached"
+                                                                "$modelNote • ${health.cachedEpisodes} cached$outdatedNote"
                                                         }
                                                     } catch (t: Throwable) {
                                                         desktopStatus = "Connection failed: ${t.message ?: t.javaClass.simpleName}"
@@ -1561,3 +1558,12 @@ private fun parseWorkerPairingPayload(raw: String): Pair<String, String>? {
     }
     return null
 }
+
+private fun MuteActionMode.displayLabel(): String = when (this) {
+    MuteActionMode.HARD_SILENCE -> "Hard silence"
+    MuteActionMode.VOLUME_DUCK -> "Gentle duck"
+    MuteActionMode.SAMPLE_DROP_MICRO_SKIP -> "Micro-skip"
+    MuteActionMode.BEEP -> "Bleep tone"
+    MuteActionMode.CUSTOM_SOUND -> "Custom sound"
+}
+

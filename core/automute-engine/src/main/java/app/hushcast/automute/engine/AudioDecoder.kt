@@ -175,6 +175,22 @@ object AudioDecoder {
             val mime = format.getString(MediaFormat.KEY_MIME)!!
             var rate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
             var channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+
+            if (mime == "audio/mpeg" && !path.startsWith("http", ignoreCase = true) && WhisperJni.isAvailable) {
+                val mp3Handle = WhisperJni.mp3Open(path)
+                if (mp3Handle != 0L) {
+                    ex.release()
+                    return decodeMp3RangeNative(mp3Handle, startSec, endSec, pcm, shouldAbort)
+                }
+            }
+
+            val encoderDelaySamples = if (format.containsKey(MediaFormat.KEY_ENCODER_DELAY)) {
+                format.getInteger(MediaFormat.KEY_ENCODER_DELAY).coerceAtLeast(0)
+            } else {
+                0
+            }
+            val encoderDelayUs = (encoderDelaySamples * 1_000_000L) / rate.coerceAtLeast(1)
+
             var encoding = AudioFormat.ENCODING_PCM_16BIT
             codec = MediaCodec.createDecoderByType(mime)
             try {
@@ -186,8 +202,8 @@ object AudioDecoder {
             }
             codec.start()
 
-            val startUs = (startSec.coerceAtLeast(0.0) * 1_000_000.0).toLong()
-            val endUs = (endSec.coerceAtLeast(startSec + 0.1) * 1_000_000.0).toLong()
+            val startUs = (startSec.coerceAtLeast(0.0) * 1_000_000.0).toLong() + encoderDelayUs
+            val endUs = (endSec.coerceAtLeast(startSec + 0.1) * 1_000_000.0).toLong() + encoderDelayUs
             if (startUs > 0L) {
                 ex.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
             }
@@ -451,6 +467,50 @@ object AudioDecoder {
             runCatching { codec?.stop() }
             runCatching { codec?.release() }
             runCatching { ex.release() }
+        }
+    }
+
+    private fun decodeMp3RangeNative(
+        mp3Handle: Long,
+        startSec: Double,
+        endSec: Double,
+        pcm: PcmBuffer,
+        shouldAbort: () -> Boolean
+    ): PcmBuffer {
+        var rate = WhisperJni.mp3SampleRate(mp3Handle).coerceAtLeast(8000)
+        val startFrame = (startSec.coerceAtLeast(0.0) * rate).toLong().coerceAtLeast(0L)
+        val endFrame = (endSec.coerceAtLeast(startSec + 0.1) * rate).toLong().coerceAtLeast(startFrame + 1L)
+        var resampler = Resampler(rate, WHISPER_SR)
+        val midChunk = FloatArray(16_384)
+        try {
+            WhisperJni.mp3Seek(mp3Handle, startFrame)
+            var currentFrame = startFrame
+            while (currentFrame < endFrame) {
+                if (shouldAbort()) throw CancellationException("Audio range decode cancelled")
+                val n = WhisperJni.mp3ReadChunk(mp3Handle, midChunk, null)
+                if (n <= 0) break
+                val newRate = WhisperJni.mp3SampleRate(mp3Handle)
+                if (newRate > 0 && newRate != rate) {
+                    resampler.close()
+                    rate = newRate
+                    resampler = Resampler(rate, WHISPER_SR)
+                }
+                val toTake = minOf(n.toLong(), endFrame - currentFrame).toInt().coerceAtLeast(0)
+                if (toTake > 0) {
+                    val w = resampler.process(midChunk, 0, toTake)
+                    if (w.isNotEmpty()) pcm.append(w)
+                }
+                currentFrame += n
+            }
+            val tail = resampler.finish()
+            if (tail.isNotEmpty()) pcm.append(tail)
+            return pcm
+        } catch (t: Throwable) {
+            pcm.close()
+            throw t
+        } finally {
+            resampler.close()
+            WhisperJni.mp3Close(mp3Handle)
         }
     }
 

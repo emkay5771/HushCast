@@ -374,8 +374,9 @@ fun PodcastSettingsView(
                         Column {
                             Text("Override the global playback speed for this podcast")
                             Spacer(Modifier.height(12.dp))
+                            val globalSpeed by settingsRepository.behavior.playerPlaybackSpeed.collectAsState(initial = 1.0f)
                             val speeds = listOf(
-                                0f to "Global",
+                                0f to "Global (${String.format(java.util.Locale.US, "%.1fx", globalSpeed)})",
                                 0.8f to "0.8x",
                                 1.0f to "1.0x",
                                 1.2f to "1.2x",
@@ -422,6 +423,7 @@ fun PodcastSettingsView(
                 val podcastWordMuting by remember(podcast.origin) {
                     settingsRepository.hushCast.podcastWordMuting(podcast.origin)
                 }.collectAsState(initial = null)
+                val globalWordMuting by settingsRepository.hushCast.wordMutingEnabled.collectAsState(initial = true)
 
                 SettingsListItem(
                     icon = {
@@ -436,7 +438,7 @@ fun PodcastSettingsView(
                             Text("Override global word muting for this podcast")
                             Spacer(Modifier.height(12.dp))
                             val options = listOf(
-                                null to "Default",
+                                null to "Default (${if (globalWordMuting) "On" else "Off"})",
                                 true to "On",
                                 false to "Off"
                             )

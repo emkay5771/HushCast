@@ -29,6 +29,8 @@ import androidx.room.withTransaction
 import app.hushcast.automute.dsp.AdPolicyMode
 import app.hushcast.automute.dsp.HushCastAudioProcessorChain
 import app.hushcast.automute.storage.AutoMuteDatabase
+import app.hushcast.automute.storage.loadResolvedMuteWindows
+import app.hushcast.automute.storage.loadResolvedMuteWindowsByEpisode
 import app.hushcast.automute.storage.toDomain
 import app.podiumpodcasts.podium.HeadsetNextAction
 import app.podiumpodcasts.podium.HeadsetPrevAction
@@ -49,9 +51,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -109,6 +115,8 @@ class PlaybackService : MediaLibraryService() {
     private val sleepTimerHandler: Handler = Handler(Looper.getMainLooper())
     var sleepTimerTrigger: Long? = null
         private set
+    private var sleepTimerChapterMessage: PlayerMessage? = null
+    private var sleepTimerEndOfEpisode: Boolean = false
     private val sleepTimerFadeDurationMs = 10_000L
     private val sleepTimerRunnable = Runnable {
         sleepTimerTrigger = null
@@ -164,7 +172,7 @@ class PlaybackService : MediaLibraryService() {
             .setMp3ExtractorFlags(Mp3Extractor.FLAG_ENABLE_INDEX_SEEKING)
 
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
-            .setBufferDurationsMs(15_000, 60_000, 1_500, 3_000)
+            .setBufferDurationsMs(60_000, 300_000, 1_500, 3_000)
             .build()
 
         exoPlayer = ExoPlayer.Builder(this, renderersFactory)
@@ -263,19 +271,35 @@ class PlaybackService : MediaLibraryService() {
             }
         }
         scope.launch {
-            settingsRepository.hushCast.muteActionMode.distinctUntilChanged().collect { mode ->
+            combine(
+                activeEpisodeIdFlow,
+                settingsRepository.hushCast.muteActionMode.distinctUntilChanged()
+            ) { epId, mode ->
                 HushCastEngineBridge.defaultActionMode = mode
-                val activeEpId = exoPlayer.currentMediaItem?.getEpisodeId() ?: HushCastEngineBridge.currentEpisodeId
-                if (!activeEpId.isNullOrBlank()) {
-                    withContext(Dispatchers.IO) {
-                        val updated = autoMuteDb.dao()
-                            .observeMuteSegmentsByEpisode(activeEpId)
-                            .first()
-                            .map { it.toDomain() }
+                epId to mode
+            }
+                .flatMapLatest { (epId, mode) ->
+                    val activeId = epId ?: exoPlayer.currentMediaItem?.getEpisodeId() ?: HushCastEngineBridge.currentEpisodeId
+                    if (activeId.isNullOrBlank()) {
+                        flowOf(emptyList())
+                    } else {
+                        autoMuteDb.dao().observeMuteSegmentsByEpisode(activeId).distinctUntilChanged().let { segFlow ->
+                            kotlinx.coroutines.flow.flow {
+                                segFlow.collect {
+                                    val updated = withContext(Dispatchers.IO) {
+                                        autoMuteDb.dao().loadResolvedMuteWindowsByEpisode(activeId, mode)
+                                    }
+                                    emit(updated)
+                                }
+                            }
+                        }
+                    }
+                }
+                .collect { updated ->
+                    if (!activeEpisodeIdFlow.value.isNullOrBlank()) {
                         HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
                     }
                 }
-            }
         }
         scope.launch {
             settingsRepository.hushCast.wordMutingEnabled.distinctUntilChanged().collect { enabled ->
@@ -396,9 +420,11 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private var loadHushCastJob: Job? = null
+    private val activeEpisodeIdFlow = MutableStateFlow<String?>(null)
 
     private fun loadHushCastForEpisode(episodeId: String, origin: String) {
         HushCastEngineBridge.currentEpisodeId = episodeId
+        activeEpisodeIdFlow.value = episodeId
         HushCastEngineBridge.clearSkippedChapterRanges()
         loadHushCastJob?.cancel()
         loadHushCastJob = scope.launch(Dispatchers.IO) {
@@ -409,7 +435,7 @@ class PlaybackService : MediaLibraryService() {
             val status = autoMuteDb.dao().getStatus(episodeId)
             val sha = status?.fileSha256?.takeIf { it.isNotBlank() }
             if (sha != null) {
-                val mutes = autoMuteDb.dao().getMuteSegments(sha).map { it.toDomain() }
+                val mutes = autoMuteDb.dao().loadResolvedMuteWindows(sha, HushCastEngineBridge.defaultActionMode)
                 val ads = autoMuteDb.dao().getAdSegments(sha).map { it.toDomain() }
                 val policyStr = autoMuteDb.dao().getPodcastAdPolicy(origin)?.policyMode
                 val policy = policyStr?.let {
@@ -936,18 +962,62 @@ class PlaybackService : MediaLibraryService() {
         sleepTimerTrigger = null
         sleepTimerHandler.removeCallbacks(sleepTimerRunnable)
         sleepTimerHandler.removeCallbacks(sleepTimerFadeRunnable)
+        sleepTimerChapterMessage?.let { runCatching { it.cancel() } }
+        sleepTimerChapterMessage = null
+        if (sleepTimerEndOfEpisode) {
+            sleepTimerEndOfEpisode = false
+            exoPlayer.pauseAtEndOfMediaItems = false
+        }
         mediaSession?.player?.volume = 1.0f
         publishSleepTimerExtra()
     }
 
     fun startSleepTimer(trigger: Long) {
+        stopSleepTimer()
         sleepTimerTrigger = trigger
         val delay = (trigger - System.currentTimeMillis()).coerceAtLeast(0L)
 
-        sleepTimerHandler.removeCallbacks(sleepTimerRunnable)
-        sleepTimerHandler.removeCallbacks(sleepTimerFadeRunnable)
         sleepTimerHandler.postDelayed(sleepTimerRunnable, delay)
         sleepTimerHandler.post(sleepTimerFadeRunnable)
+        publishSleepTimerExtra()
+    }
+
+    fun startSleepTimerEndOfEpisode(approxTrigger: Long = 0L) {
+        stopSleepTimer()
+        sleepTimerEndOfEpisode = true
+        sleepTimerTrigger = approxTrigger.takeIf { it > 0L }
+        exoPlayer.pauseAtEndOfMediaItems = true
+        exoPlayer.addListener(object : Player.Listener {
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
+                    exoPlayer.removeListener(this)
+                    stopSleepTimer()
+                }
+            }
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                exoPlayer.removeListener(this)
+                stopSleepTimer()
+            }
+        })
+        publishSleepTimerExtra()
+    }
+
+    fun startSleepTimerAtPosition(positionMs: Long, approxTrigger: Long = 0L) {
+        stopSleepTimer()
+        sleepTimerTrigger = approxTrigger.takeIf { it > 0L }
+        sleepTimerChapterMessage = exoPlayer.createMessage { _, _ ->
+            Handler(Looper.getMainLooper()).post {
+                sleepTimerChapterMessage = null
+                sleepTimerTrigger = null
+                publishSleepTimerExtra()
+                exoPlayer.pause()
+                exoPlayer.volume = 1.0f
+            }
+        }
+            .setLooper(Looper.getMainLooper())
+            .setPosition(positionMs.coerceAtLeast(0L))
+            .setDeleteAfterDelivery(true)
+            .send()
         publishSleepTimerExtra()
     }
 

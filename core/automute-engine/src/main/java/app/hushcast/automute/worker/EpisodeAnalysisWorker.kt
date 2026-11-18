@@ -10,6 +10,7 @@ import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
+import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkInfo
@@ -46,7 +47,7 @@ class EpisodeAnalysisWorker(
         val episodeTitle = inputData.getString(KEY_EPISODE_TITLE).orEmpty()
         val knownSha256 = inputData.getString(KEY_KNOWN_SHA256)
         val quickMode = inputData.getBoolean(KEY_QUICK_MODE, false)
-        val feedTranscriptRaw = readFeedTranscriptFromInput(inputData)
+        val feedTranscriptRaw = readFeedTranscriptFromInput(inputData, deleteTempFile = false)
         val feedTranscriptMime = inputData.getString(KEY_FEED_TRANSCRIPT_MIME).orEmpty()
         val actionMode = runCatching {
             MuteActionMode.valueOf(inputData.getString(KEY_ACTION_MODE) ?: MuteActionMode.HARD_SILENCE.name)
@@ -68,6 +69,7 @@ class EpisodeAnalysisWorker(
                     errorMessage = null
                 )
             )
+            deleteStagedTranscriptFile(inputData)
             return Result.failure()
         }
 
@@ -99,6 +101,7 @@ class EpisodeAnalysisWorker(
                 )
                 android.util.Log.i("HushCastPerf", "Worker success: ep=$episodeId")
                 analysisCompletedEvents.tryEmit(episodeId)
+                deleteStagedTranscriptFile(inputData)
                 Result.success()
             } catch (c: CancellationException) {
                 val reason = if (Build.VERSION.SDK_INT >= 31) stopReason else WorkInfo.STOP_REASON_NOT_STOPPED
@@ -144,6 +147,7 @@ class EpisodeAnalysisWorker(
                         errorMessage = t.message ?: t.javaClass.simpleName
                     )
                 )
+                deleteStagedTranscriptFile(inputData)
                 Result.failure()
             }
         }
@@ -234,6 +238,11 @@ class EpisodeAnalysisWorker(
             }.getOrNull()
         }
 
+        internal fun deleteStagedTranscriptFile(inputData: androidx.work.Data) {
+            val path = inputData.getString(KEY_FEED_TRANSCRIPT_PATH)?.takeIf { it.isNotBlank() } ?: return
+            runCatching { File(path).delete() }
+        }
+
         internal fun readFeedTranscriptFromInput(inputData: androidx.work.Data, deleteTempFile: Boolean = true): String? {
             val inlineRaw = inputData.getString(KEY_FEED_TRANSCRIPT_RAW)
             if (!inlineRaw.isNullOrBlank()) return inlineRaw
@@ -297,7 +306,8 @@ class EpisodeAnalysisWorker(
             actionMode: MuteActionMode = MuteActionMode.HARD_SILENCE,
             episodeTitle: String? = null,
             feedTranscriptRaw: String? = null,
-            feedTranscriptMime: String = ""
+            feedTranscriptMime: String = "",
+            force: Boolean = false
         ) {
             val chargingOnly = HushCastPrefs.isAnalyzeOnlyWhileCharging(context)
             val transcriptPath = stageTranscriptFile(context, episodeId, feedTranscriptRaw)
@@ -328,7 +338,7 @@ class EpisodeAnalysisWorker(
 
             WorkManager.getInstance(context).enqueueUniqueWork(
                 uniqueWorkName(episodeId),
-                ExistingWorkPolicy.REPLACE,
+                if (force) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
                 builder.build()
             )
         }
@@ -339,6 +349,64 @@ class EpisodeAnalysisWorker(
 
         fun cancelAll(context: Context) {
             WorkManager.getInstance(context).cancelAllWorkByTag(ANALYSIS_QUEUE_NAME)
+        }
+
+        fun isRerunEligible(
+            isCharging: Boolean,
+            isUnmeteredWifi: Boolean,
+            isWorkerConfigured: Boolean
+        ): Boolean = (isCharging && isUnmeteredWifi) || isWorkerConfigured
+
+        fun findStaleEpisodesForRerun(
+            statuses: List<EpisodeAnalysisStatusEntity>,
+            currentPipelineVersion: Int = AutoMuteAnalyzer.CURRENT_PIPELINE_VERSION
+        ): List<EpisodeAnalysisStatusEntity> = statuses.filter {
+            it.badge == ReadinessBadge.READY.name &&
+                it.pipelineVersion < currentPipelineVersion &&
+                it.fileSha256.isNotBlank()
+        }
+
+        fun enqueueBackgroundRerun(
+            context: Context,
+            episodeId: String,
+            audioPath: String,
+            knownSha256: String,
+            actionMode: MuteActionMode = MuteActionMode.HARD_SILENCE,
+            episodeTitle: String? = null,
+            feedTranscriptRaw: String? = null,
+            feedTranscriptMime: String = "",
+            isWorkerConfigured: Boolean = false
+        ) {
+            val constraintsBuilder = Constraints.Builder()
+            if (!isWorkerConfigured) {
+                constraintsBuilder
+                    .setRequiresCharging(true)
+                    .setRequiredNetworkType(NetworkType.UNMETERED)
+            }
+            val transcriptPath = stageTranscriptFile(context, episodeId, feedTranscriptRaw)
+            val request = OneTimeWorkRequestBuilder<EpisodeAnalysisWorker>()
+                .addTag(ANALYSIS_QUEUE_NAME)
+                .addTag("episode:$episodeId")
+                .setConstraints(constraintsBuilder.build())
+                .setInputData(
+                    workDataOf(
+                        KEY_EPISODE_ID to episodeId,
+                        KEY_AUDIO_PATH to audioPath,
+                        KEY_EPISODE_TITLE to episodeTitle,
+                        KEY_KNOWN_SHA256 to knownSha256,
+                        KEY_QUICK_MODE to false,
+                        KEY_ACTION_MODE to actionMode.name,
+                        KEY_FEED_TRANSCRIPT_PATH to transcriptPath,
+                        KEY_FEED_TRANSCRIPT_MIME to feedTranscriptMime
+                    )
+                )
+                .build()
+
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                uniqueWorkName(episodeId),
+                ExistingWorkPolicy.KEEP,
+                request
+            )
         }
 
         val analysisCompletedEvents = MutableSharedFlow<String>(

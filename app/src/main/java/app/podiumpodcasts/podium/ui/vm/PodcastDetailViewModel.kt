@@ -31,6 +31,7 @@ import com.materialkolor.ktx.themeColorOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
@@ -66,6 +67,7 @@ class PodcastDetailViewModel(
             )
         }
             .distinctUntilChanged()
+            .debounce { if (it.search.isBlank()) 0L else 200L }
             .flatMapLatest { q ->
                 Pager(PagingConfig(pageSize = 30, prefetchDistance = 30)) {
                     val query = db.podcastEpisodes().buildQuery(

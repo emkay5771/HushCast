@@ -92,7 +92,18 @@ fun MediaPlayerSpeedBottomSheet(
     )
 
     val origin = vm.metadataOrigin
-    var perPodcastScope by remember { mutableStateOf(false) }
+    val savedPodcastSpeed by remember(origin) {
+        if (!origin.isNullOrBlank()) settingsRepository.behavior.podcastPlaybackSpeed(origin)
+        else kotlinx.coroutines.flow.flowOf(0f)
+    }.collectAsStateWithLifecycle(initialValue = 0f)
+    var perPodcastScope by remember(origin) { mutableStateOf(false) }
+    var initializedScope by remember(origin) { mutableStateOf(false) }
+    LaunchedEffect(origin, savedPodcastSpeed) {
+        if (!initializedScope && !origin.isNullOrBlank() && savedPodcastSpeed > 0f) {
+            perPodcastScope = true
+            initializedScope = true
+        }
+    }
 
     var speed by remember { mutableFloatStateOf(1f) }
     LaunchedEffect(vm.speed) { speed = vm.speed }

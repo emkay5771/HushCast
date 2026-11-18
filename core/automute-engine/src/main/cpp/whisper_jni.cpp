@@ -645,6 +645,14 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_mp3ReadChunk(
     return (jint) n;
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_app_hushcast_automute_nativebridge_WhisperJni_mp3Seek(
+        JNIEnv *, jclass, jlong h, jlong frameIndex) {
+    auto * dec = reinterpret_cast<NativeMp3Decoder *>(h);
+    if (frameIndex < 0) frameIndex = 0;
+    return drmp3_seek_to_pcm_frame(&dec->mp3, (drmp3_uint64) frameIndex) ? JNI_TRUE : JNI_FALSE;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_app_hushcast_automute_nativebridge_WhisperJni_mp3Close(JNIEnv *, jclass, jlong h) {
     auto * dec = reinterpret_cast<NativeMp3Decoder *>(h);

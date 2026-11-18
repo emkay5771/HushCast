@@ -9,8 +9,8 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.PlaylistRemove
 import androidx.compose.material.icons.rounded.RemoveDone
 import androidx.compose.material.icons.rounded.RestartAlt
-import androidx.compose.material.icons.rounded.VerticalAlignBottom
-import androidx.compose.material.icons.rounded.VerticalAlignTop
+import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
+import androidx.compose.material.icons.rounded.QueuePlayNext
 import androidx.compose.material.icons.rounded.WatchLater
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -112,8 +112,8 @@ interface SwipeableItemActions {
                     else -> Icons.Rounded.Check
                 }.let {
                     if (inQueue) androidx.compose.material.icons.Icons.Rounded.PlaylistRemove
-                    else if (playNext) androidx.compose.material.icons.Icons.Rounded.VerticalAlignTop
-                    else androidx.compose.material.icons.Icons.Rounded.VerticalAlignBottom
+                    else if (playNext) androidx.compose.material.icons.Icons.Rounded.QueuePlayNext
+                    else androidx.compose.material.icons.Icons.AutoMirrored.Rounded.PlaylistAdd
                 },
                 backgroundColor = MaterialTheme.colorScheme.primaryContainer,
                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -179,34 +179,24 @@ interface SwipeableItemActions {
         onActionHandler = actionHandler@{
             val context = androidx.compose.ui.platform.LocalContext.current
             val db = LocalDatabase.current
-            val scope = androidx.compose.runtime.rememberCoroutineScope()
-            var showDeleteConfirm by androidx.compose.runtime.remember(bundle.episode.id) {
-                androidx.compose.runtime.mutableStateOf(false)
-            }
-            if (showDeleteConfirm) {
-                app.podiumpodcasts.podium.ui.dialog.DeleteConfirmationDialog(
-                    onDismiss = { showDeleteConfirm = false },
-                    itemName = bundle.episode.title,
-                    additionalText = "This will delete the downloaded audio file from your device.",
-                    onConfirm = {
-                        scope.launch {
-                            app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
-                                context = context,
-                                db = db,
-                                episode = bundle.episode
-                            )
-                        }
-                    }
-                )
-            }
             return@actionHandler {
                 val isDownloaded = bundle.episode.craftDownloadFile(context).exists()
                 if (isDownloaded) {
-                    showDeleteConfirm = true
+                    app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
+                        context = context,
+                        db = db,
+                        episode = bundle.episode
+                    )
                     SwipeableItemActionResult(
                         isDismissed = false,
-                        message = "",
-                        onUndo = {}
+                        message = "Download removed",
+                        onUndo = {
+                            app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                context = context,
+                                db = db,
+                                episodeId = bundle.episode.id
+                            )
+                        }
                     )
                 } else {
                     app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(

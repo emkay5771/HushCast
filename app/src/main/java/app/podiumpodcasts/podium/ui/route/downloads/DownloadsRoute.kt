@@ -78,7 +78,7 @@ fun DownloadsRoute(
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showRemovePlayedConfirm = false },
             title = { Text("Remove ${playedDownloads.size} played download(s)?") },
-            text = { Text("Downloaded audio files for listened episodes will be deleted from this device.") },
+            text = { Text("Downloaded audio files for played episodes will be deleted from this device.") },
             confirmButton = {
                 androidx.compose.material3.Button(onClick = {
                     showRemovePlayedConfirm = false

@@ -18,6 +18,7 @@ import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Sync
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
+import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.VolunteerActivism
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material.icons.rounded.Work
@@ -332,7 +333,7 @@ fun SettingsRoute(
                     label = stringResource(R.string.app_name),
                     description = "v${version.first} (${version.second})",
                     index = 0,
-                    count = 3,
+                    count = 4,
                     onClick = {
                         versionTapCount.intValue++
                         if (versionTapCount.intValue >= 7 && !devMode) {
@@ -347,14 +348,32 @@ fun SettingsRoute(
                 SettingsListItem(
                     icon = {
                         Icon(
+                            Icons.Rounded.Code,
+                            contentDescription = ""
+                        )
+                    },
+                    label = "Source code",
+                    description = "View HushCast on GitHub",
+                    index = 1,
+                    count = 4,
+                    onClick = {
+                        uriHandler.openUri("https://github.com/emkay5771/HushCast")
+                    }
+                )
+            }
+
+            item {
+                SettingsListItem(
+                    icon = {
+                        Icon(
                             Icons.Rounded.Balance,
                             contentDescription = ""
                         )
                     },
                     label = "Open-source licenses",
                     description = "See used software and their licenses",
-                    index = 1,
-                    count = 3,
+                    index = 2,
+                    count = 4,
                     onClick = {
                         onLicenses()
                     }
@@ -371,8 +390,8 @@ fun SettingsRoute(
                     },
                     label = "Support upstream podium on Ko-Fi",
                     description = "HushCast is forked from podium by aimok04 — buy them a coffee :)",
-                    index = 2,
-                    count = 3,
+                    index = 3,
+                    count = 4,
                     onClick = {
                         uriHandler.openUri(KOFI_LINK)
                     }

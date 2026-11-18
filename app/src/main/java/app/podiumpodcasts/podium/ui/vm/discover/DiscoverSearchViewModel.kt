@@ -57,20 +57,34 @@ class DiscoverSearchViewModel(
                 DiscoverSearchState.Loading()
             }
             state.value = try {
+                var piError: Throwable? = null
+                var appleError: Throwable? = null
                 val combined = kotlinx.coroutines.supervisorScope {
                     val piDeferred = async {
-                        if(podcastIndexClient.isConfigured()) {
-                            runCatching { podcastIndexClient.search(query) }.getOrDefault(emptyList())
+                        if (podcastIndexClient.isConfigured()) {
+                            runCatching { podcastIndexClient.search(query) }
+                                .onFailure { err ->
+                                    if (err is CancellationException) throw err
+                                    piError = err
+                                }
+                                .getOrDefault(emptyList())
                         } else emptyList()
                     }
                     val appleDeferred = if (disableAppleApi) {
                         null
                     } else {
                         async<List<PodcastPreviewModel>> {
-                            applePodcastClient.search.search(
-                                query = query,
-                                countryCode = countryCode
-                            )
+                            runCatching {
+                                applePodcastClient.search.search(
+                                    query = query,
+                                    countryCode = countryCode
+                                )
+                            }
+                                .onFailure { err ->
+                                    if (err is CancellationException) throw err
+                                    appleError = err
+                                }
+                                .getOrDefault(emptyList())
                         }
                     }
 
@@ -78,10 +92,23 @@ class DiscoverSearchViewModel(
                         .distinctBy { it.fetchUrl.trimEnd('/') }
                 }
 
-                if(combined.isEmpty())
-                    DiscoverSearchState.Empty()
-                else
-                    DiscoverSearchState.Done(combined, isSearching = false)
+                val piConfigured = podcastIndexClient.isConfigured()
+                val appleEnabled = !disableAppleApi
+                val allEnabledFailed = (!piConfigured || piError != null) && (!appleEnabled || appleError != null) &&
+                    (piError != null || appleError != null)
+
+                when {
+                    combined.isNotEmpty() -> DiscoverSearchState.Done(combined, isSearching = false)
+                    allEnabledFailed -> {
+                        val err = appleError ?: piError!!
+                        val isNet = err is java.io.IOException || err.cause is java.io.IOException
+                        DiscoverSearchState.Error(
+                            error = err.localizedMessage ?: "Search failed",
+                            isNetworkError = isNet
+                        )
+                    }
+                    else -> DiscoverSearchState.Empty()
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch(e: Exception) {

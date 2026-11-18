@@ -277,6 +277,14 @@ fun Main(
                         * floatingMediaPlayerHeightAnimation.value,
                 LocalFloatingMediaPlayerShown provides floatingMediaPlayerShown.value
             ) {
+                androidx.activity.compose.BackHandler(
+                    enabled = backStack.size == 1 &&
+                        backStack.lastOrNull() != Home &&
+                        !listDetailNavigator.canNavigateBack(BackNavigationBehavior.PopUntilScaffoldValueChange)
+                ) {
+                    backStack.clear()
+                    backStack.add(Home)
+                }
                 NavigableListDetailPaneScaffold(
                     defaultBackBehavior = BackNavigationBehavior.PopLatest,
                     navigator = listDetailNavigator,
@@ -397,6 +405,14 @@ fun Main(
                         vm.showMediaPlayerBottomSheet.value = true
                     }
                 )
+            }
+        }
+
+        val playerScreenVm = viewModel<app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.PlayerScreenViewModel>()
+        LaunchedEffect(playerVm.metadataEpisodeId, playerVm.currentDuration) {
+            val epId = playerVm.metadataEpisodeId
+            if (!epId.isNullOrBlank()) {
+                playerScreenVm.bindEpisode(epId, playerVm.currentDuration)
             }
         }
 

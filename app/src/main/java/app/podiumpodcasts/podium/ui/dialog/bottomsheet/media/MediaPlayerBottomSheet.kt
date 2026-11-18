@@ -97,6 +97,7 @@ import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -258,6 +259,7 @@ fun MediaPlayerBottomSheet(
     }
 
     var selectedTab by remember { mutableStateOf(MediaPlayerTab.PLAYER) }
+    var chaptersScrollTargetIndex by remember { mutableStateOf<Int?>(null) }
     var showTranscriptOverlay by remember { mutableStateOf(false) }
 
     val pagerState = rememberPagerState(
@@ -424,16 +426,15 @@ fun MediaPlayerBottomSheet(
         }
     }
 
-    val livePosMs = if (showTranscriptOverlay) {
-        vm.rememberLivePositionMs(100L)
-    } else {
-        vm.rememberLivePositionMs(500L)
-    }
+    val livePosState = vm.rememberLivePositionMsState(if (showTranscriptOverlay) 100L else 500L)
     val durationMs = vm.currentDuration.coerceAtLeast(0L)
 
-    val currentChapterIndex = remember(resolvedChapters, livePosMs) {
-        if (resolvedChapters.isEmpty()) -1
-        else resolvedChapters.indexOfFirst { livePosMs in it.startMs until it.endMs }
+    val currentChapterIndex by remember(resolvedChapters) {
+        derivedStateOf {
+            val pos = livePosState.value
+            if (resolvedChapters.isEmpty()) -1
+            else resolvedChapters.indexOfFirst { pos in it.startMs until it.endMs }
+        }
     }
     val currentChapter = resolvedChapters.getOrNull(currentChapterIndex)
 
@@ -610,19 +611,26 @@ fun MediaPlayerBottomSheet(
                                                     val artSize = if (compactLayout) 128.dp else 300.dp
                                                     val artUri = currentChapter?.imageUrl?.takeIf { it.isNotBlank() }
                                                         ?: vm.mediaMetadata?.artworkUri?.toString()
-
-                                                    AnimatedContent(
-                                                        targetState = vm.isLoading to artUri,
-                                                        label = "playerArtwork"
-                                                    ) { (loading, uri) ->
-                                                        if (loading) {
-                                                            Box(
-                                                                modifier = Modifier.size(artSize),
-                                                                contentAlignment = Alignment.Center
-                                                            ) {
-                                                                ContainedLoadingIndicator(Modifier.size(artSize / 2))
-                                                            }
+                                                    val isActivelyBuffering =
+                                                        vm.playbackState == androidx.media3.common.Player.STATE_BUFFERING && vm.playWhenReady
+                                                    var showBufferingOverlay by remember { mutableStateOf(false) }
+                                                    LaunchedEffect(isActivelyBuffering) {
+                                                        if (isActivelyBuffering) {
+                                                            kotlinx.coroutines.delay(300L)
+                                                            showBufferingOverlay = true
                                                         } else {
+                                                            showBufferingOverlay = false
+                                                        }
+                                                    }
+
+                                                    Box(
+                                                        modifier = Modifier.size(artSize),
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        AnimatedContent(
+                                                            targetState = artUri,
+                                                            label = "playerArtwork"
+                                                        ) { uri ->
                                                             ShimmerAsyncImage(
                                                                 modifier = Modifier
                                                                     .size(artSize)
@@ -631,6 +639,17 @@ fun MediaPlayerBottomSheet(
                                                                 contentDescription = null,
                                                                 contentScale = ContentScale.Crop
                                                             )
+                                                        }
+                                                        if (showBufferingOverlay) {
+                                                            Box(
+                                                                modifier = Modifier
+                                                                    .matchParentSize()
+                                                                    .clip(RoundedCornerShape(if (compactLayout) 16.dp else 28.dp))
+                                                                    .background(Color.Black.copy(alpha = 0.35f)),
+                                                                contentAlignment = Alignment.Center
+                                                            ) {
+                                                                ContainedLoadingIndicator(Modifier.size(artSize / 3))
+                                                            }
                                                         }
                                                     }
 
@@ -647,6 +666,33 @@ fun MediaPlayerBottomSheet(
                                                                 imageVector = Icons.AutoMirrored.Rounded.OpenInNew,
                                                                 contentDescription = "Open chapter link"
                                                             )
+                                                        }
+                                                    }
+                                                }
+
+                                                vm.playerError?.let { errMsg ->
+                                                    Spacer(Modifier.height(8.dp))
+                                                    Surface(
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        color = MaterialTheme.colorScheme.errorContainer,
+                                                        modifier = Modifier.fillMaxWidth()
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.SpaceBetween
+                                                        ) {
+                                                            Text(
+                                                                text = errMsg,
+                                                                style = MaterialTheme.typography.bodySmall,
+                                                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                                                maxLines = 2,
+                                                                overflow = TextOverflow.Ellipsis,
+                                                                modifier = Modifier.weight(1f)
+                                                            )
+                                                            TextButton(onClick = { vm.retry() }) {
+                                                                Text("Retry", color = MaterialTheme.colorScheme.onErrorContainer)
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -682,17 +728,45 @@ fun MediaPlayerBottomSheet(
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis
                                                     )
-                                                    if (vm.mediaSourceType is SourceTypeState.Streaming && !downloadBannerDismissedForEp) {
+                                                }
+                                                if (vm.mediaSourceType is SourceTypeState.Streaming && !downloadBannerDismissedForEp) {
+                                                    Spacer(Modifier.height(4.dp))
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                    ) {
                                                         Text(
-                                                            text = " · Streaming",
-                                                            style = MaterialTheme.typography.bodyLarge,
-                                                            color = MaterialTheme.colorScheme.primary,
-                                                            maxLines = 1,
-                                                            modifier = Modifier.clickable {
-                                                                triggerDownloadNow()
-                                                                downloadBannerDismissedForEp = true
-                                                            }
+                                                            text = "Streaming",
+                                                            style = MaterialTheme.typography.labelMedium,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
                                                         )
+                                                        Surface(
+                                                            shape = RoundedCornerShape(50),
+                                                            color = MaterialTheme.colorScheme.secondaryContainer,
+                                                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(50))
+                                                                .clickable {
+                                                                    triggerDownloadNow()
+                                                                    downloadBannerDismissedForEp = true
+                                                                }
+                                                        ) {
+                                                            Row(
+                                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    imageVector = Icons.Rounded.Download,
+                                                                    contentDescription = null,
+                                                                    modifier = Modifier.size(14.dp)
+                                                                )
+                                                                Text(
+                                                                    text = "Download",
+                                                                    style = MaterialTheme.typography.labelSmall
+                                                                )
+                                                            }
+                                                        }
                                                     }
                                                 }
 
@@ -704,12 +778,13 @@ fun MediaPlayerBottomSheet(
                                                         currentChapter = currentChapter,
                                                         currentIndex = currentChapterIndex,
                                                         skippedStarts = skippedChapterStarts,
-                                                        positionMs = livePosMs,
+                                                        positionMs = livePosState.value,
                                                         speed = vm.speed,
                                                         adjustForSpeed = adjustRemainingForSpeed,
                                                         onSeekToMs = { vm.seek(it) },
                                                         onOpenChaptersTab = {
                                                             if (MediaPlayerTab.CHAPTERS in visibleTabs) {
+                                                                chaptersScrollTargetIndex = currentChapterIndex.takeIf { it >= 0 }
                                                                 selectedTab = MediaPlayerTab.CHAPTERS
                                                             }
                                                         }
@@ -725,9 +800,13 @@ fun MediaPlayerBottomSheet(
                                                     .semantics { liveRegion = LiveRegionMode.Polite },
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                val activeAd = remember(livePosMs, adWindows) {
-                                                    adWindows.firstOrNull { livePosMs in it.startMs..it.endMs }
+                                                val activeAd by remember(adWindows) {
+                                                    derivedStateOf {
+                                                        val pos = livePosState.value
+                                                        adWindows.firstOrNull { pos in it.startMs..it.endMs }
+                                                    }
                                                 }
+                                                val ad = activeAd
                                                 val undo = pendingUndo
                                                 when {
                                                     undo != null -> {
@@ -741,17 +820,17 @@ fun MediaPlayerBottomSheet(
                                                             onDismiss = { HushCastEngineBridge.clearPendingUndo() }
                                                         )
                                                     }
-                                                    activeAd != null -> {
+                                                    ad != null -> {
                                                         FilledTonalButton(
                                                             onClick = {
                                                                 haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                                                                vm.seek(activeAd.endMs)
+                                                                vm.seek(ad.endMs)
                                                             },
                                                             modifier = Modifier.height(40.dp)
                                                         ) {
                                                             Icon(Icons.Rounded.SkipNext, contentDescription = null, modifier = Modifier.size(18.dp))
                                                             Spacer(Modifier.width(6.dp))
-                                                            Text("Skip ${formatAdDisplayLabel(activeAd)}")
+                                                            Text("Skip ${formatAdDisplayLabel(ad)}")
                                                         }
                                                     }
                                                 }
@@ -775,7 +854,8 @@ fun MediaPlayerBottomSheet(
                                             TranscriptOverlay(
                                                 state = transcriptState,
                                                 episodeTitle = vm.mediaMetadata?.title?.toString() ?: "",
-                                                currentPositionMs = livePosMs,
+                                                currentPositionMs = livePosState.value,
+                                                positionMsState = livePosState,
                                                 isPlaying = vm.isPlaying,
                                                 muteWindows = muteWindows,
                                                 onClose = { showTranscriptOverlay = false },
@@ -814,7 +894,7 @@ fun MediaPlayerBottomSheet(
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         PlayerSeekBar(
-                                            positionMs = livePosMs,
+                                            positionMs = livePosState.value,
                                             durationMs = durationMs,
                                             playbackSpeed = vm.speed,
                                             adjustRemainingForSpeed = adjustRemainingForSpeed,
@@ -924,7 +1004,7 @@ fun MediaPlayerBottomSheet(
                                 PlayerChaptersTab(
                                     chapters = resolvedChapters,
                                     skippedPublishedStarts = skippedChapterStarts,
-                                    currentPositionMs = livePosMs,
+                                    currentPositionMs = livePosState.value,
                                     onToggleSkip = { pubStart, skip ->
                                         playerVm.toggleSkippedChapter(pubStart, skip)
                                     },
@@ -936,6 +1016,7 @@ fun MediaPlayerBottomSheet(
                                             if (!vm.isPlaying) vm.play()
                                         }
                                     },
+                                    targetChapterIndex = chaptersScrollTargetIndex,
                                     contentBottomPadding = 16.dp
                                 )
                             }
@@ -1318,6 +1399,9 @@ private fun ChapterNavigationLine(
         val spatial = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
         AnimatedContent(
             targetState = currentChapter,
+            transitionSpec = {
+                fadeIn(animationSpec = spatial) togetherWith fadeOut(animationSpec = spatial)
+            },
             modifier = Modifier
                 .weight(1f)
                 .clickable(onClick = onOpenChaptersTab),

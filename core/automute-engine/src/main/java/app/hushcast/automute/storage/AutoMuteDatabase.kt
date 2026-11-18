@@ -25,6 +25,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.serialization.Serializable
@@ -313,6 +314,9 @@ interface AutoMuteDao {
     @Query("SELECT * FROM episode_analysis_status")
     fun observeAllStatuses(): Flow<List<EpisodeAnalysisStatusEntity>>
 
+    @Query("SELECT * FROM episode_analysis_status")
+    suspend fun getAllStatuses(): List<EpisodeAnalysisStatusEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertInsights(insights: EpisodeInsightsEntity)
 
@@ -347,6 +351,7 @@ interface AutoMuteDao {
     suspend fun clearAnalysisForOtherHashes(episodeId: String, keepSha256: String) {
         deleteMuteSegmentsForOtherHashes(episodeId, keepSha256)
         deleteAdSegmentsForOtherHashes(episodeId, keepSha256)
+        deleteOtherOffsetMaps(episodeId, keepSha256)
     }
 
     @Query("SELECT * FROM episode_chunk_checkpoints WHERE fileSha256 = :sha256 ORDER BY chunkIndex ASC")
@@ -361,6 +366,9 @@ interface AutoMuteDao {
     @Query("SELECT * FROM episode_offset_map WHERE fileSha256 = :sha256 LIMIT 1")
     suspend fun getOffsetMap(sha256: String): EpisodeOffsetMapEntity?
 
+    @Query("SELECT * FROM episode_offset_map WHERE fileSha256 = :sha256 LIMIT 1")
+    fun observeOffsetMap(sha256: String): Flow<EpisodeOffsetMapEntity?>
+
     @Query("SELECT * FROM episode_offset_map WHERE episodeId = :episodeId ORDER BY createdAt DESC LIMIT 1")
     suspend fun getOffsetMapByEpisode(episodeId: String): EpisodeOffsetMapEntity?
 
@@ -372,6 +380,9 @@ interface AutoMuteDao {
 
     @Query("DELETE FROM episode_offset_map WHERE episodeId = :episodeId")
     suspend fun deleteOffsetMapsByEpisode(episodeId: String)
+
+    @Query("DELETE FROM episode_offset_map WHERE episodeId = :episodeId AND fileSha256 != :keepSha256")
+    suspend fun deleteOtherOffsetMaps(episodeId: String, keepSha256: String)
 
     @androidx.room.Transaction
     suspend fun clearAnalysisForEpisode(episodeId: String) {
@@ -555,14 +566,58 @@ fun MuteRuleEntity.toDomain() = MuteRule(
     useDefaultMode = actionMode.equals("DEFAULT", ignoreCase = true)
 )
 
-fun MuteSegmentEntity.toDomain() = MuteWindow(
+fun MuteSegmentEntity.toDomain(defaultActionMode: MuteActionMode = MuteActionMode.HARD_SILENCE) = MuteWindow(
     startMs = startMs,
     endMs = endMs,
     word = word,
     ruleId = ruleId,
-    actionMode = runCatching { MuteActionMode.valueOf(actionMode) }.getOrDefault(MuteActionMode.HARD_SILENCE),
+    actionMode = if (actionMode.equals("DEFAULT", ignoreCase = true)) {
+        defaultActionMode
+    } else {
+        runCatching { MuteActionMode.valueOf(actionMode) }.getOrDefault(defaultActionMode)
+    },
     enabled = enabled
 )
+
+suspend fun AutoMuteDao.loadResolvedMuteWindows(
+    fileSha256: String,
+    defaultActionMode: MuteActionMode
+): List<MuteWindow> {
+    val rulesById = getAllRules().associateBy { it.id }
+    return getMuteSegments(fileSha256).map { seg ->
+        val rule = rulesById[seg.ruleId]
+        val useDefault = seg.actionMode.equals("DEFAULT", ignoreCase = true) ||
+            (rule != null && rule.actionMode.equals("DEFAULT", ignoreCase = true))
+        val resolvedMode = when {
+            useDefault -> defaultActionMode
+            rule != null -> runCatching { MuteActionMode.valueOf(rule.actionMode) }.getOrDefault(defaultActionMode)
+            else -> runCatching { MuteActionMode.valueOf(seg.actionMode) }.getOrDefault(defaultActionMode)
+        }
+        seg.toDomain(defaultActionMode).copy(actionMode = resolvedMode)
+    }
+}
+
+suspend fun AutoMuteDao.loadResolvedMuteWindowsByEpisode(
+    episodeId: String,
+    defaultActionMode: MuteActionMode
+): List<MuteWindow> {
+    val sha = getStatus(episodeId)?.fileSha256?.takeIf { it.isNotBlank() }
+    if (sha != null) {
+        return loadResolvedMuteWindows(sha, defaultActionMode)
+    }
+    val rulesById = getAllRules().associateBy { it.id }
+    return observeMuteSegmentsByEpisode(episodeId).first().map { seg ->
+        val rule = rulesById[seg.ruleId]
+        val useDefault = seg.actionMode.equals("DEFAULT", ignoreCase = true) ||
+            (rule != null && rule.actionMode.equals("DEFAULT", ignoreCase = true))
+        val resolvedMode = when {
+            useDefault -> defaultActionMode
+            rule != null -> runCatching { MuteActionMode.valueOf(rule.actionMode) }.getOrDefault(defaultActionMode)
+            else -> runCatching { MuteActionMode.valueOf(seg.actionMode) }.getOrDefault(defaultActionMode)
+        }
+        seg.toDomain(defaultActionMode).copy(actionMode = resolvedMode)
+    }
+}
 
 fun AdSegmentEntity.toDomain() = AdWindow(
     startMs = startMs,

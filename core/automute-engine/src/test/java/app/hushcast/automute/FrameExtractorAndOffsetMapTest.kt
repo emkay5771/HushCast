@@ -31,6 +31,12 @@ class FrameExtractorAndOffsetMapTest {
             assertTrue(frames.cpp[i].isFinite())
             assertTrue(frames.f0[i].isFinite())
         }
+        // Parity assertions for a pure 220 Hz sine wave (mid=0.25)
+        val midIdx = frames.n / 2
+        assertEquals(220f, frames.centroid[midIdx], 60f)
+        assertEquals(220f, frames.f0[midIdx], 25f)
+        assertTrue("Expected tonal low flatness, got ${frames.flatness[midIdx]}", frames.flatness[midIdx] < 0.15f)
+        assertTrue("Expected loudness near -15 dBFS, got ${frames.lk[midIdx]}", frames.lk[midIdx] in -25f..-5f)
     }
 
     @Test
@@ -47,11 +53,16 @@ class FrameExtractorAndOffsetMapTest {
         val gaps = map.uncoveredGaps(totalDurationMs = 750_000L, minGapMs = 3_500L)
         assertEquals(
             listOf(
-                0L to 30_000L,        // pre-roll DAI ad
-                330_000L to 390_000L, // mid-roll DAI ad
-                690_000L to 750_000L  // post-roll DAI ad
+                0L to 30_000L,        // pre-roll DAI ad (measured shift > 0)
+                330_000L to 390_000L  // mid-roll DAI ad (interior gap between stretches)
             ),
             gaps
         )
+
+        // Leading/trailing gaps with zero offset shift (intro/outro music) must NOT be flagged
+        val noDaiMap = OffsetMap(
+            listOf(OffsetStretch(srcStartMs = 10_000L, srcEndMs = 590_000L, shiftMs = 0L))
+        )
+        assertEquals(emptyList<Pair<Long, Long>>(), noDaiMap.uncoveredGaps(totalDurationMs = 600_000L, minGapMs = 3_500L))
     }
 }

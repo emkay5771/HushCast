@@ -183,7 +183,7 @@ object ChapterParser {
         return resolved
     }
 
-    private fun parseNptTimeMs(npt: String): Long {
+    internal fun parseNptTimeMs(npt: String): Long {
         val parts = npt.trim().split(":")
         return when (parts.size) {
             3 -> {

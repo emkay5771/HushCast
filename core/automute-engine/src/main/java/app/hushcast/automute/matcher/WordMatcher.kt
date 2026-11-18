@@ -157,7 +157,10 @@ object WordMatcher {
             }
         }
 
-        val combinedRegex = if (regexRules.size > 1) {
+        val hasBackreference = regexRules.any { (rx, _) ->
+            Regex("""\\[1-9]""").containsMatchIn(rx.pattern)
+        }
+        val combinedRegex = if (regexRules.size > 1 && !hasBackreference) {
             runCatching {
                 Regex(regexRules.joinToString("|") { "(?:${it.first.pattern})" }, RegexOption.IGNORE_CASE)
             }.getOrNull()

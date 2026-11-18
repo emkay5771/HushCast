@@ -181,26 +181,27 @@ fun NewEpisodesRoute(
             )
         }
     ) { inset ->
+        val refreshWorkInfos by androidx.work.WorkManager.getInstance(context)
+            .getWorkInfosForUniqueWorkFlow(
+                app.podiumpodcasts.podium.background.worker.PeriodicPodcastUpdateWorker.INSTANT_UNIQUE_NAME
+            )
+            .collectAsState(initial = emptyList())
+        val isWorkRefreshing = refreshWorkInfos.any {
+            it.state == androidx.work.WorkInfo.State.ENQUEUED ||
+                it.state == androidx.work.WorkInfo.State.RUNNING
+        }
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-            isRefreshing = isRefreshing,
+            isRefreshing = isWorkRefreshing || isRefreshing,
             state = pullState,
             onRefresh = {
-                if (!isRefreshing) {
-                    isRefreshing = true
-                    scope.launch {
-                        runCatching {
-                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                app.podiumpodcasts.podium.background.work.PodcastUpdateWork(context, db).doWork()
-                            }
-                        }
-                        isRefreshing = false
-                    }
+                if (!isWorkRefreshing && !isRefreshing) {
+                    app.podiumpodcasts.podium.background.worker.PeriodicPodcastUpdateWorker.enqueueNow(context)
                 }
             },
             indicator = {
                 androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.LoadingIndicator(
                     state = pullState,
-                    isRefreshing = isRefreshing,
+                    isRefreshing = isWorkRefreshing || isRefreshing,
                     modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter)
                 )
             },

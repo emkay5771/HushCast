@@ -222,7 +222,7 @@ fun PodcastEpisodeDetailView(
             }
 
             val detailPlayerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.PlayerScreenViewModel>(
-                key = "detail_${episode.id}"
+                key = "episode_detail_shared"
             )
             val detailMediaVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
             androidx.compose.runtime.LaunchedEffect(episode.id, episode.duration) {
@@ -310,7 +310,7 @@ fun PodcastEpisodeDetailView(
                             onDismissRequest = { showMoreMenu = false }
                         ) {
                             DropdownMenuItem(
-                                text = { Text("Play Next") },
+                                text = { Text("Play next") },
                                 onClick = {
                                     showMoreMenu = false
                                     detailMediaVm.playNext(downloadContext, bundle)
@@ -502,8 +502,7 @@ fun PodcastEpisodeDetailView(
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(10.dp))
                                         .clickable {
-                                            detailMediaVm.play(context, bundle)
-                                            detailMediaVm.seek(ch.startMs)
+                                            detailMediaVm.play(context, bundle, startPositionMs = ch.startMs)
                                         }
                                         .padding(vertical = 8.dp, horizontal = 6.dp),
                                     verticalAlignment = Alignment.CenterVertically
@@ -544,9 +543,10 @@ fun PodcastEpisodeDetailView(
                             onClose = { showDetailTranscriptSheet = false },
                             onSeekToMs = { posMs ->
                                 if (detailMediaVm.metadataEpisodeId != episode.id) {
-                                    detailMediaVm.play(context, bundle)
+                                    detailMediaVm.play(context, bundle, startPositionMs = posMs)
+                                } else {
+                                    detailMediaVm.seek(posMs)
                                 }
-                                detailMediaVm.seek(posMs)
                             },
                             onMuteWord = { word ->
                                 detailPlayerVm.addMuteWordRule(word.text, app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode)
@@ -555,8 +555,8 @@ fun PodcastEpisodeDetailView(
                                 detailPlayerVm.shareTranscriptTxt(context, episode.title, lines)
                             },
                             onRetry = { detailPlayerVm.retryPublisherTranscript() },
-                            onProcessNow = { showDetailTranscriptSheet = false },
-                            onDownloadNow = { showDetailTranscriptSheet = false },
+                            onProcessNow = null,
+                            onDownloadNow = null,
                             bottomControlsPadding = 24.dp
                         )
                     }

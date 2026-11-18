@@ -94,14 +94,16 @@ fun SwipeableItem(
             if (!result.isDismissed) {
                 offsetX.animateTo(0f, spatialSpec)
             }
-            snackbarHostState.currentSnackbarData?.dismiss()
-            val snackBarResult = snackbarHostState.showSnackbar(
-                message = result.message,
-                actionLabel = undo,
-                duration = SnackbarDuration.Short
-            )
-            if (snackBarResult == SnackbarResult.ActionPerformed) {
-                result.onUndo()
+            if (result.message.isNotBlank()) {
+                snackbarHostState.currentSnackbarData?.dismiss()
+                val snackBarResult = snackbarHostState.showSnackbar(
+                    message = result.message,
+                    actionLabel = undo,
+                    duration = SnackbarDuration.Short
+                )
+                if (snackBarResult == SnackbarResult.ActionPerformed) {
+                    result.onUndo()
+                }
             }
         }
     }
@@ -271,7 +273,7 @@ fun SwipeableItem(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .offset { IntOffset((offsetX.value * dirSign).roundToInt(), 0) }
+                .offset { IntOffset(offsetX.value.roundToInt(), 0) }
                 .draggable(
                     orientation = Orientation.Horizontal,
                     enabled = startAction != null || endAction != null,

@@ -65,8 +65,10 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
     var openPlayerSheetNonce by mutableLongStateOf(0L)
 
     var isPlaying by mutableStateOf(false)
+    var playWhenReady by mutableStateOf(false)
     var isLoading by mutableStateOf(false)
     var playbackState by mutableIntStateOf(1)
+    var playerError by mutableStateOf<String?>(null)
 
     var seekBackIncrement by mutableLongStateOf(10000)
     var seekForwardIncrement by mutableLongStateOf(10000)
@@ -79,6 +81,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     // unix millis when sleep timer should trigger
     var sleepTimerTrigger by mutableStateOf<Long?>(null)
+    var sleepTimerPresetKey by mutableStateOf<String?>(null)
 
     var metadataOrigin by mutableStateOf<String?>(null)
     var metadataEpisodeId by mutableStateOf<String?>(null)
@@ -119,7 +122,8 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     fun play(
         context: Context,
-        bundle: PodcastEpisodeBundle
+        bundle: PodcastEpisodeBundle,
+        startPositionMs: Long? = null
     ) {
         appContext = context.applicationContext
         saveLastPlayingEpisodeId(bundle.episode.id)
@@ -134,7 +138,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         val mediaItem = bundle.episode.createMediaItem(context, bundle.playState)
-        val startPosMs = ((bundle.playState?.state ?: 0) * 1000L).coerceAtLeast(0L)
+        val startPosMs = (startPositionMs ?: ((bundle.playState?.state ?: 0) * 1000L)).coerceAtLeast(0L)
 
         val controller = mediaController ?: return
         if (controller.mediaItemCount == 0) {
@@ -445,7 +449,15 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     fun play() {
+        playerError = null
         mediaController?.play()
+    }
+
+    fun retry() {
+        playerError = null
+        val controller = mediaController ?: return
+        controller.prepare()
+        controller.play()
     }
 
     fun pause() {
@@ -483,11 +495,40 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         )
     }
 
-    fun setSleepTimer(sleepTimer: Long?) {
-        sleepTimerTrigger = sleepTimer?.takeIf { it != 0L }
+    fun setSleepTimer(sleepTimer: Long?, presetKey: String? = null) {
+        val next = sleepTimer?.takeIf { it != 0L }
+        sleepTimerTrigger = next
+        sleepTimerPresetKey = if (next == null) null else presetKey
         mediaController?.sendCustomCommand(
             SessionCommand(COMMAND_SLEEP_TIMER_SET, Bundle().apply {
                 putLong("trigger", sleepTimer ?: 0L)
+            }),
+            Bundle.EMPTY
+        )
+    }
+
+    fun setSleepTimerEndOfEpisode(approxWallMs: Long) {
+        val approxTrigger = System.currentTimeMillis() + approxWallMs
+        sleepTimerTrigger = approxTrigger
+        sleepTimerPresetKey = "END_OF_EPISODE"
+        mediaController?.sendCustomCommand(
+            SessionCommand(COMMAND_SLEEP_TIMER_SET, Bundle().apply {
+                putString("mode", "END_OF_EPISODE")
+                putLong("approxTrigger", approxTrigger)
+            }),
+            Bundle.EMPTY
+        )
+    }
+
+    fun setSleepTimerEndOfChapter(chapterEndMs: Long, approxWallMs: Long) {
+        val approxTrigger = System.currentTimeMillis() + approxWallMs
+        sleepTimerTrigger = approxTrigger
+        sleepTimerPresetKey = "END_OF_CHAPTER"
+        mediaController?.sendCustomCommand(
+            SessionCommand(COMMAND_SLEEP_TIMER_SET, Bundle().apply {
+                putString("mode", "END_OF_CHAPTER")
+                putLong("positionMs", chapterEndMs)
+                putLong("approxTrigger", approxTrigger)
             }),
             Bundle.EMPTY
         )
@@ -535,7 +576,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     @Composable
-    fun rememberLivePositionMs(intervalMs: Long = 500L): Long {
+    fun rememberLivePositionMsState(intervalMs: Long = 500L): androidx.compose.runtime.State<Long> {
         val posState = remember { mutableLongStateOf(currentPosition) }
         val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -554,7 +595,12 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
             }
         }
 
-        return posState.longValue
+        return posState
+    }
+
+    @Composable
+    fun rememberLivePositionMs(intervalMs: Long = 500L): Long {
+        return rememberLivePositionMsState(intervalMs).value
     }
 
     fun livePositionNowMs(): Long {
@@ -756,8 +802,21 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             this@MediaPlayerViewModel.playbackState = playbackState
+            if (playbackState == Player.STATE_READY) {
+                this@MediaPlayerViewModel.playerError = null
+            }
             this@MediaPlayerViewModel.isPlayerVisible = (mediaController?.mediaItemCount ?: 0) > 0 || playbackState != Player.STATE_IDLE
             super.onPlaybackStateChanged(playbackState)
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            this@MediaPlayerViewModel.playWhenReady = playWhenReady
+            super.onPlayWhenReadyChanged(playWhenReady, reason)
+        }
+
+        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+            this@MediaPlayerViewModel.playerError = error.localizedMessage ?: error.errorCodeName
+            super.onPlayerError(error)
         }
     }
 
@@ -765,6 +824,10 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         this@MediaPlayerViewModel.mediaController = mediaController
 
         this@MediaPlayerViewModel.isPlaying = mediaController.isPlaying
+        this@MediaPlayerViewModel.playWhenReady = mediaController.playWhenReady
+        this@MediaPlayerViewModel.playerError = mediaController.playerError?.let {
+            it.localizedMessage ?: it.errorCodeName
+        }
         this@MediaPlayerViewModel.currentDuration = mediaController.duration.coerceAtLeast(1L)
         this@MediaPlayerViewModel.currentPosition = mediaController.currentPosition
         this@MediaPlayerViewModel.lastProgressUpdate = System.currentTimeMillis()
