@@ -841,40 +841,12 @@ fun MediaPlayerBottomSheet(
                                                         } else Modifier
                                                     )
 
-                                                    val livePosMs = vm.rememberLivePositionMs(500L)
-                                                    var dismissedAdStarts by remember(episodeId) {
-                                                        mutableStateOf(emptySet<Long>())
-                                                    }
-                                                    val activeAd = remember(adEntities, livePosMs, dismissedAdStarts) {
-                                                        adEntities.firstOrNull { seg ->
-                                                            livePosMs in seg.startMs until (seg.endMs - 400L) &&
-                                                                seg.startMs !in dismissedAdStarts
-                                                        }?.toDomain()
-                                                    }
-                                                    if (pendingUndo != null || activeAd != null || episodeChapters.isNotEmpty()) {
+                                                    if (episodeChapters.isNotEmpty()) {
                                                         Spacer(Modifier.height(10.dp))
-                                                        ActivePlaybackContextBar(
+                                                        ActiveChapterPill(
                                                             vm = vm,
-                                                            livePosMs = livePosMs,
                                                             chapters = episodeChapters,
-                                                            activeAd = activeAd,
-                                                            pendingUndo = pendingUndo,
-                                                            onOpenChapters = { selectedTab = MediaPlayerTab.CHAPTERS },
-                                                            onSkipAd = { ad ->
-                                                                vm.seek(ad.endMs)
-                                                                HushCastEngineBridge.playSponsorSkipIndicator(context)
-                                                            },
-                                                            onDismissAd = { ad ->
-                                                                dismissedAdStarts = dismissedAdStarts + ad.startMs
-                                                            },
-                                                            onUndoSkip = { undoEvent ->
-                                                                HushCastEngineBridge.adSkipObserver.bypassAd(undoEvent.adWindow.startMs)
-                                                                vm.seek(undoEvent.jumpedFromMs)
-                                                                HushCastEngineBridge.clearPendingUndo()
-                                                            },
-                                                            onDismissUndo = {
-                                                                HushCastEngineBridge.clearPendingUndo()
-                                                            }
+                                                            onClick = { selectedTab = MediaPlayerTab.CHAPTERS }
                                                         )
                                                     }
                                                 }
@@ -894,7 +866,20 @@ fun MediaPlayerBottomSheet(
                                     PlayerSeekBarSection(
                                         vm = vm,
                                         muteWindows = muteWindows,
-                                        adWindows = adWindows
+                                        adWindows = adWindows,
+                                        pendingUndo = pendingUndo,
+                                        onSkipAd = { ad ->
+                                            vm.seek(ad.endMs)
+                                            HushCastEngineBridge.playSponsorSkipIndicator(context)
+                                        },
+                                        onUndoSkip = { undoEvent ->
+                                            HushCastEngineBridge.adSkipObserver.bypassAd(undoEvent.adWindow.startMs)
+                                            vm.seek(undoEvent.jumpedFromMs)
+                                            HushCastEngineBridge.clearPendingUndo()
+                                        },
+                                        onDismissUndo = {
+                                            HushCastEngineBridge.clearPendingUndo()
+                                        }
                                     )
 
                                     Spacer(Modifier.height(16.dp))
@@ -2202,7 +2187,11 @@ private fun Image(
 private fun PlayerSeekBarSection(
     vm: MediaPlayerViewModel,
     muteWindows: List<app.hushcast.automute.dsp.MuteWindow>,
-    adWindows: List<app.hushcast.automute.dsp.AdWindow>
+    adWindows: List<app.hushcast.automute.dsp.AdWindow>,
+    pendingUndo: app.hushcast.automute.dsp.AdSkipEvent? = null,
+    onSkipAd: ((app.hushcast.automute.dsp.AdWindow) -> Unit)? = null,
+    onUndoSkip: ((app.hushcast.automute.dsp.AdSkipEvent) -> Unit)? = null,
+    onDismissUndo: (() -> Unit)? = null
 ) {
     val scope = rememberCoroutineScope()
     var blockSliderUpdate by remember { mutableStateOf(false) }
@@ -2221,6 +2210,10 @@ private fun PlayerSeekBarSection(
         durationMs = vm.currentDuration,
         muteWindows = muteWindows,
         adWindows = adWindows,
+        pendingUndo = pendingUndo,
+        onSkipAd = onSkipAd,
+        onUndoSkip = onUndoSkip,
+        onDismissUndo = onDismissUndo,
         onValueChange = {
             dragSliderState = it
             blockSliderUpdate = true
@@ -2377,122 +2370,28 @@ private fun LiveChaptersTabContent(
 }
 
 @Composable
-private fun ActivePlaybackContextBar(
+private fun ActiveChapterPill(
     vm: MediaPlayerViewModel,
-    livePosMs: Long,
     chapters: List<app.hushcast.automute.desktop.DesktopChapterDto>,
-    activeAd: app.hushcast.automute.dsp.AdWindow?,
-    pendingUndo: app.hushcast.automute.dsp.AdSkipEvent?,
-    onOpenChapters: () -> Unit,
-    onSkipAd: (app.hushcast.automute.dsp.AdWindow) -> Unit,
-    onDismissAd: (app.hushcast.automute.dsp.AdWindow) -> Unit,
-    onUndoSkip: (app.hushcast.automute.dsp.AdSkipEvent) -> Unit,
-    onDismissUndo: () -> Unit
+    onClick: () -> Unit
 ) {
-    when {
-        pendingUndo != null -> {
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.85f)
-            ) {
-                Row(
-                    modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = "Skipped ${pendingUndo.adWindow.label}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    androidx.compose.material3.TextButton(
-                        onClick = { onUndoSkip(pendingUndo) },
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Text("Undo", style = MaterialTheme.typography.labelMedium)
-                    }
-                    IconButton(
-                        onClick = onDismissUndo,
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Close,
-                            contentDescription = "Dismiss",
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
-        }
+    val posMs = vm.rememberLivePositionMs(500L)
+    val activeChapter = remember(chapters, posMs) {
+        chapters.lastOrNull { it.startMs <= posMs } ?: chapters.firstOrNull()
+    } ?: return
 
-        activeAd != null -> {
-            val sectionName = when (activeAd.adClass) {
-                "house_promo" -> "Show Promo"
-                "membership_pitch" -> "Membership"
-                "boilerplate" -> "Intro / Outro"
-                else -> "Sponsor"
-            }
-            val remainingSec = ((activeAd.endMs - livePosMs) / 1000L).coerceAtLeast(0L)
-            Surface(
-                shape = RoundedCornerShape(14.dp),
-                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.85f)
-            ) {
-                Row(
-                    modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        text = if (remainingSec > 0) "$sectionName • ${remainingSec}s" else sectionName,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    androidx.compose.material3.TextButton(
-                        onClick = { onSkipAd(activeAd) },
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                    ) {
-                        Text("Skip", style = MaterialTheme.typography.labelMedium)
-                    }
-                    IconButton(
-                        onClick = { onDismissAd(activeAd) },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Close,
-                            contentDescription = "Dismiss",
-                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        chapters.isNotEmpty() -> {
-            val activeChapter = remember(chapters, livePosMs) {
-                chapters.lastOrNull { it.startMs <= livePosMs } ?: chapters.firstOrNull()
-            } ?: return
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
-                modifier = Modifier.clickable(onClick = onOpenChapters)
-            ) {
-                Text(
-                    text = "Ch: ${activeChapter.title}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                )
-            }
-        }
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Text(
+            text = "Ch: ${activeChapter.title}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+        )
     }
 }

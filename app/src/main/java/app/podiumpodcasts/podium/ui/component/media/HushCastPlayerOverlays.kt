@@ -207,7 +207,11 @@ fun AnnotatedPlaybackSlider(
     adWindows: List<AdWindow>,
     onValueChange: (Float) -> Unit,
     onValueChangeFinished: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    pendingUndo: AdSkipEvent? = null,
+    onSkipAd: ((AdWindow) -> Unit)? = null,
+    onUndoSkip: ((AdSkipEvent) -> Unit)? = null,
+    onDismissUndo: (() -> Unit)? = null
 ) {
     val activeTrackColor = MaterialTheme.colorScheme.primary
     val inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
@@ -256,19 +260,20 @@ fun AnnotatedPlaybackSlider(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         androidx.compose.animation.AnimatedVisibility(
-            visible = isDragging || activeAd != null,
+            visible = isDragging || activeAd != null || pendingUndo != null,
             enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(),
             exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically()
         ) {
-            val pillBg = if (activeAd != null) {
-                MaterialTheme.colorScheme.tertiaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerHighest
+            val showUndo = !isDragging && pendingUndo != null
+            val pillBg = when {
+                showUndo -> MaterialTheme.colorScheme.primaryContainer
+                activeAd != null -> MaterialTheme.colorScheme.tertiaryContainer
+                else -> MaterialTheme.colorScheme.surfaceContainerHighest
             }
-            val pillFg = if (activeAd != null) {
-                MaterialTheme.colorScheme.onTertiaryContainer
-            } else {
-                MaterialTheme.colorScheme.onSurface
+            val pillFg = when {
+                showUndo -> MaterialTheme.colorScheme.onPrimaryContainer
+                activeAd != null -> MaterialTheme.colorScheme.onTertiaryContainer
+                else -> MaterialTheme.colorScheme.onSurface
             }
 
             Surface(
@@ -288,42 +293,104 @@ fun AnnotatedPlaybackSlider(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
+                        if (showUndo && pendingUndo != null) {
                             Text(
-                                text = formatScrubTimeMs(currentPosMs),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.Bold
+                                text = "Skipped ${pendingUndo.adWindow.label}",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
                             )
-                            if (activeAd != null) {
-                                Text(
-                                    text = "• ${if (activeAd.isHighConfidence) "Sponsor" else "Suggested Ad"} (${formatScrubTimeMs(activeAd.startMs)}–${formatScrubTimeMs(activeAd.endMs)})",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    maxLines = 1
-                                )
-                            } else if (activeMute != null) {
-                                Text(
-                                    text = "• Muted: ${activeMute.word}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    maxLines = 1
-                                )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                if (onUndoSkip != null) {
+                                    TextButton(
+                                        onClick = { onUndoSkip(pendingUndo) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                        modifier = Modifier.height(28.dp)
+                                    ) {
+                                        Text("Undo", style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                                if (onDismissUndo != null) {
+                                    IconButton(
+                                        onClick = onDismissUndo,
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Close,
+                                            contentDescription = "Dismiss",
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
                             }
-                        }
+                        } else {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Text(
+                                    text = formatScrubTimeMs(currentPosMs),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (activeAd != null) {
+                                    val customLabel = activeAd.label.trim().takeIf {
+                                        it.isNotEmpty() &&
+                                            it != "Sponsor / Ad" &&
+                                            it != "Suggested Ad" &&
+                                            it != "House Promo" &&
+                                            it != "Membership Pitch" &&
+                                            it != "Intro / Outro"
+                                    }
+                                    val sectionLabel = customLabel ?: when (activeAd.adClass) {
+                                        "house_promo" -> "Show Promo"
+                                        "membership_pitch" -> "Membership"
+                                        "boilerplate" -> "Intro / Outro"
+                                        else -> if (activeAd.isHighConfidence) "Sponsor" else "Suggested Ad"
+                                    }
+                                    Text(
+                                        text = "• $sectionLabel (${formatScrubTimeMs(activeAd.startMs)}–${formatScrubTimeMs(activeAd.endMs)})",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                } else if (activeMute != null) {
+                                    Text(
+                                        text = "• Muted: ${activeMute.word}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        maxLines = 1,
+                                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
 
-                        if (isDragging) {
-                            val speedLabel = when {
-                                scrubSpeed <= 0.15f -> "Fine 1/10x"
-                                scrubSpeed <= 0.25f -> "Fine 1/5x"
-                                scrubSpeed <= 0.55f -> "Fine ½x"
-                                else -> "Drag ↓ for fine"
+                            if (isDragging) {
+                                val speedLabel = when {
+                                    scrubSpeed <= 0.15f -> "Fine 1/10x"
+                                    scrubSpeed <= 0.25f -> "Fine 1/5x"
+                                    scrubSpeed <= 0.55f -> "Fine ½x"
+                                    else -> "Drag ↓ for fine"
+                                }
+                                Text(
+                                    text = speedLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = pillFg.copy(alpha = 0.78f)
+                                )
+                            } else if (activeAd != null && onSkipAd != null) {
+                                TextButton(
+                                    onClick = { onSkipAd(activeAd) },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Text("Skip", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                }
                             }
-                            Text(
-                                text = speedLabel,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = pillFg.copy(alpha = 0.78f)
-                            )
                         }
                     }
 

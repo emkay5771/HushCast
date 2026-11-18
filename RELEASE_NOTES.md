@@ -1,3 +1,12 @@
+# HushCast v1.0.17-hushcast
+
+## What's New
+- **Unified Seekbar Context & Skip/Undo Pill**:
+  - Merged the **Skip** and **Undo** controls into the rounded `AnnotatedPlaybackSlider` context pill above the seekbar, eliminating the separate stacked popup above it and restoring the clean `ActiveChapterPill` below the album art.
+  - Displays the specific detected ad/sponsor name (from `AdWindow.label`, e.g. `Sponsor: <Brand>`) in the rounded pill when available, falling back to the friendly section type (`Sponsor`, `Suggested Ad`, `Show Promo`, `Membership`, `Intro / Outro`) when generic.
+
+---
+
 # HushCast v1.0.16-hushcast
 
 ## What's New
