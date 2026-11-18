@@ -97,8 +97,8 @@ fun TranscriptOverlay(
     onMuteWord: (Word) -> Unit,
     onShareTxt: (List<TranscriptLineUi>) -> Unit,
     onRetry: () -> Unit,
-    onProcessNow: () -> Unit,
-    onDownloadNow: () -> Unit,
+    onProcessNow: (() -> Unit)? = null,
+    onDownloadNow: (() -> Unit)? = null,
     bottomControlsPadding: Dp = 128.dp,
     modifier: Modifier = Modifier
 ) {
@@ -351,9 +351,12 @@ fun TranscriptOverlay(
                             text = if (state.isDownloaded) "No transcript yet" else "Download to get a transcript",
                             style = MaterialTheme.typography.titleMedium
                         )
-                        Spacer(Modifier.height(12.dp))
-                        Button(onClick = if (state.isDownloaded) onProcessNow else onDownloadNow) {
-                            Text(if (state.isDownloaded) "Process" else "Download")
+                        val action = if (state.isDownloaded) onProcessNow else onDownloadNow
+                        if (action != null) {
+                            Spacer(Modifier.height(12.dp))
+                            Button(onClick = action) {
+                                Text(if (state.isDownloaded) "Process" else "Download")
+                            }
                         }
                     }
                 }

@@ -121,7 +121,8 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     fun play(
         context: Context,
-        bundle: PodcastEpisodeBundle
+        bundle: PodcastEpisodeBundle,
+        startPositionMs: Long? = null
     ) {
         appContext = context.applicationContext
         saveLastPlayingEpisodeId(bundle.episode.id)
@@ -136,7 +137,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
 
         val mediaItem = bundle.episode.createMediaItem(context, bundle.playState)
-        val startPosMs = ((bundle.playState?.state ?: 0) * 1000L).coerceAtLeast(0L)
+        val startPosMs = (startPositionMs ?: ((bundle.playState?.state ?: 0) * 1000L)).coerceAtLeast(0L)
 
         val controller = mediaController ?: return
         if (controller.mediaItemCount == 0) {

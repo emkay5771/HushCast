@@ -408,6 +408,14 @@ fun Main(
             }
         }
 
+        val playerScreenVm = viewModel<app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.PlayerScreenViewModel>()
+        LaunchedEffect(playerVm.metadataEpisodeId, playerVm.currentDuration) {
+            val epId = playerVm.metadataEpisodeId
+            if (!epId.isNullOrBlank()) {
+                playerScreenVm.bindEpisode(epId, playerVm.currentDuration)
+            }
+        }
+
         if(vm.showMediaPlayerBottomSheet.value) MediaPlayerBottomSheet(
             onOpenEpisode = { origin, id ->
                 vm.showMediaPlayerBottomSheet.value = false

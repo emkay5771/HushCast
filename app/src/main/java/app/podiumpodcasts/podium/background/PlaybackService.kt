@@ -51,9 +51,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -267,16 +271,35 @@ class PlaybackService : MediaLibraryService() {
             }
         }
         scope.launch {
-            settingsRepository.hushCast.muteActionMode.distinctUntilChanged().collect { mode ->
+            combine(
+                activeEpisodeIdFlow,
+                settingsRepository.hushCast.muteActionMode.distinctUntilChanged()
+            ) { epId, mode ->
                 HushCastEngineBridge.defaultActionMode = mode
-                val activeEpId = exoPlayer.currentMediaItem?.getEpisodeId() ?: HushCastEngineBridge.currentEpisodeId
-                if (!activeEpId.isNullOrBlank()) {
-                    withContext(Dispatchers.IO) {
-                        val updated = autoMuteDb.dao().loadResolvedMuteWindowsByEpisode(activeEpId, mode)
+                epId to mode
+            }
+                .flatMapLatest { (epId, mode) ->
+                    val activeId = epId ?: exoPlayer.currentMediaItem?.getEpisodeId() ?: HushCastEngineBridge.currentEpisodeId
+                    if (activeId.isNullOrBlank()) {
+                        flowOf(emptyList())
+                    } else {
+                        autoMuteDb.dao().observeMuteSegmentsByEpisode(activeId).distinctUntilChanged().let { segFlow ->
+                            kotlinx.coroutines.flow.flow {
+                                segFlow.collect {
+                                    val updated = withContext(Dispatchers.IO) {
+                                        autoMuteDb.dao().loadResolvedMuteWindowsByEpisode(activeId, mode)
+                                    }
+                                    emit(updated)
+                                }
+                            }
+                        }
+                    }
+                }
+                .collect { updated ->
+                    if (!activeEpisodeIdFlow.value.isNullOrBlank()) {
                         HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
                     }
                 }
-            }
         }
         scope.launch {
             settingsRepository.hushCast.wordMutingEnabled.distinctUntilChanged().collect { enabled ->
@@ -397,9 +420,11 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private var loadHushCastJob: Job? = null
+    private val activeEpisodeIdFlow = MutableStateFlow<String?>(null)
 
     private fun loadHushCastForEpisode(episodeId: String, origin: String) {
         HushCastEngineBridge.currentEpisodeId = episodeId
+        activeEpisodeIdFlow.value = episodeId
         HushCastEngineBridge.clearSkippedChapterRanges()
         loadHushCastJob?.cancel()
         loadHushCastJob = scope.launch(Dispatchers.IO) {
