@@ -190,8 +190,7 @@ fun MediaPlayerBottomSheet(
     val playerVm = viewModel<PlayerScreenViewModel>()
 
     val episodeId = vm.metadataEpisodeId ?: ""
-    // Bound during composition, so the first frame already asks for this episode's data.
-    remember(episodeId, vm.currentDuration) {
+    LaunchedEffect(episodeId, vm.currentDuration) {
         playerVm.bindEpisode(episodeId, vm.currentDuration)
     }
 

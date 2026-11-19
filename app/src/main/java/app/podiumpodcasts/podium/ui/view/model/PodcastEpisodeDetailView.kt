@@ -50,6 +50,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -225,9 +226,7 @@ fun PodcastEpisodeDetailView(
                 key = "episode_detail_shared"
             )
             val detailMediaVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
-            // Item 2: this view model is shared by every episode page, so bind during composition
-            // (before the first frame) and drop anything still tagged with another episode.
-            remember(episode.id, episode.duration) {
+            LaunchedEffect(episode.id, episode.duration) {
                 detailPlayerVm.bindEpisode(episode.id, episode.duration * 1000L)
             }
             val chaptersScoped by detailPlayerVm.resolvedChaptersScoped.collectAsState()
