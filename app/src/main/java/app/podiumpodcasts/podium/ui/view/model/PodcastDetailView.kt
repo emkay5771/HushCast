@@ -36,7 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.rounded.Close
@@ -157,7 +157,7 @@ enum class Destinations(
     @StringRes val label: Int,
     val icon: ImageVector
 ) {
-    EPISODES(0, R.string.common_episodes, Icons.AutoMirrored.Rounded.FormatListBulleted),
+    EPISODES(0, R.string.common_episodes, Icons.AutoMirrored.Rounded.List),
     INFO(1, R.string.common_info, Icons.Default.Info)
 }
 

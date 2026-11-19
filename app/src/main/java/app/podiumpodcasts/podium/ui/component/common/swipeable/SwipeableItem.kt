@@ -230,7 +230,7 @@ fun SwipeableItem(
                             imageVector = primaryStyleResolved.icon,
                             contentDescription = startPrimaryLabel,
                             tint = primaryIconTint,
-                            modifier = Modifier.androidx.compose.foundation.layout.size(20.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                         if (startPrimaryShort.isNotEmpty()) {
                             androidx.compose.material3.Text(
@@ -262,7 +262,7 @@ fun SwipeableItem(
                                 imageVector = secStyle.icon,
                                 contentDescription = startSecondaryLabel,
                                 tint = secStyle.iconTint,
-                                modifier = Modifier.androidx.compose.foundation.layout.size(20.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                             if (startSecondaryShort.isNotEmpty()) {
                                 androidx.compose.material3.Text(
@@ -311,7 +311,7 @@ fun SwipeableItem(
                                 imageVector = secStyle.icon,
                                 contentDescription = endSecondaryLabel,
                                 tint = secStyle.iconTint,
-                                modifier = Modifier.androidx.compose.foundation.layout.size(20.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                             if (endSecondaryShort.isNotEmpty()) {
                                 androidx.compose.material3.Text(
@@ -352,7 +352,7 @@ fun SwipeableItem(
                             imageVector = primaryStyleResolved.icon,
                             contentDescription = endPrimaryLabel,
                             tint = primaryIconTint,
-                            modifier = Modifier.androidx.compose.foundation.layout.size(20.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                         if (endPrimaryShort.isNotEmpty()) {
                             androidx.compose.material3.Text(
