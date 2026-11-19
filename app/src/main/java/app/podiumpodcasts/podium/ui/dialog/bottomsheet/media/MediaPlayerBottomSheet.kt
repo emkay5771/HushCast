@@ -1187,7 +1187,6 @@ fun MediaPlayerBottomSheet(
                     }
                 }
             }
-            }
 
             Box(
                 modifier = Modifier
@@ -1219,6 +1218,7 @@ fun MediaPlayerBottomSheet(
                         )
                     }
                 }
+            }
             }
         }
     }
