@@ -56,7 +56,7 @@ object RssFeedParser {
             reader.errorHandler = handler
             // Never fetch anything a DOCTYPE points at.
             reader.entityResolver = org.xml.sax.EntityResolver { _, _ -> InputSource(StringReader("")) }
-            reader.parse(InputSource(StringReader(xml.trimStart('﻿', ' ', '\t', '\r', '\n'))))
+            reader.parse(InputSource(StringReader(xml.trimStart('\uFEFF', ' ', '\t', '\r', '\n'))))
             if (!handler.sawRss) null else handler.result()
         } catch (e: Exception) {
             null
