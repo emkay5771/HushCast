@@ -1477,16 +1477,34 @@ class LocalMlBackend:
 
 
 def _fw_words_to_dtos(raw_words, default_start: float) -> list[WordDto]:
-    """faster-whisper Word objects -> WordDto with a single leading space (for split_sentences)."""
+    """faster-whisper Word objects -> WordDto, preserving sub-word attachment (e.g. .5, ,000, %)."""
     out: list[WordDto] = []
     for w in raw_words or []:
-        wt = str(getattr(w, "word", "") or "").strip()
-        if not wt:
+        raw = str(getattr(w, "word", "") or "").lstrip("\r\n\t")
+        if not raw.strip():
             continue
         ws = round(float(getattr(w, "start", default_start)), 3)
         we = round(max(ws + 0.01, float(getattr(w, "end", ws + 0.1))), 3)
-        out.append(WordDto(start=ws, end=we, text=" " + wt))
+        out.append(WordDto(start=ws, end=we, text=raw))
     return out
+
+
+_NO_SPACE_BEFORE_RE = re.compile(r"^[.,%?!:;)\]\u2019'\u201d\"]")
+_NO_SPACE_AFTER_RE = re.compile(r"[-/($#\u201c\"\[(\s]$")
+
+
+def _join_word_text(prev_text: Optional[str], cur_text: str) -> str:
+    """Keep sub-word tokens attached while ensuring a space at segment/repair boundaries."""
+    stripped = cur_text.strip()
+    if not stripped:
+        return ""
+    if cur_text.startswith(" "):
+        return " " + stripped
+    if prev_text is None:
+        return stripped
+    if _NO_SPACE_BEFORE_RE.match(stripped) or _NO_SPACE_AFTER_RE.search(prev_text):
+        return stripped
+    return " " + stripped
 
 
 def _make_fw_window_decoder(fw_model, pcm_16k, lang: str, sr: int = 16000):
@@ -1545,6 +1563,11 @@ def _transcribe_faster_whisper(
         temperature=0.0,
         condition_on_previous_text=False,
         vad_filter=True,
+        vad_parameters={
+            "threshold": 0.35,
+            "min_silence_duration_ms": 700,
+            "speech_pad_ms": 600,
+        },
         word_timestamps=True,
         initial_prompt=initial_prompt,
     )
@@ -1583,7 +1606,13 @@ def _transcribe_faster_whisper(
     finally:
         fw_logger.setLevel(prev_level)
 
-    flat = [WordDto(start=w.start, end=w.end, text=" " + w.text.strip()) for w in flat if w.text.strip()]
+    joined_flat: list[WordDto] = []
+    for w in flat:
+        if not w.text.strip():
+            continue
+        prev_txt = joined_flat[-1].text if joined_flat else None
+        joined_flat.append(WordDto(start=w.start, end=w.end, text=_join_word_text(prev_txt, w.text)))
+    flat = joined_flat
     for i in range(len(flat) - 1):
         # Re-decoded words can overlap their neighbours slightly at the repair seams.
         if flat[i + 1].start > flat[i].start and flat[i].end > flat[i + 1].start:

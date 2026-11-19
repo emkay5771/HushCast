@@ -338,3 +338,51 @@ def test_faster_whisper_path_prompt_leak_repair_and_flat_split() -> None:
     # words and segments describe the same word list.
     assert sum(s.nWords for s in segments) == len(words)
     assert segments[0].start == words[0].start and segments[-1].end == words[-1].end
+    assert batched_calls[0]["vad_parameters"]["speech_pad_ms"] == 600
+
+
+def test_find_hard_cuts_catches_mid_sentence_gap_under_800ms() -> None:
+    a = _seq(0.0, 0.4, ["it", "is", "happening", "by", "a", "country"])
+    b = _seq(2.75, 0.4, ["and", "everyone", "knows", "it."])  # 0.35 s gap, mid-sentence
+    c = _seq(4.7, 0.4, ["Next", "topic."])  # 0.35 s gap, after sentence end -> not a cut
+    assert find_hard_cuts([a, b, c]) == [2.575]
+
+
+def test_faster_whisper_preserves_subword_punctuation_and_numbers() -> None:
+    from hushcast_worker.pipeline import _transcribe_faster_whisper
+
+    raw_words = [
+        _w(0.0, 0.2, " Over"),
+        _w(0.2, 0.4, " 1"),
+        _w(0.4, 0.6, ".5"),
+        _w(0.6, 0.8, " billion,"),
+        _w(0.8, 1.0, " or"),
+        _w(1.0, 1.2, " 39"),
+        _w(1.2, 1.4, "%"),
+        _w(1.4, 1.6, " in"),
+        _w(1.6, 1.8, " the"),
+        _w(1.8, 2.0, " U"),
+        _w(2.0, 2.2, ".S."),
+        _w(2.2, 2.4, " at"),
+        _w(2.4, 2.6, " BetterFutureAI"),
+        _w(2.6, 2.8, ".org."),
+    ]
+
+    class _Model:
+        def transcribe(self, audio, **kwargs):
+            return iter([]), None
+
+    class _Pipe:
+        model = _Model()
+
+        def transcribe(self, audio, **kwargs):
+            return iter([_fw_seg(raw_words)]), None
+
+    pcm = [0.0] * (16000 * 5)
+    _, segments = _transcribe_faster_whisper(
+        _Pipe(), pcm, lang="en", duration_sec=5.0, initial_prompt=None
+    )
+    assert [s.text for s in segments] == [
+        "Over 1.5 billion, or 39% in the U.S.",
+        "at BetterFutureAI.org.",
+    ]

@@ -27,6 +27,7 @@ _MAX_PODCAST_TITLE_CHARS = 80
 _MAX_EPISODE_TITLE_CHARS = 120
 
 HARD_CUT_MAX_GAP_S = 0.12
+MID_SENTENCE_CUT_MAX_GAP_S = 0.80
 REPAIR_WINDOW_S = 10.0
 REPAIR_RADIUS_S = 2.0
 REPAIR_PROMPT_WORDS = 30
@@ -118,15 +119,25 @@ def strip_prompt_leak(words: Sequence[WordDto], prompt: Optional[str]) -> tuple[
 def find_hard_cuts(
     segments_words: Sequence[Sequence[WordDto]],
     max_gap_s: float = HARD_CUT_MAX_GAP_S,
+    mid_sentence_max_gap_s: float = MID_SENTENCE_CUT_MAX_GAP_S,
 ) -> list[float]:
-    """Times of window boundaries with (almost) no gap between the words on either side."""
+    """
+    Times of window boundaries with (almost) no gap between the words on either side, or a
+    short gap (< mid_sentence_max_gap_s) where the previous window ended mid-sentence.
+    """
     groups = [g for g in segments_words if g]
     cuts: list[float] = []
     for prev, nxt in zip(groups, groups[1:]):
         a = float(prev[-1].end)
         b = float(nxt[0].start)
-        if b - a < max_gap_s:
+        gap = b - a
+        if gap < max_gap_s:
             cuts.append(0.5 * (a + b))
+        elif gap < mid_sentence_max_gap_s:
+            last_txt = prev[-1].text.strip()
+            ends_sentence = last_txt.endswith((".", "?", "!", "…"))
+            if not ends_sentence or _strip_cut_period(prev[-1].text, nxt[0].text) is not None:
+                cuts.append(0.5 * (a + b))
     return cuts
 
 
