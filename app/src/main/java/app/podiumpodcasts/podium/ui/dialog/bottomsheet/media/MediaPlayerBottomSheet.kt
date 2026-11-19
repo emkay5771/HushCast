@@ -1189,32 +1189,35 @@ fun MediaPlayerBottomSheet(
             }
             }
 
-            var lastUndo by remember { mutableStateOf<app.hushcast.automute.dsp.AdSkipEvent?>(null) }
-            if (pendingUndo != null) lastUndo = pendingUndo
-            AnimatedVisibility(
-                visible = pendingUndo != null,
-                enter = slideInVertically(
-                    animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
-                ) { it } + fadeIn(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
-                exit = slideOutVertically(
-                    animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
-                ) { it } + fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
+            Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .semantics { liveRegion = LiveRegionMode.Polite }
             ) {
-                val undo = pendingUndo ?: lastUndo
-                if (undo != null) {
-                    OneTapUndoAdSkipBanner(
-                        event = undo,
-                        onUndo = {
-                            HushCastEngineBridge.adSkipObserver.bypassAd(undo.adWindow.startMs)
-                            vm.seek(undo.adWindow.startMs)
-                            HushCastEngineBridge.clearPendingUndo()
-                        },
-                        onDismiss = { HushCastEngineBridge.clearPendingUndo() }
-                    )
+                var lastUndo by remember { mutableStateOf<app.hushcast.automute.dsp.AdSkipEvent?>(null) }
+                if (pendingUndo != null) lastUndo = pendingUndo
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = pendingUndo != null,
+                    enter = slideInVertically(
+                        animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                    ) { it } + fadeIn(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
+                    exit = slideOutVertically(
+                        animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                    ) { it } + fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                ) {
+                    val undo = pendingUndo ?: lastUndo
+                    if (undo != null) {
+                        OneTapUndoAdSkipBanner(
+                            event = undo,
+                            onUndo = {
+                                HushCastEngineBridge.adSkipObserver.bypassAd(undo.adWindow.startMs)
+                                vm.seek(undo.adWindow.startMs)
+                                HushCastEngineBridge.clearPendingUndo()
+                            },
+                            onDismiss = { HushCastEngineBridge.clearPendingUndo() }
+                        )
+                    }
                 }
             }
         }
