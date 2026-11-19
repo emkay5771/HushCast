@@ -37,7 +37,8 @@ object HushCastAnalyze {
         context: Context,
         db: AppDatabase,
         episodeId: String,
-        actionMode: MuteActionMode
+        actionMode: MuteActionMode,
+        reprocessStage: String? = null
     ): Outcome = withContext(Dispatchers.IO) {
         val appContext = context.applicationContext
         // The worker is used only when it's switched on and has an address (same rule everywhere).
@@ -47,7 +48,8 @@ object HushCastAnalyze {
                 db = db,
                 episodeId = episodeId,
                 downloadMethod = DownloadAnalysisMethod.DESKTOP,
-                forceReprocess = true
+                forceReprocess = true,
+                reprocessStage = reprocessStage
             )
             return@withContext Outcome.SENT_TO_WORKER
         }

@@ -442,6 +442,28 @@ fun PodcastSettingsView(
                         )
                     }
                 }
+
+                row { pos ->
+                    val disableAutoProcess by remember(podcast.origin) {
+                        settingsRepository.hushCast.podcastDisableAutoProcess(podcast.origin)
+                    }.collectAsState(initial = false)
+
+                    SettingsSwitchListItem(
+                        checked = disableAutoProcess,
+                        onCheckedChange = { disabled ->
+                            scope.launch {
+                                settingsRepository.hushCast.setPodcastDisableAutoProcess(podcast.origin, disabled)
+                            }
+                        },
+                        icon = {
+                            Icon(Icons.Rounded.FileDownload, contentDescription = null)
+                        },
+                        label = "Download direct (skip auto-processing)",
+                        description = "Download episodes directly without queuing HushCast processing automatically",
+                        index = pos.index,
+                        count = pos.count
+                    )
+                }
             }
         }
     }

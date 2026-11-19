@@ -44,7 +44,11 @@ fun rememberBlurredArtwork(artworkUri: String?, enabled: Boolean): ImageBitmap? 
     val context = LocalContext.current
     var image by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(artworkUri, enabled) {
-        image = if (!enabled || artworkUri.isNullOrBlank()) null else loadBlurred(context, artworkUri)
+        if (artworkUri.isNullOrBlank()) {
+            image = null
+        } else if (enabled) {
+            image = loadBlurred(context, artworkUri)
+        }
     }
     return image
 }
@@ -53,22 +57,24 @@ fun rememberBlurredArtwork(artworkUri: String?, enabled: Boolean): ImageBitmap? 
  * Draws [image] stretched behind the content, under a scrim in [scrimColor] that is solid at the
  * top (so it meets the sheet's drag-handle band without a seam) and lighter lower down.
  */
-fun Modifier.playerBackdrop(image: ImageBitmap?, scrimColor: Color): Modifier =
-    if (image == null) this else drawBehind {
+fun Modifier.playerBackdrop(image: ImageBitmap?, scrimColor: Color, alpha: Float = 1f): Modifier {
+    val clamped = alpha.coerceIn(0f, 1f)
+    if (image == null || clamped <= 0f) return this
+    return drawBehind {
         drawImage(
             image = image,
             srcOffset = IntOffset.Zero,
             srcSize = IntSize(image.width, image.height),
             dstOffset = IntOffset.Zero,
             dstSize = IntSize(size.width.toInt(), size.height.toInt()),
-            alpha = 0.85f,
+            alpha = 0.85f * clamped,
             filterQuality = FilterQuality.High
         )
         drawRect(
             brush = Brush.verticalGradient(
-                0f to scrimColor,
-                0.18f to scrimColor.copy(alpha = 0.55f),
-                1f to scrimColor.copy(alpha = 0.70f),
+                0f to scrimColor.copy(alpha = scrimColor.alpha * clamped),
+                0.18f to scrimColor.copy(alpha = 0.55f * clamped),
+                1f to scrimColor.copy(alpha = 0.70f * clamped),
                 startY = 0f,
                 endY = size.height
             ),
@@ -76,6 +82,7 @@ fun Modifier.playerBackdrop(image: ImageBitmap?, scrimColor: Color): Modifier =
             size = size
         )
     }
+}
 
 private suspend fun loadBlurred(context: Context, uri: String): ImageBitmap? = withContext(Dispatchers.IO) {
     runCatching {

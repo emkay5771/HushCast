@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -79,8 +80,6 @@ import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ContainedLoadingIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledIconButton
@@ -207,7 +206,7 @@ fun MediaPlayerBottomSheet(
     val devMode by settingsRepository.hushCast.devMode.collectAsStateWithLifecycle(initialValue = false)
     val wordMutingGlobal by settingsRepository.hushCast.wordMutingEnabled.collectAsStateWithLifecycle(initialValue = true)
     val adPolicyGlobal by settingsRepository.hushCast.adPolicyMode.collectAsStateWithLifecycle(initialValue = AdPolicyMode.AUTO_SKIP)
-    val blurBackground by settingsRepository.appearance.playerBlurBackground.collectAsStateWithLifecycle(initialValue = true)
+    val blurBackground by settingsRepository.appearance.playerBlurBackground.collectAsStateWithLifecycle(initialValue = false)
     val blurSheets by settingsRepository.appearance.playerBlurSheets.collectAsStateWithLifecycle(initialValue = true)
     val toolbarVisibleCount by settingsRepository.behavior.playerToolbarVisibleCount.collectAsStateWithLifecycle(initialValue = 4)
 
@@ -467,6 +466,11 @@ fun MediaPlayerBottomSheet(
             artworkUri = vm.mediaMetadata?.artworkUri?.toString(),
             enabled = blurBackground
         )
+        val backdropAlpha by animateFloatAsState(
+            targetValue = if (blurBackground && blurredArtwork != null) 1f else 0f,
+            animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+            label = "playerBackdropAlpha"
+        )
         ModalBottomSheet(
             sheetState = sheetState,
             sheetMaxWidth = androidx.compose.ui.unit.Dp.Infinity,
@@ -491,7 +495,11 @@ fun MediaPlayerBottomSheet(
                     .fillMaxWidth()
                     .fillMaxHeight()
                     // R19: blurred artwork behind the player, blending into the sheet at the top.
-                    .playerBackdrop(blurredArtwork, androidx.compose.material3.BottomSheetDefaults.ContainerColor)
+                    .playerBackdrop(
+                        image = blurredArtwork,
+                        scrimColor = androidx.compose.material3.BottomSheetDefaults.ContainerColor,
+                        alpha = backdropAlpha
+                    )
             ) {
                 // Top row: Collapse, Tabs, Up Next.  T2: slides away (instead of popping) while the
                 // transcript is open.
@@ -590,7 +598,11 @@ fun MediaPlayerBottomSheet(
                         when (visibleTabs.getOrNull(pageIndex) ?: MediaPlayerTab.PLAYER) {
                             MediaPlayerTab.PLAYER -> {
                                 Column(
-                                    modifier = Modifier.fillMaxSize(),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .swipeUpForUpNext(enabled = !showTranscriptOverlay) {
+                                            showQueueBottomSheet = true
+                                        },
                                     horizontalAlignment = Alignment.CenterHorizontally
                                 ) {
                                     // Top area: Artwork + Titles + Skip pill (or TranscriptOverlay when open)
@@ -611,30 +623,6 @@ fun MediaPlayerBottomSheet(
                                                 modifier = Modifier
                                                     .weight(1f)
                                                     .fillMaxWidth()
-                                                    // R18: swipe up anywhere above the seek bar opens Up Next.
-                                                    .pointerInput(Unit) {
-                                                        val thresholdPx = 64.dp.toPx()
-                                                        awaitEachGesture {
-                                                            val down = awaitFirstDown(requireUnconsumed = false)
-                                                            var totalDy = 0f
-                                                            var totalDx = 0f
-                                                            var triggered = false
-                                                            while (true) {
-                                                                val event = awaitPointerEvent()
-                                                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                                                if (!change.pressed) break
-                                                                totalDy += (change.position.y - change.previousPosition.y)
-                                                                totalDx += (change.position.x - change.previousPosition.x)
-                                                                if (!triggered && totalDy < -thresholdPx &&
-                                                                    kotlin.math.abs(totalDy) > kotlin.math.abs(totalDx) * 1.5f
-                                                                ) {
-                                                                    triggered = true
-                                                                    change.consume()
-                                                                    showQueueBottomSheet = true
-                                                                }
-                                                            }
-                                                        }
-                                                    }
                                             ) {
                                             // R7: the artwork takes the room the text below leaves, instead of a fixed 300 dp.
                                             val reservedForText = if (compactLayout) 110.dp else 200.dp
@@ -1583,12 +1571,60 @@ private fun PlayerTransportControls(
     }
 }
 
+private fun Modifier.swipeUpForUpNext(
+    enabled: Boolean,
+    onSwipeUp: () -> Unit
+): Modifier {
+    if (!enabled) return this
+    return this.pointerInput(Unit) {
+        val thresholdPx = 64.dp.toPx()
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = true)
+            var totalDy = 0f
+            var totalDx = 0f
+            var triggered = false
+            while (true) {
+                val event = awaitPointerEvent()
+                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                if (!change.pressed || change.isConsumed) break
+                totalDy += (change.position.y - change.previousPosition.y)
+                totalDx += (change.position.x - change.previousPosition.x)
+                if (!triggered && totalDy < -thresholdPx &&
+                    kotlin.math.abs(totalDy) > kotlin.math.abs(totalDx) * 1.5f
+                ) {
+                    triggered = true
+                    change.consume()
+                    onSwipeUp()
+                }
+            }
+        }
+    }
+}
+
+private fun playerToolbarActionIcon(
+    action: PlayerToolbarAction,
+    isProcessed: Boolean,
+    protectionActive: Boolean,
+    isFavorite: Boolean,
+    isDownloaded: Boolean
+) = when (action) {
+    PlayerToolbarAction.HUSHCAST, PlayerToolbarAction.ANALYZE ->
+        if (isProcessed && protectionActive) Icons.Rounded.Shield else Icons.Outlined.Shield
+    PlayerToolbarAction.SPEED -> Icons.Filled.Speed
+    PlayerToolbarAction.SLEEP -> Icons.Filled.Bedtime
+    PlayerToolbarAction.TRANSCRIPT -> Icons.Rounded.Subtitles
+    PlayerToolbarAction.FAVORITE -> if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder
+    PlayerToolbarAction.DOWNLOAD -> if (isDownloaded) Icons.Rounded.DownloadForOffline else Icons.Rounded.Download
+    PlayerToolbarAction.GO_TO_PODCAST -> Icons.Rounded.Podcasts
+    PlayerToolbarAction.EPISODE_DETAILS -> Icons.Rounded.Info
+    PlayerToolbarAction.MARK_PLAYED -> Icons.Rounded.Done
+}
+
 @Composable
 private fun PlayerActionToolbar(
     /** Processing progress while the episode is being analyzed, drawn as a ring on the HushCast icon (R16). */
     analysisPercent: Int?,
     shortcutActions: List<PlayerToolbarAction>,
-    overflowActions: List<PlayerToolbarAction>,
     isProcessed: Boolean,
     protectionActive: Boolean,
     speed: Float,
@@ -1596,10 +1632,8 @@ private fun PlayerActionToolbar(
     isFavorite: Boolean,
     isDownloaded: Boolean,
     transcriptState: TranscriptLoadState,
-    showMoreMenu: Boolean,
     onToggleMoreMenu: (Boolean) -> Unit,
-    onPerformAction: (PlayerToolbarAction) -> Unit,
-    onOpenCustomize: () -> Unit
+    onPerformAction: (PlayerToolbarAction) -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -1609,18 +1643,13 @@ private fun PlayerActionToolbar(
         verticalAlignment = Alignment.CenterVertically
     ) {
         shortcutActions.forEach { action ->
-            val icon = when (action) {
-                PlayerToolbarAction.HUSHCAST, PlayerToolbarAction.ANALYZE ->
-                    if (isProcessed && protectionActive) Icons.Rounded.Shield else Icons.Outlined.Shield
-                PlayerToolbarAction.SPEED -> Icons.Filled.Speed
-                PlayerToolbarAction.SLEEP -> Icons.Filled.Bedtime
-                PlayerToolbarAction.TRANSCRIPT -> Icons.Rounded.Subtitles
-                PlayerToolbarAction.FAVORITE -> if (isFavorite) Icons.Rounded.Star else Icons.Rounded.StarBorder
-                PlayerToolbarAction.DOWNLOAD -> if (isDownloaded) Icons.Rounded.DownloadForOffline else Icons.Rounded.Download
-                PlayerToolbarAction.GO_TO_PODCAST -> Icons.Rounded.Podcasts
-                PlayerToolbarAction.EPISODE_DETAILS -> Icons.Rounded.Info
-                PlayerToolbarAction.MARK_PLAYED -> Icons.Rounded.Done
-            }
+            val icon = playerToolbarActionIcon(
+                action = action,
+                isProcessed = isProcessed,
+                protectionActive = protectionActive,
+                isFavorite = isFavorite,
+                isDownloaded = isDownloaded
+            )
 
             val isTranscriptUnavailable = action == PlayerToolbarAction.TRANSCRIPT &&
                 transcriptState !is TranscriptLoadState.Ready
@@ -1674,34 +1703,94 @@ private fun PlayerActionToolbar(
             }
         }
 
-        Box {
-            IconButton(
-                onClick = { onToggleMoreMenu(true) },
-                modifier = Modifier.size(48.dp)
-            ) {
-                Icon(Icons.Rounded.MoreHoriz, contentDescription = "More actions")
-            }
+        IconButton(
+            onClick = { onToggleMoreMenu(true) },
+            modifier = Modifier.size(48.dp)
+        ) {
+            Icon(Icons.Rounded.MoreHoriz, contentDescription = "More actions")
+        }
+    }
+}
 
-            DropdownMenu(
-                expanded = showMoreMenu,
-                onDismissRequest = { onToggleMoreMenu(false) }
-            ) {
-                overflowActions.forEach { action ->
-                    DropdownMenuItem(
-                        text = { Text(action.uiLabel()) },
-                        onClick = {
-                            onToggleMoreMenu(false)
-                            onPerformAction(action)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PlayerMoreActionsSheet(
+    overflowActions: List<PlayerToolbarAction>,
+    isProcessed: Boolean,
+    protectionActive: Boolean,
+    isFavorite: Boolean,
+    isDownloaded: Boolean,
+    onPerformAction: (PlayerToolbarAction) -> Unit,
+    onOpenCustomize: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    fun hideThen(after: () -> Unit) {
+        scope.launch { sheetState.hide() }.invokeOnCompletion { after() }
+    }
+
+    ModalBottomSheet(
+        sheetState = sheetState,
+        onDismissRequest = onDismiss
+    ) {
+        PlayerSheetBlur()
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp)
+                .padding(bottom = 16.dp)
+        ) {
+            overflowActions.forEach { action ->
+                androidx.compose.material3.ListItem(
+                    headlineContent = { Text(action.uiLabel()) },
+                    leadingContent = {
+                        Icon(
+                            imageVector = playerToolbarActionIcon(
+                                action = action,
+                                isProcessed = isProcessed,
+                                protectionActive = protectionActive,
+                                isFavorite = isFavorite,
+                                isDownloaded = isDownloaded
+                            ),
+                            contentDescription = null
+                        )
+                    },
+                    colors = androidx.compose.material3.ListItemDefaults.colors(
+                        containerColor = Color.Transparent
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            hideThen {
+                                onDismiss()
+                                onPerformAction(action)
+                            }
                         }
-                    )
-                }
-                HorizontalDivider()
-                DropdownMenuItem(
-                    leadingIcon = { Icon(Icons.Rounded.Tune, contentDescription = null) },
-                    text = { Text("Customize player") },
-                    onClick = onOpenCustomize
                 )
             }
+            if (overflowActions.isNotEmpty()) {
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+            }
+            androidx.compose.material3.ListItem(
+                headlineContent = { Text("Customize player") },
+                leadingContent = {
+                    Icon(Icons.Rounded.Tune, contentDescription = null)
+                },
+                colors = androidx.compose.material3.ListItemDefaults.colors(
+                    containerColor = Color.Transparent
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable {
+                        hideThen {
+                            onDismiss()
+                            onOpenCustomize()
+                        }
+                    }
+            )
         }
     }
 }

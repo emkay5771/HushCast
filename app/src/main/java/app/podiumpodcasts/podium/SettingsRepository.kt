@@ -13,6 +13,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
@@ -419,7 +420,7 @@ class SettingsRepository(val context: Context) {
 
         /** Blurred artwork behind the full player. */
         val playerBlurBackground: Flow<Boolean> = dataStore.data
-            .map { preferences -> preferences[SettingsKeys.APPEARANCE_PLAYER_BLUR_BACKGROUND] ?: true }
+            .map { preferences -> preferences[SettingsKeys.APPEARANCE_PLAYER_BLUR_BACKGROUND] ?: false }
 
         suspend fun setPlayerBlurBackground(enable: Boolean) = dataStore.edit { preferences ->
             preferences[SettingsKeys.APPEARANCE_PLAYER_BLUR_BACKGROUND] = enable
@@ -995,6 +996,25 @@ class SettingsRepository(val context: Context) {
             dataStore.edit { preferences ->
                 if (enabled == null) preferences.remove(key)
                 else preferences[key] = enabled
+            }
+        }
+
+        fun podcastDisableAutoProcess(origin: String): Flow<Boolean> {
+            val key = booleanPreferencesKey("podcast_disable_auto_process_${origin.hashCode()}")
+            return dataStore.data.map { preferences ->
+                preferences[key] ?: false
+            }
+        }
+
+        suspend fun isPodcastDisableAutoProcess(origin: String): Boolean {
+            return podcastDisableAutoProcess(origin).first()
+        }
+
+        suspend fun setPodcastDisableAutoProcess(origin: String, disabled: Boolean) {
+            val key = booleanPreferencesKey("podcast_disable_auto_process_${origin.hashCode()}")
+            dataStore.edit { preferences ->
+                if (!disabled) preferences.remove(key)
+                else preferences[key] = true
             }
         }
 

@@ -159,7 +159,7 @@ fun SettingsAppearancePane(
     val paletteStyle by appearance.paletteStyle.collectAsState(AppPaletteStyle.TONAL)
     val contrast by appearance.contrast.collectAsState(AppContrast.STANDARD)
     val artworkColors by appearance.enableArtworkColors.collectAsState(true)
-    val blurBackground by appearance.playerBlurBackground.collectAsState(true)
+    val blurBackground by appearance.playerBlurBackground.collectAsState(false)
     val blurSheets by appearance.playerBlurSheets.collectAsState(true)
     val blurAvailable = rememberCrossWindowBlurEnabled()
     val bottomBarRaw by appearance.bottomBarItemsRaw.collectAsState("HOME,DISCOVER,LIBRARY")

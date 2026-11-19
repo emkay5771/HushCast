@@ -100,9 +100,17 @@ class PodcastEpisodeDownloadWork(
                     .setState(episodeId, PodcastEpisodeDownloadState.DOWNLOADING.value)
 
                 // One meaning for the worker switch: switched on AND an address set.
+                val disableAutoProcess = !forceReprocess && reprocessStage == null &&
+                    app.podiumpodcasts.podium.SettingsRepository(context).hushCast
+                        .isPodcastDisableAutoProcess(episode.origin)
+                val effectiveDownloadMethod = if (disableAutoProcess) {
+                    app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS
+                } else {
+                    downloadMethod
+                }
                 val workerActive = app.hushcast.automute.engine.HushCastPrefs.isWorkerActive(context)
                 val workerUrl = app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context)
-                val shouldTryDesktop = when (downloadMethod) {
+                val shouldTryDesktop = when (effectiveDownloadMethod) {
                     app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP,
                     app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO -> workerActive
                     app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE,
@@ -128,7 +136,7 @@ class PodcastEpisodeDownloadWork(
                         language = podcastLanguage.ifBlank { null },
                         forceReprocess = forceReprocess && !isRetry,
                         reprocessStage = reprocessStage,
-                        resetStatusOnError = downloadMethod != app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP || isFinalAttempt,
+                        resetStatusOnError = effectiveDownloadMethod != app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP || isFinalAttempt,
                         onProgressUpdate = onProgressUpdate
                     )
                     if (offloaded) {
@@ -136,7 +144,7 @@ class PodcastEpisodeDownloadWork(
                         stateHandled = true
                         return@withPermit outcome
                     }
-                    if (downloadMethod == app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP) {
+                    if (effectiveDownloadMethod == app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP) {
                         db.podcastEpisodeDownloads().setState(
                             episodeId,
                             if (wasAlreadyDownloaded) PodcastEpisodeDownloadState.DOWNLOADED.value
@@ -147,7 +155,7 @@ class PodcastEpisodeDownloadWork(
                         return@withPermit outcome
                     }
                     Log.w("HushCastDesktop", "Desktop worker unavailable or failed (auto=$isAuto); falling back to on-device download")
-                } else if (downloadMethod == app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP) {
+                } else if (effectiveDownloadMethod == app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP) {
                     Log.w(
                         "HushCastDesktop",
                         "Worker requested for $episodeId but it's switched off or has no address; using this phone"
@@ -195,7 +203,7 @@ class PodcastEpisodeDownloadWork(
                     app.podiumpodcasts.podium.background.PlaybackService.notifyEpisodeDownloaded(episodeId)
 
                     val canAnalyzeOnDevice = app.hushcast.automute.engine.ModelManager(context).areWordMuteModelsReady()
-                    if (downloadMethod == app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS || !canAnalyzeOnDevice) {
+                    if (effectiveDownloadMethod == app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS || !canAnalyzeOnDevice) {
                         app.hushcast.automute.worker.EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
                         if (workerOffFallback) {
                             noteStatus("Worker is off. Turn it on in Settings to process this episode")

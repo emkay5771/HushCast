@@ -243,6 +243,56 @@ fun PlayerHushCastSheet(
                             Text("Re-process episode")
                         }
                     }
+
+                    var showAdvancedReprocess by remember { mutableStateOf(false) }
+                    val workerActive = remember(context) {
+                        app.hushcast.automute.engine.HushCastPrefs.isWorkerActive(context)
+                    }
+                    TextButton(
+                        onClick = { showAdvancedReprocess = !showAdvancedReprocess },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Advanced")
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            imageVector = if (showAdvancedReprocess) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            contentDescription = null
+                        )
+                    }
+                    AnimatedVisibility(visible = showAdvancedReprocess) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = "Re-run specific pipeline stages on the worker without re-transcribing.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            listOf(
+                                "SUMMARY_CHAPTERS" to "Re-run Summary & Chapters",
+                                "ADS_AND_SUMMARY" to "Re-run Ads & Summary",
+                                "ALIGN_WORDS" to "Re-align Words"
+                            ).forEach { (stage, label) ->
+                                OutlinedButton(
+                                    onClick = { hideThen { onProcessStage(stage) } },
+                                    enabled = workerActive,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(label)
+                                }
+                            }
+                            if (!workerActive) {
+                                Text(
+                                    text = "Requires Desktop or Cloud worker to be enabled in Settings.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
