@@ -165,7 +165,7 @@ class PlayerHelpersTest {
 
     @Test
     fun `adForLine ignores tiny edge overlap and matches midpoint`() {
-        val ad = AdWindow(startMs = 10_000L, endMs = 20_000L, adClass = "sponsor_ad")
+        val ad = AdWindow(startMs = 10_000L, endMs = 20_000L, confidence = 0.9f, adClass = "sponsor_ad")
         assertNull(adForLine(line(8_000L, 10_050L), listOf(ad)))
         assertEquals(ad, adForLine(line(10_000L, 12_000L), listOf(ad)))
     }
