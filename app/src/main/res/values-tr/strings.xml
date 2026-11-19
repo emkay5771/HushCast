@@ -126,6 +126,9 @@
     <string name="route_podcast_settings">Podcast ayarları</string>
     <string name="route_restore">Yedekten geri yükle</string>
     <string name="route_restore_action_restart_app">Uygulamayı yeniden başlat</string>
+    <string name="route_restore_action_restore">Geri yükle</string>
+    <string name="route_restore_confirm_title">Verileriniz değiştirilsin mi?</string>
+    <string name="common_action_cancel">İptal</string>
     <string name="route_restore_confirmation">Bir yedekleme dosyasından geri yüklemek mevcut veritabanının üzerine yazacaktır. Tüm veriler kaybolacak.</string>
     <string name="route_restore_invalid_backup_file">Geçersiz yedekleme dosyası</string>
     <string name="route_restore_invalid_backup_file_text">Lütfen geçerli bir %1$s yedekleme dosyası seç.</string>

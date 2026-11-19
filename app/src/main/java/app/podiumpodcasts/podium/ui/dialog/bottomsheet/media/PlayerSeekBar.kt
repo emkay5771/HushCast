@@ -13,6 +13,10 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,6 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -57,9 +62,14 @@ import app.hushcast.automute.dsp.SkipAwareSeekCalculator
 import app.podiumpodcasts.podium.background.HushCastEngineBridge
 import kotlin.math.abs
 
+/**
+ * S4: [positionMsState] is read only in derived state (second-level text, ad/mute hits) and in the
+ * draw phase (track and thumb), so a position tick redraws the bar instead of recomposing the
+ * page around it.
+ */
 @Composable
 fun PlayerSeekBar(
-    positionMs: Long,
+    positionMsState: androidx.compose.runtime.State<Long>,
     durationMs: Long,
     playbackSpeed: Float,
     adjustRemainingForSpeed: Boolean,
@@ -68,7 +78,9 @@ fun PlayerSeekBar(
     onSeekToMs: (Long) -> Unit,
     onSkipAd: ((AdWindow) -> Unit)? = null,
     modifier: Modifier = Modifier,
-    compact: Boolean = false
+    compact: Boolean = false,
+    /** Chapters, so the scrub card can name the chapter you'd land in (R8). */
+    chapters: List<app.podiumpodcasts.podium.api.chapters.ResolvedChapter> = emptyList()
 ) {
     val haptic = LocalHapticFeedback.current
     var isDragging by remember { mutableStateOf(false) }
@@ -76,18 +88,33 @@ fun PlayerSeekBar(
     var scrubSpeed by remember { mutableFloatStateOf(1f) }
 
     val safeDuration = durationMs.coerceAtLeast(1L)
-    val liveFraction = (positionMs.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
-    val displayFraction = if (isDragging) dragFraction else liveFraction
-    val displayPosMs = if (isDragging) (displayFraction * safeDuration).toLong() else positionMs
+    // Exact position, for hit tests: changes every tick, but only derived states read it.
+    val exactPosState = remember(positionMsState, safeDuration) {
+        derivedStateOf {
+            if (isDragging) (dragFraction * safeDuration).toLong() else positionMsState.value
+        }
+    }
+    // Whole seconds, for the text: recomposes at most once a second.
+    val displayPosSec by remember(exactPosState) { derivedStateOf { exactPosState.value / 1000L } }
+    // While dragging the card's zoomed timeline follows the finger exactly (it recomposes anyway).
+    val displayPosMs = if (isDragging) exactPosState.value else displayPosSec * 1000L
+    val displayFraction = if (isDragging) dragFraction else (displayPosMs.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
 
-    val activeAd = remember(displayPosMs, adWindows) {
-        if (durationMs <= 0L) null
-        else adWindows.firstOrNull { displayPosMs in it.startMs..it.endMs }
+    val activeAdState = remember(adWindows, durationMs, exactPosState) {
+        derivedStateOf {
+            val pos = exactPosState.value
+            if (durationMs <= 0L) null else adWindows.firstOrNull { pos in it.startMs..it.endMs }
+        }
     }
-    val nearMute = remember(displayPosMs, muteWindows) {
-        if (durationMs <= 0L) null
-        else muteWindows.firstOrNull { it.enabled && abs(displayPosMs - it.startMs) <= 1500L }
+    val nearMuteState = remember(muteWindows, durationMs, exactPosState) {
+        derivedStateOf {
+            val pos = exactPosState.value
+            if (durationMs <= 0L) null
+            else muteWindows.firstOrNull { it.enabled && abs(pos - it.startMs) <= 1500L }
+        }
     }
+    val activeAd = activeAdState.value
+    val nearMute = nearMuteState.value
 
     LaunchedEffect(isDragging, activeAd?.startMs, nearMute?.startMs) {
         if (isDragging && (activeAd != null || nearMute != null)) {
@@ -95,8 +122,20 @@ fun PlayerSeekBar(
         }
     }
 
+    // R8: which chapter the scrub would land in, with a tick each time it changes.
+    val scrubChapterIndex = if (isDragging && chapters.isNotEmpty()) {
+        chapters.indexOfLast { displayPosMs >= it.startMs }
+    } else {
+        -1
+    }
+    LaunchedEffect(isDragging, scrubChapterIndex) {
+        if (isDragging && scrubChapterIndex >= 0) {
+            haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+        }
+    }
+
     val trackHeight by animateDpAsState(
-        targetValue = if (isDragging) 14.dp else if (compact) 6.dp else 9.dp,
+        targetValue = if (isDragging) 16.dp else if (compact) 6.dp else 12.dp,
         animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
         label = "seekTrackHeight"
     )
@@ -107,7 +146,6 @@ fun PlayerSeekBar(
     val activeTrackColor = MaterialTheme.colorScheme.primary
     val inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
     val thumbColor = if (activeAd != null) MaterialTheme.colorScheme.tertiary else activeTrackColor
-    val thumbBorderColor = MaterialTheme.colorScheme.surface
 
     val posText = DateUtils.formatElapsedTime(displayPosMs / 1000L)
     val remainingAudioMs = (durationMs - displayPosMs).coerceAtLeast(0L)
@@ -127,8 +165,14 @@ fun PlayerSeekBar(
         // Precise scrub floating pill with zoomed-in ±90s mini timeline
         AnimatedVisibility(
             visible = isDragging && durationMs > 0L,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically()
+            enter = fadeIn(),
+            exit = fadeOut(),
+            // R8: the card floats above the bar with no layout height, so the page above doesn't
+            // jump and the chapter row isn't clipped while scrubbing.
+            modifier = Modifier.layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints)
+                layout(placeable.width, 0) { placeable.place(0, -placeable.height) }
+            }
         ) {
             val pillBg = if (activeAd != null) {
                 MaterialTheme.colorScheme.tertiaryContainer
@@ -194,6 +238,16 @@ fun PlayerSeekBar(
                             text = speedLabel,
                             style = MaterialTheme.typography.labelSmall,
                             color = pillFg.copy(alpha = 0.78f)
+                        )
+                    }
+
+                    val scrubChapter = chapters.getOrNull(scrubChapterIndex)
+                    if (scrubChapter != null) {
+                        Text(
+                            text = "${scrubChapterIndex + 1} of ${chapters.size} · ${scrubChapter.title}",
+                            style = MaterialTheme.typography.labelMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
@@ -349,58 +403,69 @@ fun PlayerSeekBar(
             ) {
                 val w = size.width
                 val h = size.height
-                val cr = CornerRadius(h / 2f, h / 2f)
-
-                drawRoundRect(
-                    color = inactiveTrackColor,
-                    topLeft = Offset.Zero,
-                    size = Size(w, h),
-                    cornerRadius = cr
-                )
-
-                val fillW = (displayFraction * w).coerceIn(0f, w)
-                if (fillW > 0f) {
-                    drawRoundRect(
-                        color = activeTrackColor,
-                        topLeft = Offset.Zero,
-                        size = Size(fillW, h),
-                        cornerRadius = cr
-                    )
-                }
-
-                if (durationMs > 0L) {
-                    val dur = durationMs.toFloat()
-                    for (ad in adWindows) {
-                        val x0 = (ad.startMs / dur).coerceIn(0f, 1f) * w
-                        val x1 = (ad.endMs / dur).coerceIn(0f, 1f) * w
-                        drawRoundRect(
-                            color = if (ad.isHighConfidence) adColor else suggestedAdColor,
-                            topLeft = Offset(x0, 0f),
-                            size = Size((x1 - x0).coerceAtLeast(3.dp.toPx()), h),
-                            cornerRadius = cr
+                // Read the live position here (draw phase) so ticks only redraw.
+                val drawFraction = if (isDragging) dragFraction
+                else (positionMsState.value.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
+                val outer = CornerRadius(h / 2f, h / 2f)
+                val inner = CornerRadius(2.dp.toPx(), 2.dp.toPx())
+                // R6: M3E-style track: two rounded segments with a gap at the handle; every mark
+                // is clipped to them, so marks at the ends can't square off the round caps.
+                val handleX = (drawFraction * w).coerceIn(0f, w)
+                val gap = 4.dp.toPx() + (if (isDragging) 3.dp.toPx() else 2.dp.toPx())
+                val leftEnd = handleX - gap
+                val rightStart = handleX + gap
+                val trackPath = Path().apply {
+                    if (leftEnd > 0f) {
+                        addRoundRect(
+                            RoundRect(
+                                left = 0f, top = 0f, right = leftEnd, bottom = h,
+                                topLeftCornerRadius = outer, topRightCornerRadius = inner,
+                                bottomRightCornerRadius = inner, bottomLeftCornerRadius = outer
+                            )
                         )
                     }
-                    for (mute in muteWindows) {
-                        if (!mute.enabled) continue
-                        val x = (mute.startMs / dur).coerceIn(0f, 1f) * w
-                        drawRect(
-                            color = muteTickColor,
-                            topLeft = Offset(x, 0f),
-                            size = Size(2.5.dp.toPx(), h)
+                    if (rightStart < w) {
+                        addRoundRect(
+                            RoundRect(
+                                left = rightStart, top = 0f, right = w, bottom = h,
+                                topLeftCornerRadius = inner, topRightCornerRadius = outer,
+                                bottomRightCornerRadius = outer, bottomLeftCornerRadius = inner
+                            )
                         )
                     }
                 }
+                clipPath(trackPath) {
+                    drawRect(color = inactiveTrackColor, topLeft = Offset.Zero, size = Size(w, h))
+                    if (handleX > 0f) {
+                        drawRect(color = activeTrackColor, topLeft = Offset.Zero, size = Size(handleX, h))
+                    }
+                    if (durationMs > 0L) {
+                        val dur = durationMs.toFloat()
+                        for (ad in adWindows) {
+                            val x0 = (ad.startMs / dur).coerceIn(0f, 1f) * w
+                            val x1 = (ad.endMs / dur).coerceIn(0f, 1f) * w
+                            drawRect(
+                                color = if (ad.isHighConfidence) adColor else suggestedAdColor,
+                                topLeft = Offset(x0, 0f),
+                                size = Size((x1 - x0).coerceAtLeast(3.dp.toPx()), h)
+                            )
+                        }
+                        for (mute in muteWindows) {
+                            if (!mute.enabled) continue
+                            val x = (mute.startMs / dur).coerceIn(0f, 1f) * w
+                            drawRect(
+                                color = muteTickColor,
+                                topLeft = Offset(x, 0f),
+                                size = Size(2.5.dp.toPx(), h)
+                            )
+                        }
+                    }
+                }
 
-                val thumbX = (displayFraction * w).coerceIn(0f, w)
+                val thumbX = (drawFraction * w).coerceIn(0f, w)
                 val thumbW = if (isDragging) 6.dp.toPx() else 4.dp.toPx()
                 val thumbH = if (isDragging) 28.dp.toPx() else 22.dp.toPx()
                 val thumbTop = (h - thumbH) / 2f
-                drawRoundRect(
-                    color = thumbBorderColor,
-                    topLeft = Offset(thumbX - thumbW / 2f - 2.dp.toPx(), thumbTop - 2.dp.toPx()),
-                    size = Size(thumbW + 4.dp.toPx(), thumbH + 4.dp.toPx()),
-                    cornerRadius = CornerRadius(thumbW, thumbW)
-                )
                 drawRoundRect(
                     color = thumbColor,
                     topLeft = Offset(thumbX - thumbW / 2f, thumbTop),

@@ -32,5 +32,15 @@ data class PodcastSubscriptionModel(
     @ColumnInfo("cacheLastModified")
     val cacheLastModified: String = "",
     @ColumnInfo("cacheContentLength")
-    val cacheContentLength: String = ""
+    val cacheContentLength: String = "",
+    /**
+     * Which version of the feed extras (transcripts, chapters) was last applied from a full,
+     * unconditional fetch.  Below [FEED_EXTRAS_VERSION] the next refresh skips the ETag /
+     * Last-Modified headers once, so feeds that keep answering 304 still get their extras.
+     */
+    @ColumnInfo("extrasVersion", defaultValue = "0")
+    val extrasVersion: Int = 0
 )
+
+/** Bump to make every podcast re-read its feed extras once (e.g. after a parser change). */
+const val FEED_EXTRAS_VERSION = 1

@@ -19,6 +19,10 @@ fun ListItemListItem(
 
     colors: ListItemColors = ListItemDefaults.segmentedColors(),
 
+    /** S7: passed down from the list (see PodcastEpisodeListItem). */
+    inQueue: Boolean? = null,
+    playerVm: app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel? = null,
+
     onClickPodcast: (origin: String) -> Unit,
     onClickEpisode: (episode: PodcastEpisodeModel) -> Unit
 ) {
@@ -41,6 +45,9 @@ fun ListItemListItem(
 
             index = index,
             count = count,
+
+            inQueue = inQueue,
+            playerVm = playerVm,
 
             onClick = { onClickEpisode(listItem.episode) }
         )

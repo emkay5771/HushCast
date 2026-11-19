@@ -1,8 +1,10 @@
 package app.podiumpodcasts.podium.ui.navigation
 
 import androidx.activity.BackEventCompat
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -83,6 +85,10 @@ data object Restore : PodiumNavKey(showNavBar = false, showMediaPlayer = false)
 
 @Serializable
 data object OpmlImporting : PodiumNavKey(showNavBar = false, showMediaPlayer = false)
+
+/** I14: the library search, opened from Home's top bar. */
+@Serializable
+data object Search : PodiumNavKey(showNavBar = false)
 @Serializable
 data object Unknown : PodiumNavKey()
 
@@ -96,21 +102,44 @@ fun Navigation(
 
     onBack: () -> Unit = { },
 
+    /** B6: the startup destination; a screen's back arrow on another root returns here. */
+    startKey: NavKey = Home,
+
     onClickPodcast: (origin: String) -> Unit,
     onClickEpisode: (episode: PodcastEpisodeModel) -> Unit
 ) {
     val popOrHome: () -> Unit = {
-        if (backStack.size > 1) {
-            backStack.removeLastOrNull()
-        } else if (backStack.lastOrNull() != Home) {
-            backStack.clear()
-            backStack.add(Home)
+        when (val action = resolveUpButton(backStack.toList(), startKey)) {
+            BackAction.Pop -> backStack.removeLastOrNull()
+            is BackAction.ReplaceRoot -> {
+                backStack.clear()
+                backStack.add(action.key)
+            }
+            BackAction.None -> Unit
         }
     }
 
     val navSpatial = MaterialTheme.motionScheme.defaultSpatialSpec<androidx.compose.ui.unit.IntOffset>()
     val navEffects = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
     val navScaleSpec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
+
+    // M2: fade-through between top-level destinations (M3 motion: the old screen fades out
+    // quickly, then the new one fades in while scaling up slightly).  Pushes and pops inside a
+    // tab keep the shared-axis slide.
+    fun fadeThrough() = (
+        fadeIn(tween(durationMillis = 210, delayMillis = 90, easing = LinearOutSlowInEasing)) +
+            scaleIn(
+                initialScale = 0.92f,
+                animationSpec = tween(durationMillis = 210, delayMillis = 90, easing = LinearOutSlowInEasing)
+            )
+        ).togetherWith(fadeOut(tween(durationMillis = 90, easing = FastOutLinearInEasing)))
+    fun androidx.compose.animation.AnimatedContentTransitionScope<androidx.navigation3.scene.Scene<NavKey>>.isTabSwitch(): Boolean =
+        isTopLevelSwitch(
+            initialKey = initialState.entries.lastOrNull()?.contentKey ?: initialState.key,
+            initialPreviousKeys = initialState.previousEntries.map { it.contentKey },
+            targetKey = targetState.entries.lastOrNull()?.contentKey ?: targetState.key,
+            targetPreviousKeys = targetState.previousEntries.map { it.contentKey }
+        )
 
     NavDisplay(
         modifier = Modifier
@@ -122,13 +151,15 @@ fun Navigation(
             rememberSaveableStateHolderNavEntryDecorator()
         ),
         transitionSpec = {
-            (slideInHorizontally(animationSpec = navSpatial) { it / 12 } + fadeIn(animationSpec = navEffects))
+            if (isTabSwitch()) fadeThrough()
+            else (slideInHorizontally(animationSpec = navSpatial) { it / 12 } + fadeIn(animationSpec = navEffects))
                 .togetherWith(
                     slideOutHorizontally(animationSpec = navSpatial) { -it / 16 } + fadeOut(animationSpec = navEffects)
                 )
         },
         popTransitionSpec = {
-            (slideInHorizontally(animationSpec = navSpatial) { -it / 14 } + fadeIn(animationSpec = navEffects))
+            if (isTabSwitch()) fadeThrough()
+            else (slideInHorizontally(animationSpec = navSpatial) { -it / 14 } + fadeIn(animationSpec = navEffects))
                 .togetherWith(
                     slideOutHorizontally(animationSpec = navSpatial) { it / 10 } + fadeOut(animationSpec = navEffects)
                 ).apply {
@@ -162,6 +193,7 @@ fun Navigation(
                         onClickAddPodcast = { backStack.add(AddPodcast) },
 
                         onClickDiscover = { backStack.add(Discover) },
+                        onClickSearch = { backStack.add(Search) },
 
                         onClickPodcast = onClickPodcast,
                         onClickEpisode = onClickEpisode
@@ -189,6 +221,15 @@ fun Navigation(
                             backStack.add(List(it))
                         }
                     )
+                }
+
+                is Search -> NavEntry(key) {
+                    app.podiumpodcasts.podium.ui.route.library.LibrarySearchRoute(
+                        onClickPodcast = onClickPodcast,
+                        onClickEpisode = onClickEpisode
+                    ) {
+                        popOrHome()
+                    }
                 }
 
                 is History -> NavEntry(key) {

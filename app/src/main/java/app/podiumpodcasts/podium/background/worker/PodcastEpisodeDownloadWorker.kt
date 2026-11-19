@@ -53,16 +53,7 @@ class PodcastEpisodeDownloadWorker(
         )
 
         return try {
-            runCatching {
-                setForeground(
-                    createDownloadForegroundInfo(
-                        episodeId = episodeId,
-                        title = "Downloading episode…",
-                        sourceLabel = "Preparing download…",
-                        percent = 0
-                    )
-                )
-            }
+            ensureNotificationChannels(applicationContext)
 
             var lastTitle = ""
             var lastNotifPct = 0
@@ -76,7 +67,21 @@ class PodcastEpisodeDownloadWorker(
                 forceReprocess = forceReprocess,
                 reprocessStage = reprocessStage,
                 isFinalAttempt = isFinalAttempt,
-                isRetry = runAttemptCount > 0
+                isRetry = runAttemptCount > 0,
+                // S12: only show the foreground notification once a download slot is ours, not
+                // while this work waits behind other downloads.
+                onSlotAcquired = {
+                    runCatching {
+                        setForeground(
+                            createDownloadForegroundInfo(
+                                episodeId = episodeId,
+                                title = "Downloading episode…",
+                                sourceLabel = "Preparing download…",
+                                percent = 0
+                            )
+                        )
+                    }
+                }
             ) { title, sourceLabel, pct ->
                 if (title.isNotBlank()) lastTitle = title
                 val clampedPct = maxOf(lastNotifPct, pct.coerceIn(0, 100))
@@ -196,14 +201,7 @@ class PodcastEpisodeDownloadWorker(
         percent: Int,
         isAnalysis: Boolean = true
     ): ForegroundInfo {
-        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val channel = NotificationChannel(
-            DOWNLOAD_CHANNEL_ID,
-            "Episode Downloads",
-            NotificationManager.IMPORTANCE_LOW
-        )
-        manager.createNotificationChannel(channel)
-
+        ensureNotificationChannels(applicationContext)
         val cancelIntent = WorkManager.getInstance(applicationContext).createCancelPendingIntent(id)
         val clamped = percent.coerceIn(0, 100)
         val chipText = if (clamped > 0) "$clamped%" else "…"
@@ -247,12 +245,7 @@ class PodcastEpisodeDownloadWorker(
         method: app.hushcast.automute.engine.DownloadAnalysisMethod
     ) {
         val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val channel = NotificationChannel(
-            DOWNLOAD_COMPLETE_CHANNEL_ID,
-            "Completed Episode Downloads",
-            NotificationManager.IMPORTANCE_DEFAULT
-        )
-        manager.createNotificationChannel(channel)
+        ensureNotificationChannels(applicationContext)
 
         val statusText = when (method) {
             app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS -> "Download complete"
@@ -299,6 +292,33 @@ class PodcastEpisodeDownloadWorker(
     companion object {
         private const val DOWNLOAD_CHANNEL_ID = "episode_downloads"
         private const val DOWNLOAD_COMPLETE_CHANNEL_ID = "episode_downloads_complete"
+
+        @Volatile
+        private var channelsCreated = false
+
+        /** S12: the download channels are created once per process, not on every progress update. */
+        private fun ensureNotificationChannels(context: Context) {
+            if (channelsCreated) return
+            synchronized(this) {
+                if (channelsCreated) return
+                val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                manager.createNotificationChannels(
+                    listOf(
+                        NotificationChannel(
+                            DOWNLOAD_CHANNEL_ID,
+                            "Episode Downloads",
+                            NotificationManager.IMPORTANCE_LOW
+                        ),
+                        NotificationChannel(
+                            DOWNLOAD_COMPLETE_CHANNEL_ID,
+                            "Completed Episode Downloads",
+                            NotificationManager.IMPORTANCE_DEFAULT
+                        )
+                    )
+                )
+                channelsCreated = true
+            }
+        }
 
         fun generateUniqueWorkName(episodeId: String): String {
             return "app.podiumpodcasts.podium.background.worker.PodcastEpisodeDownloadWorker:$episodeId"

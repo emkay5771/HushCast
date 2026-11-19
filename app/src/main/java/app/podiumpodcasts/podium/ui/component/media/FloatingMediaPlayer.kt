@@ -136,9 +136,9 @@ fun FloatingMediaPlayer(
                 enter = fadeIn() + scaleIn(initialScale = 0.94f) + slideInVertically { it },
                 exit = fadeOut() + scaleOut(targetScale = 0.94f) + slideOutVertically { it }
             ) {
-                SwitchableDynamicMaterialExpressiveTheme(
+                app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.PlayerArtworkTheme(
                     enable = enableArtworkColors.value,
-                    seedColor = Color(vm.metadataImageSeedColor ?: 1)
+                    seedColor = vm.metadataImageSeedColor
                 ) {
                     val cardShape = RoundedCornerShape(20.dp)
                     ElevatedCard(
@@ -514,7 +514,7 @@ fun FloatingMediaPlayer(
                                 val durMs = vm.currentDuration
                                 if (durMs > 0L && (adEntities.value.isNotEmpty() || muteEntities.value.isNotEmpty())) {
                                     val adColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.8f)
-                                    val suggestedAdColor = Color(0xFFFFB300).copy(alpha = 0.85f)
+                                    val suggestedAdColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.85f)
                                     val muteTickColor = MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
                                     androidx.compose.foundation.Canvas(modifier = Modifier.matchParentSize()) {
                                         val w = size.width

@@ -23,6 +23,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.podiumpodcasts.podium.SubscriptionsBadgeMode
 import app.podiumpodcasts.podium.SubscriptionsLayout
@@ -45,7 +47,9 @@ fun PodcastGridOptionsSheet(
     onToggleReorderMode: (Boolean) -> Unit,
     onNewFolder: () -> Unit,
     onOrganizeFolders: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    /** False where folders aren't shown (Subscriptions): hides the folder buttons. */
+    showFolderActions: Boolean = true
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -53,15 +57,15 @@ fun PodcastGridOptionsSheet(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp)
         ) {
-            Text("Podcasts Options", style = Typography.titleLargeEmphasized)
+            Text("Podcast options", style = Typography.titleLargeEmphasized, modifier = Modifier.semantics { heading() })
             Spacer(Modifier.height(16.dp))
 
-            Text("Layout", style = Typography.labelLarge)
+            Text("Layout", style = Typography.labelLarge, modifier = Modifier.semantics { heading() })
             Spacer(Modifier.height(8.dp))
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 val options = listOf(
-                    SubscriptionsLayout.LARGE_GRID to "Large Grid",
-                    SubscriptionsLayout.SMALL_GRID to "Small Grid",
+                    SubscriptionsLayout.LARGE_GRID to "Large grid",
+                    SubscriptionsLayout.SMALL_GRID to "Small grid",
                     SubscriptionsLayout.LIST to "List"
                 )
                 options.forEachIndexed { idx, (value, label) ->
@@ -74,11 +78,11 @@ fun PodcastGridOptionsSheet(
             }
 
             Spacer(Modifier.height(16.dp))
-            Text("Sort by", style = Typography.labelLarge)
+            Text("Sort by", style = Typography.labelLarge, modifier = Modifier.semantics { heading() })
             Spacer(Modifier.height(8.dp))
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 val options = listOf(
-                    SubscriptionsSort.RECENTLY_ADDED to "New Episodes",
+                    SubscriptionsSort.RECENTLY_ADDED to "New episodes",
                     SubscriptionsSort.A_Z to "A–Z",
                     SubscriptionsSort.CUSTOM to "Custom"
                 )
@@ -92,7 +96,7 @@ fun PodcastGridOptionsSheet(
             }
 
             Spacer(Modifier.height(16.dp))
-            Text("Badges", style = Typography.labelLarge)
+            Text("Badges", style = Typography.labelLarge, modifier = Modifier.semantics { heading() })
             Spacer(Modifier.height(8.dp))
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                 val options = listOf(
@@ -116,7 +120,7 @@ fun PodcastGridOptionsSheet(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Reorder mode (drag & drop)", style = Typography.bodyLarge)
+                    Text("Reorder by dragging", style = Typography.bodyLarge)
                     Switch(
                         checked = reorderMode,
                         onCheckedChange = onToggleReorderMode
@@ -139,6 +143,7 @@ fun PodcastGridOptionsSheet(
                 }
             }
 
+            if (showFolderActions) {
             Spacer(Modifier.height(16.dp))
             OutlinedButton(
                 onClick = {
@@ -149,7 +154,7 @@ fun PodcastGridOptionsSheet(
             ) {
                 Icon(Icons.Rounded.Add, contentDescription = null)
                 Spacer(Modifier.size(8.dp))
-                Text("New Folder")
+                Text("New folder")
             }
             if (hasFolders) {
                 Spacer(Modifier.height(8.dp))
@@ -160,8 +165,9 @@ fun PodcastGridOptionsSheet(
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Organize Folders")
+                    Text("Organize folders")
                 }
+            }
             }
             Spacer(Modifier.height(24.dp))
         }

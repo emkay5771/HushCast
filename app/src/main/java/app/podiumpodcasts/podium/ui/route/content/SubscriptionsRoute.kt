@@ -120,6 +120,7 @@ fun SubscriptionsRoute(
                     scope.launch { settingsRepository.appearance.setSubscriptionsSort(SubscriptionsSort.CUSTOM) }
                 }
             },
+            showFolderActions = false,
             onNewFolder = { },
             onOrganizeFolders = { },
             onDismiss = { showOptionsSheet = false }
@@ -141,7 +142,7 @@ fun SubscriptionsRoute(
                     IconButton(onClick = { showOptionsSheet = true }) {
                         Icon(
                             imageVector = Icons.Rounded.Tune,
-                            contentDescription = "Subscriptions Options"
+                            contentDescription = "Subscription options"
                         )
                     }
                 }

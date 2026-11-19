@@ -167,6 +167,9 @@
     <string name="route_podcast_settings">Podcast-Einstellungen</string>
     <string name="route_restore">Vom Backup wiederherstellen</string>
     <string name="route_restore_action_restart_app">App neustarten</string>
+    <string name="route_restore_action_restore">Wiederherstellen</string>
+    <string name="route_restore_confirm_title">Daten ersetzen?</string>
+    <string name="common_action_cancel">Abbrechen</string>
     <string name="route_restore_confirmation">Das Wiederherstellen von einer Backup-Datei wird die Datenbank überschreiben. Alle Daten gehen verloren.</string>
     <string name="route_restore_invalid_backup_file">Ungültige Backup-Datei</string>
     <string name="route_restore_invalid_backup_file_text">Bitte wähle eine gültige %1$s-Backup-Datei aus.</string>

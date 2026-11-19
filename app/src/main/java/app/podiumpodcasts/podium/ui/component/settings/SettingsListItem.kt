@@ -12,6 +12,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -32,8 +33,12 @@ fun SettingsListItem(
 
     leadingContent: (@Composable () -> Unit)? = icon?.let {
         {
+            // The row's label already names it, so the icon is decorative: TalkBack would
+            // otherwise read the label twice when the icon repeats it as its description.
             Box(
-                Modifier.padding(8.dp),
+                Modifier
+                    .padding(8.dp)
+                    .clearAndSetSemantics { },
                 contentAlignment = Alignment.Center
             ) {
                 it()

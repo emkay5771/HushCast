@@ -174,7 +174,37 @@ fun DiscoverRoute(
                 PrimaryScrollableTabRow(
                     selectedTabIndex = selectedTopic.ordinal,
                     edgePadding = 16.dp,
-                    minTabWidth = 60.dp
+                    minTabWidth = 60.dp,
+                    indicator = {
+                        if (androidx.compose.ui.platform.LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl) {
+                            androidx.compose.material3.TabRowDefaults.PrimaryIndicator(
+                                Modifier.tabIndicatorOffset(selectedTopic.ordinal, matchContentSize = true),
+                                width = androidx.compose.ui.unit.Dp.Unspecified
+                            )
+                        } else {
+                            // M7: the indicator follows the pager while it's dragged, instead of
+                            // jumping when the swipe settles.  Read during layout, so dragging
+                            // doesn't recompose the tab row.
+                            androidx.compose.material3.TabRowDefaults.PrimaryIndicator(
+                                Modifier.tabIndicatorLayout { measurable, constraints, tabPositions ->
+                                    if (tabPositions.isEmpty()) return@tabIndicatorLayout layout(0, 0) { }
+                                    val (left, width) = pagerIndicatorSpan(
+                                        tabPositions = tabPositions,
+                                        currentPage = pagerState.currentPage,
+                                        offsetFraction = pagerState.currentPageOffsetFraction
+                                    )
+                                    val widthPx = width.roundToPx().coerceAtLeast(0)
+                                    val placeable = measurable.measure(
+                                        constraints.copy(minWidth = widthPx, maxWidth = widthPx)
+                                    )
+                                    layout(placeable.width, placeable.height) {
+                                        placeable.place(left.roundToPx(), 0)
+                                    }
+                                },
+                                width = androidx.compose.ui.unit.Dp.Unspecified
+                            )
+                        }
+                    }
                 ) {
                     Topics.entries.forEachIndexed { index, item ->
                         Tab(
@@ -276,4 +306,23 @@ fun DiscoverRoute(
             showCountryCodeSelector.value = false
         }
     )
+}
+/**
+ * M7: where the tab indicator sits while the pager is between pages: the content span of the
+ * current tab, moved toward the next tab by the drag fraction.
+ */
+private fun pagerIndicatorSpan(
+    tabPositions: List<androidx.compose.material3.TabPosition>,
+    currentPage: Int,
+    offsetFraction: Float
+): Pair<androidx.compose.ui.unit.Dp, androidx.compose.ui.unit.Dp> {
+    val page = currentPage.coerceIn(0, tabPositions.lastIndex)
+    val target = (if (offsetFraction > 0f) page + 1 else page - 1).coerceIn(0, tabPositions.lastIndex)
+    val fraction = kotlin.math.abs(offsetFraction).coerceIn(0f, 1f)
+    val cur = tabPositions[page]
+    val next = tabPositions[target]
+    fun androidx.compose.material3.TabPosition.contentLeft() = left + (width - contentWidth) / 2
+    val left = androidx.compose.ui.unit.lerp(cur.contentLeft(), next.contentLeft(), fraction)
+    val width = androidx.compose.ui.unit.lerp(cur.contentWidth, next.contentWidth, fraction)
+    return left to width
 }

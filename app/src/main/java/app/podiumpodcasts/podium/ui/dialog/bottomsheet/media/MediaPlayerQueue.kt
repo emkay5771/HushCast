@@ -78,6 +78,7 @@ fun MediaPlayerQueueBottomSheet(
     onDismiss: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
 
     val settingsRepository = LocalSettingsRepository.current
     val vm = viewModel<MediaPlayerViewModel>()
@@ -117,6 +118,8 @@ fun MediaPlayerQueueBottomSheet(
                 if (dragFromIdx == -1) dragFromIdx = fromQ
                 dragToIdx = toQ
                 localQueue.add(toQ, localQueue.removeAt(fromQ))
+                // M10: a tick each time the dragged episode passes another.
+                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.SegmentFrequentTick)
             }
         }
     }
@@ -148,14 +151,15 @@ fun MediaPlayerQueueBottomSheet(
         )
     }
 
-    SwitchableDynamicMaterialExpressiveTheme(
+    PlayerArtworkTheme(
         enable = enableArtworkColors.value,
-        seedColor = Color(vm.metadataImageSeedColor ?: 1)
+        seedColor = vm.metadataImageSeedColor
     ) {
         ModalBottomSheet(
             sheetState = sheetState,
             onDismissRequest = onDismiss
         ) {
+            PlayerSheetBlur()
             Box(modifier = Modifier.fillMaxWidth()) {
             LazyColumn(
                 state = lazyListState,
@@ -357,11 +361,13 @@ fun MediaPlayerQueueBottomSheet(
                                         .animateItem()
                                         .longPressDraggableHandle(
                                             onDragStarted = {
+                                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.GestureThresholdActivate)
                                                 isDragging = true
                                                 dragFromIdx = -1
                                                 dragToIdx = -1
                                             },
                                             onDragStopped = {
+                                                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.GestureEnd)
                                                 if (dragFromIdx >= 0 && dragToIdx >= 0 && dragFromIdx != dragToIdx) {
                                                     vm.moveQueueItem(dragFromIdx, dragToIdx)
                                                 }
@@ -372,11 +378,13 @@ fun MediaPlayerQueueBottomSheet(
                                         ),
                                     dragModifier = Modifier.draggableHandle(
                                         onDragStarted = {
+                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.GestureThresholdActivate)
                                             isDragging = true
                                             dragFromIdx = -1
                                             dragToIdx = -1
                                         },
                                         onDragStopped = {
+                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.GestureEnd)
                                             if (dragFromIdx >= 0 && dragToIdx >= 0 && dragFromIdx != dragToIdx) {
                                                 vm.moveQueueItem(dragFromIdx, dragToIdx)
                                             }

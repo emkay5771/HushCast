@@ -160,6 +160,15 @@ Java_app_hushcast_automute_nativebridge_LlamaJni_embed(JNIEnv * env, jclass, jlo
     return result;
 }
 
+// S11: the analyzer lowers the thread count between batches (heat, or playback started).
+extern "C" JNIEXPORT void JNICALL
+Java_app_hushcast_automute_nativebridge_LlamaJni_setThreads(JNIEnv *, jclass, jlong h, jint threads) {
+    auto * e = reinterpret_cast<Embedder *>(h);
+    if (!e || !e->ctx) return;
+    const int n = std::max(1, (int) threads);
+    llama_set_n_threads(e->ctx, n, n);
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_app_hushcast_automute_nativebridge_LlamaJni_free(JNIEnv *, jclass, jlong h) {
     auto * e = reinterpret_cast<Embedder *>(h);

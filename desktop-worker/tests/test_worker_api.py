@@ -617,3 +617,101 @@ def test_v9_long_poll_and_v10_stage_fields(tmp_path: Path) -> None:
 
 
 
+def _poll_until(client, job_id: str, headers: dict, state: str = "READY", tries: int = 100) -> dict:
+    body: dict = {}
+    for _ in range(tries):
+        body = client.get(f"/v1/jobs/{job_id}", headers=headers).json()
+        if body["state"] == state:
+            return body
+        time.sleep(0.02)
+    return body
+
+
+def test_v17_delete_audio_keeps_bundle_and_is_idempotent(tmp_path: Path) -> None:
+    payload = b"AUDIO_TO_DELETE"
+    sha = hashlib.sha256(payload).hexdigest()
+
+    async def dl(url: str, dest: Path, on_bytes):
+        dest.write_bytes(payload)
+        return sha, "audio/mpeg"
+
+    cache = WorkerCache(tmp_path / "cache")
+    app = create_app(cache=cache, backend=FakeBackend(), token="tok", downloader=dl)
+    headers = {"Authorization": "Bearer tok"}
+    with TestClient(app) as client:
+        jid = client.post("/v1/jobs", headers=headers, json={"episodeId": "ep-d", "audioUrl": "https://example.com/d.mp3"}).json()["jobId"]
+        assert _poll_until(client, jid, headers)["state"] == "READY"
+        assert cache.audio_path(sha).exists()
+
+        assert client.delete(f"/v1/episodes/{sha}/audio").status_code == 401
+        res = client.delete(f"/v1/episodes/{sha}/audio", headers=headers)
+        assert res.status_code == 204 and res.content == b""
+        assert not cache.audio_path(sha).exists()
+        assert client.get(f"/v1/episodes/{sha}/bundle", headers=headers).status_code == 200
+        assert client.get(f"/v1/episodes/{sha}/audio", headers=headers).status_code == 404
+        eps = client.get("/v1/episodes", headers=headers).json()
+        assert eps[0]["fileSha256"] == sha and eps[0]["audioBytes"] == 0
+        assert cache._index["by_sha"][sha]["hasAudio"] is False
+
+        # Already gone, or never there: still 204. Bad input: 400.
+        assert client.delete(f"/v1/episodes/{sha}/audio", headers=headers).status_code == 204
+        assert client.delete(f"/v1/episodes/{'c' * 64}/audio", headers=headers).status_code == 204
+        assert client.delete("/v1/episodes/xyz/audio", headers=headers).status_code == 400
+
+        # A later resubmit re-downloads the audio and matches the kept bundle by SHA-256.
+        again = client.post("/v1/jobs", headers=headers, json={"episodeId": "ep-d", "audioUrl": "https://example.com/d.mp3"}).json()
+        assert _poll_until(client, again["jobId"], headers)["stageLabel"] == "Ready (matched existing SHA-256)"
+
+
+def test_v17_delete_audio_waits_for_running_job(tmp_path: Path) -> None:
+    import threading
+
+    payload = b"AUDIO_IN_USE"
+    sha = hashlib.sha256(payload).hexdigest()
+    gate = threading.Event()
+    started = threading.Event()
+
+    async def dl(url: str, dest: Path, on_bytes):
+        dest.write_bytes(payload)
+        return sha, "audio/mpeg"
+
+    class GatedBackend(FakeBackend):
+        def analyze_with_embeddings(self, **kwargs):
+            started.set()
+            assert gate.wait(5.0)
+            assert kwargs["audio_path"].exists(), "audio deleted under a running job"
+            return super().analyze_with_embeddings(**kwargs)
+
+    cache = WorkerCache(tmp_path / "cache")
+    app = create_app(cache=cache, backend=GatedBackend(), token="tok", downloader=dl)
+    headers = {"Authorization": "Bearer tok"}
+    with TestClient(app) as client:
+        jid = client.post("/v1/jobs", headers=headers, json={"episodeId": "ep-g", "audioUrl": "https://example.com/g.mp3"}).json()["jobId"]
+        assert started.wait(5.0)
+        res = client.delete(f"/v1/episodes/{sha}/audio", headers=headers)
+        assert res.status_code == 204
+        assert cache.audio_path(sha).exists()  # deferred: the job still reads it
+        gate.set()
+        assert _poll_until(client, jid, headers)["state"] == "READY"
+        for _ in range(100):
+            if not cache.audio_path(sha).exists():
+                break
+            time.sleep(0.02)
+        assert not cache.audio_path(sha).exists()
+        assert cache.get_bundle(sha) is not None
+
+
+def test_health_reports_queue_position_and_cold_start(tmp_path: Path) -> None:
+    from hushcast_worker.models import health_schema_problems
+
+    class WarmBackend(FakeBackend):
+        def models_loaded(self) -> bool:
+            return True
+
+    for backend, cold in ((FakeBackend(), True), (WarmBackend(), False)):
+        app = create_app(cache=WorkerCache(tmp_path / f"cache-{cold}"), backend=backend, token="t")
+        with TestClient(app) as client:
+            body = client.get("/v1/health").json()
+        assert health_schema_problems(body, expect_deployment="local") == []
+        assert body["queueDepth"] == 0 and body["queuePosition"] == 0
+        assert body["coldStart"] is cold

@@ -46,8 +46,11 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import app.podiumpodcasts.podium.R
+import androidx.compose.runtime.derivedStateOf
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -77,7 +80,11 @@ fun SwipeableItem(
     val endRevealPx = with(density) { (actionSlotWidthDp * endSlots.size).toPx() }
     val halfThresholdPx = with(density) { 56.dp.toPx() }
     val flingVelocityThresholdPx = with(density) { 600.dp.toPx() }
-    var itemWidthPx by remember { mutableFloatStateOf(0f) }
+    val minFullSwipePx = with(density) { 180.dp.toPx() }
+    // S7: the row width is kept in a plain holder, not snapshot state, so a size change doesn't
+    // trigger another recomposition.  It's only read while dragging.
+    val itemWidthHolder = remember { FloatArray(1) }
+    fun currentFullSwipeThresholdPx(): Float = maxOf(minFullSwipePx, itemWidthHolder[0] * 0.50f)
 
     val offsetX = remember { Animatable(0f) }
     var wasOverFullThreshold by remember { mutableStateOf(false) }
@@ -91,51 +98,78 @@ fun SwipeableItem(
         if (handler == null) return
         scope.launch {
             val result = handler()
-            if (!result.isDismissed) {
-                offsetX.animateTo(0f, spatialSpec)
-            }
-            if (result.message.isNotBlank()) {
-                snackbarHostState.currentSnackbarData?.dismiss()
-                val snackBarResult = snackbarHostState.showSnackbar(
-                    message = result.message,
-                    actionLabel = undo,
-                    duration = SnackbarDuration.Short
-                )
-                if (snackBarResult == SnackbarResult.ActionPerformed) {
-                    result.onUndo()
+            var settled = false
+            try {
+                if (!result.isDismissed) {
+                    offsetX.animateTo(0f, spatialSpec)
+                }
+                if (result.message.isNotBlank()) {
+                    snackbarHostState.currentSnackbarData?.dismiss()
+                    val snackBarResult = snackbarHostState.showSnackbar(
+                        message = result.message,
+                        actionLabel = if (result.showUndo) undo else null,
+                        duration = SnackbarDuration.Short
+                    )
+                    settled = true
+                    if (snackBarResult == SnackbarResult.ActionPerformed) {
+                        result.onUndo()
+                    } else {
+                        result.onTimeout?.invoke()
+                    }
+                } else {
+                    settled = true
+                    result.onTimeout?.invoke()
+                }
+            } finally {
+                // Item 2: if the screen closes while the snackbar is up, the action stands
+                // (the user didn't undo it), so finish it even though this scope is cancelled.
+                if (!settled) {
+                    withContext(NonCancellable) { result.onTimeout?.invoke() }
                 }
             }
         }
     }
 
-    val fullSwipeThresholdPx = maxOf(
-        with(density) { 180.dp.toPx() },
-        itemWidthPx * 0.50f
-    )
-    val isFullStart = offsetX.value >= fullSwipeThresholdPx && startAction != null
-    val isFullEnd = offsetX.value <= -fullSwipeThresholdPx && endAction != null
+    // S7: derived, so a drag only recomposes this row when the tray side or the "full swipe"
+    // state changes, not on every pixel.
+    val swipeSide by remember {
+        derivedStateOf { if (offsetX.value > 0f) 1 else if (offsetX.value < 0f) -1 else 0 }
+    }
+    val hasStart = startAction != null
+    val hasEnd = endAction != null
+    val isFullStart by remember(hasStart) {
+        derivedStateOf { hasStart && offsetX.value >= currentFullSwipeThresholdPx() }
+    }
+    val isFullEnd by remember(hasEnd) {
+        derivedStateOf { hasEnd && offsetX.value <= -currentFullSwipeThresholdPx() }
+    }
 
+    // M11: TalkBack lists each swipe action by its name.
+    val startPrimaryLabel = startAction?.label?.invoke()
+    val startSecondaryLabel = secondaryStartAction?.label?.invoke()
+    val endPrimaryLabel = endAction?.label?.invoke()
+    val endSecondaryLabel = secondaryEndAction?.label?.invoke()
     val a11yActions = buildList {
         if (startPrimaryHandler != null) {
-            add(CustomAccessibilityAction("Primary start action") {
+            add(CustomAccessibilityAction(startPrimaryLabel.orIfBlank("Swipe right action")) {
                 executeAction(startPrimaryHandler)
                 true
             })
         }
         if (startSecondaryHandler != null) {
-            add(CustomAccessibilityAction("Secondary start action") {
+            add(CustomAccessibilityAction(startSecondaryLabel.orIfBlank("Second swipe right action")) {
                 executeAction(startSecondaryHandler)
                 true
             })
         }
         if (endPrimaryHandler != null) {
-            add(CustomAccessibilityAction("Primary end action") {
+            add(CustomAccessibilityAction(endPrimaryLabel.orIfBlank("Swipe left action")) {
                 executeAction(endPrimaryHandler)
                 true
             })
         }
         if (endSecondaryHandler != null) {
-            add(CustomAccessibilityAction("Secondary end action") {
+            add(CustomAccessibilityAction(endSecondaryLabel.orIfBlank("Second swipe left action")) {
                 executeAction(endSecondaryHandler)
                 true
             })
@@ -145,7 +179,7 @@ fun SwipeableItem(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .onSizeChanged { itemWidthPx = it.width.toFloat() }
+            .onSizeChanged { itemWidthHolder[0] = it.width.toFloat() }
             .semantics {
                 if (a11yActions.isNotEmpty()) {
                     customActions = a11yActions
@@ -153,7 +187,7 @@ fun SwipeableItem(
             }
     ) {
         // Background action tray
-        if (offsetX.value > 0f && startSlots.isNotEmpty()) {
+        if (swipeSide > 0 && startSlots.isNotEmpty()) {
             val primaryStyle = startAction!!.style()
             val bgColor by animateColorAsState(
                 if (isFullStart) primaryStyle.activeBackgroundColor else primaryStyle.backgroundColor,
@@ -178,12 +212,12 @@ fun SwipeableItem(
                     modifier = Modifier
                         .width(actionSlotWidthDp)
                         .fillMaxHeight()
-                        .clickable { executeAction(startPrimaryHandler) },
+                        .clickable(onClickLabel = startPrimaryLabel) { executeAction(startPrimaryHandler) },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = primaryStyleResolved.icon,
-                        contentDescription = null,
+                        contentDescription = startPrimaryLabel,
                         tint = primaryIconTint,
                         modifier = Modifier.graphicsLayer {
                             val s = if (isFullStart) 1.25f else 1.0f
@@ -199,18 +233,18 @@ fun SwipeableItem(
                             .width(actionSlotWidthDp)
                             .fillMaxHeight()
                             .background(secStyle.backgroundColor.copy(alpha = 0.85f))
-                            .clickable { executeAction(startSecondaryHandler) },
+                            .clickable(onClickLabel = startSecondaryLabel) { executeAction(startSecondaryHandler) },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = secStyle.icon,
-                            contentDescription = null,
+                            contentDescription = startSecondaryLabel,
                             tint = secStyle.iconTint
                         )
                     }
                 }
             }
-        } else if (offsetX.value < 0f && endSlots.isNotEmpty()) {
+        } else if (swipeSide < 0 && endSlots.isNotEmpty()) {
             val primaryStyle = endAction!!.style()
             val bgColor by animateColorAsState(
                 if (isFullEnd) primaryStyle.activeBackgroundColor else primaryStyle.backgroundColor,
@@ -232,12 +266,12 @@ fun SwipeableItem(
                             .width(actionSlotWidthDp)
                             .fillMaxHeight()
                             .background(secStyle.backgroundColor.copy(alpha = 0.85f))
-                            .clickable { executeAction(endSecondaryHandler) },
+                            .clickable(onClickLabel = endSecondaryLabel) { executeAction(endSecondaryHandler) },
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = secStyle.icon,
-                            contentDescription = null,
+                            contentDescription = endSecondaryLabel,
                             tint = secStyle.iconTint
                         )
                     }
@@ -252,12 +286,12 @@ fun SwipeableItem(
                     modifier = Modifier
                         .width(actionSlotWidthDp)
                         .fillMaxHeight()
-                        .clickable { executeAction(endPrimaryHandler) },
+                        .clickable(onClickLabel = endPrimaryLabel) { executeAction(endPrimaryHandler) },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = primaryStyleResolved.icon,
-                        contentDescription = null,
+                        contentDescription = endPrimaryLabel,
                         tint = primaryIconTint,
                         modifier = Modifier.graphicsLayer {
                             val s = if (isFullEnd) 1.25f else 1.0f
@@ -279,6 +313,7 @@ fun SwipeableItem(
                     enabled = startAction != null || endAction != null,
                     state = rememberDraggableState { rawDelta ->
                         val delta = rawDelta * dirSign
+                        val fullSwipeThresholdPx = currentFullSwipeThresholdPx()
                         val minBound = if (endAction != null) -(fullSwipeThresholdPx * 1.15f) else 0f
                         val maxBound = if (startAction != null) (fullSwipeThresholdPx * 1.15f) else 0f
                         val next = (offsetX.value + delta).coerceIn(minBound, maxBound)
@@ -292,6 +327,7 @@ fun SwipeableItem(
                     },
                     onDragStopped = { rawVelocity ->
                         val cur = offsetX.value
+                        val fullSwipeThresholdPx = currentFullSwipeThresholdPx()
                         val velocity = rawVelocity * dirSign
                         wasOverFullThreshold = false
                         when {
@@ -319,3 +355,4 @@ fun SwipeableItem(
         )
     }
 }
+private fun String?.orIfBlank(fallback: String): String = if (this.isNullOrBlank()) fallback else this

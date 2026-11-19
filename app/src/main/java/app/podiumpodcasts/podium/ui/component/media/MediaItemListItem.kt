@@ -92,7 +92,7 @@ fun MediaItemListItem(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Rounded.DragHandle,
-                    contentDescription = "Reorder",
+                    contentDescription = "Reorder episode",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = dragModifier.size(24.dp)
                 )
@@ -120,8 +120,8 @@ fun MediaItemListItem(
                 )
 
                 val badgeLabel = when (readinessBadge) {
-                    ReadinessBadge.READY -> "AI Ready"
-                    ReadinessBadge.WORD_MUTE_READY -> "Word-Mute"
+                    ReadinessBadge.READY -> "AI ready"
+                    ReadinessBadge.WORD_MUTE_READY -> "Word mute"
                     ReadinessBadge.ANALYZING -> "${analysisStatus?.progressPercent ?: 0}%"
                     ReadinessBadge.NOT_PROCESSED -> null
                 }
@@ -207,40 +207,29 @@ fun MediaItemListItem(
                         IconButton(
                             onClick = {
                                 scope.launch {
-                                    val bundle = withContext(Dispatchers.IO) {
-                                        runCatching { appDb.podcastEpisodes().getSync(episodeId) }.getOrNull()
-                                    }
-                                    val audioFile = bundle?.episode?.craftDownloadFile(context)
-                                    if (audioFile != null && audioFile.exists()) {
-                                        autoMuteDb.dao().upsertStatus(
-                                            app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
-                                                episodeId = episodeId,
-                                                badge = ReadinessBadge.ANALYZING.name,
-                                                progressPercent = 0,
-                                                stageLabel = "Queued for AI analysis…"
-                                            )
-                                        )
-                                        EpisodeAnalysisWorker.enqueueAnalyzeNow(
-                                            context = context,
-                                            episodeId = episodeId,
-                                            audioPath = audioFile.absolutePath,
-                                            actionMode = HushCastEngineBridge.defaultActionMode,
-                                            episodeTitle = bundle.episode.title
-                                        )
+                                    // Same routing as the player: worker if set up, else on the phone
+                                    // (replacing any queued job), else offer a download.
+                                    val outcome = app.podiumpodcasts.podium.ui.hushcast.HushCastAnalyze.start(
+                                        context = context,
+                                        db = appDb,
+                                        episodeId = episodeId,
+                                        actionMode = HushCastEngineBridge.defaultActionMode
+                                    )
+                                    if (outcome == app.podiumpodcasts.podium.ui.hushcast.HushCastAnalyze.Outcome.NEEDS_DOWNLOAD) {
+                                        showAnalyzeDialog = true
+                                    } else {
                                         Toast.makeText(
                                             context,
-                                            "Queued for HushCast AI analysis",
+                                            app.podiumpodcasts.podium.ui.hushcast.HushCastAnalyze.message(outcome),
                                             Toast.LENGTH_SHORT
                                         ).show()
-                                    } else {
-                                        showAnalyzeDialog = true
                                     }
                                 }
                             }
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.AutoAwesome,
-                                contentDescription = "Analyze with HushCast AI"
+                                contentDescription = "Process with HushCast"
                             )
                         }
                     }

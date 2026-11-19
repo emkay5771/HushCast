@@ -80,6 +80,11 @@ fun HistoryRoute(
         .collectAsLazyPagingItems()
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
+    val playerVm = viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+    // One set for the whole list instead of a queue lookup per row.
+    val queueEpisodeIds = remember(playerVm) {
+        androidx.compose.runtime.derivedStateOf { playerVm.queue.toHashSet() }
+    }
 
     Scaffold(
         Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -129,6 +134,8 @@ fun HistoryRoute(
                     scope = scope,
                     label = R.string.route_history_today,
                     pager = todayPager,
+                    playerVm = playerVm,
+                    queueEpisodeIds = queueEpisodeIds,
                     onClickEpisode = onClickEpisode
                 )
 
@@ -137,6 +144,8 @@ fun HistoryRoute(
                     scope = scope,
                     label = R.string.route_history_this_week,
                     pager = weekPager,
+                    playerVm = playerVm,
+                    queueEpisodeIds = queueEpisodeIds,
                     onClickEpisode = onClickEpisode
                 )
 
@@ -145,6 +154,8 @@ fun HistoryRoute(
                     scope = scope,
                     label = R.string.route_history_this_month,
                     pager = monthPager,
+                    playerVm = playerVm,
+                    queueEpisodeIds = queueEpisodeIds,
                     onClickEpisode = onClickEpisode
                 )
 
@@ -153,6 +164,8 @@ fun HistoryRoute(
                     scope = scope,
                     label = R.string.route_history_this_year,
                     pager = yearPager,
+                    playerVm = playerVm,
+                    queueEpisodeIds = queueEpisodeIds,
                     onClickEpisode = onClickEpisode
                 )
 
@@ -161,6 +174,8 @@ fun HistoryRoute(
                     scope = scope,
                     label = R.string.route_history_older,
                     pager = olderPager,
+                    playerVm = playerVm,
+                    queueEpisodeIds = queueEpisodeIds,
                     onClickEpisode = onClickEpisode
                 )
 
@@ -178,6 +193,8 @@ fun LazyListScope.pagerSection(
     scope: CoroutineScope,
     label: Int,
     pager: LazyPagingItems<PodcastHistoryBundle>,
+    playerVm: app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel,
+    queueEpisodeIds: androidx.compose.runtime.State<Set<String>>,
     onClickEpisode: (episode: PodcastEpisodeModel) -> Unit
 ) {
     if(pager.itemCount > 0) {
@@ -210,7 +227,8 @@ fun LazyListScope.pagerSection(
                 scope = scope,
                 modifier = Modifier.animateItem(),
                 snackbarHostState = vm.snackbarHostState,
-                endAction = SwipeableItemActions.DeleteAction {
+                shape = app.podiumpodcasts.podium.ui.component.model.episode.episodeRowShape(it, pager.itemCount),
+                endAction = SwipeableItemActions.DeleteAction(label = "Remove from history") {
                     vm.delete(historyElement)
 
                     SwipeableItemActionResult(
@@ -237,6 +255,8 @@ fun LazyListScope.pagerSection(
 
                         index = it,
                         count = pager.itemCount,
+                        playerVm = playerVm,
+                        inQueue = historyElement.episode.id in queueEpisodeIds.value,
 
                         colors = ListItemDefaults.segmentedColors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh

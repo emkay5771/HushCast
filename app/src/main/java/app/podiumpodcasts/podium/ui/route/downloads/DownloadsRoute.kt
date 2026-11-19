@@ -11,8 +11,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.TopAppBar
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ListItemDefaults
@@ -66,6 +69,11 @@ fun DownloadsRoute(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     var showRemovePlayedConfirm by remember { androidx.compose.runtime.mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
+    // S7: one lookup and one Set for the whole list, not one per row.
+    val playerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+    val queueEpisodeIds by remember(playerVm) {
+        androidx.compose.runtime.derivedStateOf { playerVm.queue.toHashSet() }
+    }
 
     val playedDownloads = pager.itemSnapshotList.items.mapNotNull { item ->
         val ep = item.episode ?: return@mapNotNull null
@@ -77,21 +85,30 @@ fun DownloadsRoute(
     if (showRemovePlayedConfirm) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showRemovePlayedConfirm = false },
-            title = { Text("Remove ${playedDownloads.size} played download(s)?") },
-            text = { Text("Downloaded audio files for played episodes will be deleted from this device.") },
+            title = {
+                Text(
+                    if (playedDownloads.size == 1) "Remove 1 played download?"
+                    else "Remove ${playedDownloads.size} played downloads?"
+                )
+            },
+            text = { Text("The audio files of played episodes are deleted from this device. The episode that's playing is kept.") },
             confirmButton = {
                 androidx.compose.material3.Button(onClick = {
                     showRemovePlayedConfirm = false
-                    val count = playedDownloads.size
+                    // Item 2: never delete the file the player is using.
+                    val toRemove = playedDownloads.filter { it.id != playerVm.metadataEpisodeId }
+                    val removedCount = toRemove.size
                     scope.launch {
-                        playedDownloads.forEach { ep ->
+                        toRemove.forEach { ep ->
                             app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
                                 context = context,
                                 db = db,
                                 episode = ep
                             )
                         }
-                        snackbarHostState.showSnackbar("Removed $count played download(s)")
+                        snackbarHostState.showSnackbar(
+                            if (removedCount == 1) "Removed 1 played download" else "Removed $removedCount played downloads"
+                        )
                     }
                 }) { Text("Remove") }
             },
@@ -105,17 +122,33 @@ fun DownloadsRoute(
         Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         snackbarHost = { app.podiumpodcasts.podium.ui.component.PodiumSnackbarHost(snackbarHostState) },
         topBar = {
-            CenterAlignedTopAppBar(
+            // I14: M3 Expressive flexible top bar like Home's: centred title, count and size as
+            // a subtitle, one primary action and the rest in an overflow menu.
+            var showOverflowMenu by remember { androidx.compose.runtime.mutableStateOf(false) }
+            TopAppBar(
                 scrollBehavior = scrollBehavior,
+                titleHorizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
                 navigationIcon = {
                     BackButton { onBack() }
                 },
                 title = {
-                    Text(stringResource(R.string.route_downloads))
+                    Text(
+                        text = stringResource(R.string.route_downloads),
+                        modifier = Modifier.semantics { heading() }
+                    )
+                },
+                subtitle = {
+                    val count = pager.itemCount
+                    if (count > 0) {
+                        val countText = "$count ${if (count == 1) "episode" else "episodes"}"
+                        Text(
+                            text = if (totalSize.value > 0L) "$countText · ${formatFileSize(totalSize.value)}" else countText,
+                            maxLines = 1
+                        )
+                    }
                 },
                 actions = {
                     if(pager.itemCount > 0) {
-                        val playerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
                         app.podiumpodcasts.podium.ui.component.common.BubbleButton(
                             icon = androidx.compose.material.icons.Icons.Rounded.PlayArrow,
                             contentDescription = "Play all"
@@ -131,40 +164,55 @@ fun DownloadsRoute(
                                 episodes.drop(1).forEach { playerVm.enqueue(context, it) }
                             }
                         }
-                        app.podiumpodcasts.podium.ui.component.common.BubbleButton(
-                            icon = androidx.compose.material.icons.Icons.AutoMirrored.Rounded.PlaylistAdd,
-                            contentDescription = "Add all to Up Next"
-                        ) {
-                            pager.itemSnapshotList.items
-                                .mapNotNull { item ->
-                                    val ep = item.episode ?: return@mapNotNull null
-                                    if (item.download.state != PodcastEpisodeDownloadState.DOWNLOADED.value) return@mapNotNull null
-                                    PodcastEpisodeBundle(ep, item.playState, item.download)
-                                }
-                                .forEach {
-                                    playerVm.enqueue(context, it)
-                                }
-                        }
-                        if (playedDownloads.isNotEmpty()) {
-                            app.podiumpodcasts.podium.ui.component.common.BubbleButton(
-                                icon = androidx.compose.material.icons.Icons.Rounded.Delete,
-                                contentDescription = "Remove played downloads"
+                        androidx.compose.foundation.layout.Box {
+                            androidx.compose.material3.IconButton(onClick = { showOverflowMenu = true }) {
+                                androidx.compose.material3.Icon(
+                                    androidx.compose.material.icons.Icons.Rounded.MoreVert,
+                                    contentDescription = "More actions"
+                                )
+                            }
+                            androidx.compose.material3.DropdownMenu(
+                                expanded = showOverflowMenu,
+                                onDismissRequest = { showOverflowMenu = false }
                             ) {
-                                showRemovePlayedConfirm = true
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text("Add all to Up Next") },
+                                    leadingIcon = {
+                                        androidx.compose.material3.Icon(
+                                            androidx.compose.material.icons.Icons.AutoMirrored.Rounded.PlaylistAdd,
+                                            contentDescription = null
+                                        )
+                                    },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        pager.itemSnapshotList.items
+                                            .mapNotNull { item ->
+                                                val ep = item.episode ?: return@mapNotNull null
+                                                if (item.download.state != PodcastEpisodeDownloadState.DOWNLOADED.value) return@mapNotNull null
+                                                PodcastEpisodeBundle(ep, item.playState, item.download)
+                                            }
+                                            .forEach {
+                                                playerVm.enqueue(context, it)
+                                            }
+                                    }
+                                )
+                                if (playedDownloads.isNotEmpty()) {
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text("Remove played downloads") },
+                                        leadingIcon = {
+                                            androidx.compose.material3.Icon(
+                                                androidx.compose.material.icons.Icons.Rounded.Delete,
+                                                contentDescription = null
+                                            )
+                                        },
+                                        onClick = {
+                                            showOverflowMenu = false
+                                            showRemovePlayedConfirm = true
+                                        }
+                                    )
+                                }
                             }
                         }
-                    }
-                    if(totalSize.value > 0L) Surface(
-                        Modifier.padding(8.dp),
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.secondary,
-                        contentColor = MaterialTheme.colorScheme.onSecondary
-                    ) {
-                        Text(
-                            modifier = Modifier.padding(8.dp),
-                            text = formatFileSize(totalSize.value),
-                            style = Typography.bodyMedium
-                        )
                     }
                 }
             )
@@ -205,6 +253,8 @@ fun DownloadsRoute(
 
                     PodcastEpisodeListItem(
                         modifier = Modifier.animateItem(),
+                        inQueue = episode.id in queueEpisodeIds,
+                        playerVm = playerVm,
 
                         bundle = PodcastEpisodeBundle(
                             episode = episode,

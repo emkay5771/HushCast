@@ -34,6 +34,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -127,6 +129,50 @@ fun LibrarySearch(
     }
 }
 
+/**
+ * I14: the library search as its own screen, opened from Home's Search action.  It opens with
+ * the search expanded; collapsing it (Back, or picking a result) leaves the screen.
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun LibrarySearchRoute(
+    onClickPodcast: (origin: String) -> Unit,
+    onClickEpisode: (episode: PodcastEpisodeModel) -> Unit,
+    onBack: () -> Unit
+) {
+    val searchBarState = rememberSearchBarState(initialValue = SearchBarValue.Expanded)
+    val scrollBehavior = SearchBarDefaults.enterAlwaysSearchBarScrollBehavior()
+    val currentOnBack by androidx.compose.runtime.rememberUpdatedState(onBack)
+
+    androidx.compose.runtime.LaunchedEffect(searchBarState) {
+        // Leave once the search has been collapsed (it starts expanded).
+        androidx.compose.runtime.snapshotFlow { searchBarState.currentValue }
+            .collect { value ->
+                if (value == SearchBarValue.Collapsed) currentOnBack()
+            }
+    }
+
+    androidx.compose.material3.Scaffold(
+        topBar = {
+            LibrarySearch(
+                scrollBehavior = scrollBehavior,
+                searchBarState = searchBarState,
+                navigationIcon = {
+                    app.podiumpodcasts.podium.ui.component.common.BackButton { onBack() }
+                },
+                onClickPodcast = onClickPodcast,
+                onClickEpisode = onClickEpisode
+            )
+        }
+    ) { inset ->
+        Box(
+            Modifier
+                .padding(inset)
+                .fillMaxSize()
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun SearchContent(
@@ -136,8 +182,14 @@ private fun SearchContent(
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
+    // S7: one lookup and one Set for the result list, not one per row.
+    val playerVm = viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+    val queueEpisodeIds by androidx.compose.runtime.remember(playerVm) {
+        androidx.compose.runtime.derivedStateOf { playerVm.queue.toHashSet() }
+    }
     val desktopUrl = androidx.compose.runtime.remember(context) {
-        app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context)
+        // Transcript search needs the worker switched on, not just an address saved.
+        if (app.hushcast.automute.engine.HushCastPrefs.isWorkerActive(context)) app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context) else ""
     }
     val desktopToken = androidx.compose.runtime.remember(context) {
         app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerToken(context)
@@ -161,7 +213,8 @@ private fun SearchContent(
                     Text(
                         text = "Search transcripts",
                         style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.semantics { heading() }
                     )
                     Spacer(Modifier.height(6.dp))
                     androidx.compose.foundation.layout.Row(
@@ -316,6 +369,8 @@ private fun SearchContent(
 
                                             index = index,
                                             count = episodesPager.itemCount,
+                                            inQueue = bundle.episode.id in queueEpisodeIds,
+                                            playerVm = playerVm,
 
                                             onClick = { onClickEpisode(bundle.episode) }
                                         )

@@ -16,7 +16,20 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.foundation.layout.Box
+import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import app.podiumpodcasts.podium.ui.component.model.episode.episodeRowShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.ListItemDefaults
@@ -87,6 +100,11 @@ fun ListRoute(
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
+    // S7: one lookup and one Set for the whole list, not one per row.
+    val rowPlayerVm = viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+    val queueEpisodeIds by remember(rowPlayerVm) {
+        androidx.compose.runtime.derivedStateOf { rowPlayerVm.queue.toHashSet() }
+    }
 
     Scaffold(
         Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -94,8 +112,18 @@ fun ListRoute(
             PodiumSnackbarHost(snackbarHostState)
         },
         topBar = {
-            CenterAlignedTopAppBar(
+            // I14: M3 Expressive flexible top bar like Home's: centred title, the count as a
+            // subtitle, one primary action and the rest in an overflow menu.
+            val settingsRepo = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
+            val startupDest = settingsRepo.appearance.startupDestination.collectAsState("HOME")
+            val isStartup = startupDest.value == "LIST:$listId"
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val playerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+            var showOverflowMenu by remember { mutableStateOf(false) }
+
+            TopAppBar(
                 scrollBehavior = scrollBehavior,
+                titleHorizontalAlignment = Alignment.CenterHorizontally,
                 navigationIcon = {
                     BackButton { onBack() }
                 },
@@ -104,32 +132,20 @@ fun ListRoute(
                         text = systemList?.label?.let { stringResource(it) }
                             ?: list.value?.name ?: "",
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.semantics { heading() }
                     )
                 },
-                actions = {
-                    val settingsRepo = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
-                    val startupDest = settingsRepo.appearance.startupDestination.collectAsState("HOME")
-                    val isStartup = startupDest.value == "LIST:$listId"
-                    val context = androidx.compose.ui.platform.LocalContext.current
-
-                    BubbleButton(
-                        icon = if (isStartup) androidx.compose.material.icons.Icons.Rounded.Home else androidx.compose.material.icons.Icons.Outlined.Home,
-                        contentDescription = if (isStartup) "Pinned as startup screen" else "Set as startup screen"
-                    ) {
-                        scope.launch {
-                            val next = if (isStartup) "HOME" else "LIST:$listId"
-                            settingsRepo.appearance.setStartupDestination(next)
-                            android.widget.Toast.makeText(
-                                context,
-                                if (isStartup) "Startup screen reset to Podcasts" else "Playlist set as startup screen",
-                                android.widget.Toast.LENGTH_SHORT
-                            ).show()
-                        }
+                subtitle = {
+                    if (items.itemCount > 0) {
+                        Text(
+                            text = "${items.itemCount} ${if (items.itemCount == 1) "item" else "items"}",
+                            maxLines = 1
+                        )
                     }
-
+                },
+                actions = {
                     if(items.itemCount > 0) {
-                        val playerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
                         BubbleButton(
                             icon = androidx.compose.material.icons.Icons.Rounded.PlayArrow,
                             contentDescription = "Play all"
@@ -142,30 +158,66 @@ fun ListRoute(
                                 episodes.drop(1).forEach { playerVm.enqueue(context, it) }
                             }
                         }
-                        BubbleButton(
-                            icon = Icons.AutoMirrored.Rounded.PlaylistAdd,
-                            contentDescription = "Add all to Up Next"
-                        ) {
-                            items.itemSnapshotList.items
-                                .filter { it.episode != null }
-                                .forEach {
-                                    playerVm.enqueue(context, it.toPodcastEpisodeBundle())
-                                }
-                        }
                     }
-                    if(list.value?.isSystemList == false) {
-                        BubbleButton(
-                            icon = Icons.Rounded.Edit,
-                            contentDescription = stringResource(R.string.common_action_edit)
-                        ) {
-                            vm.listEditBottomSheetState.show(listId)
+                    Box {
+                        IconButton(onClick = { showOverflowMenu = true }) {
+                            Icon(Icons.Rounded.MoreVert, contentDescription = "More actions")
                         }
-
-                        BubbleButton(
-                            icon = Icons.Rounded.Delete,
-                            contentDescription = stringResource(R.string.common_action_delete)
+                        DropdownMenu(
+                            expanded = showOverflowMenu,
+                            onDismissRequest = { showOverflowMenu = false }
                         ) {
-                            vm.showDeleteDialog.value = true
+                            if (items.itemCount > 0) {
+                                DropdownMenuItem(
+                                    text = { Text("Add all to Up Next") },
+                                    leadingIcon = { Icon(Icons.AutoMirrored.Rounded.PlaylistAdd, contentDescription = null) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        items.itemSnapshotList.items
+                                            .filter { it.episode != null }
+                                            .forEach {
+                                                playerVm.enqueue(context, it.toPodcastEpisodeBundle())
+                                            }
+                                    }
+                                )
+                            }
+                            DropdownMenuItem(
+                                text = { Text(if (isStartup) "Don't open at startup" else "Open at startup") },
+                                leadingIcon = {
+                                    Icon(
+                                        if (isStartup) Icons.Rounded.Home else Icons.Outlined.Home,
+                                        contentDescription = null
+                                    )
+                                },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    scope.launch {
+                                        val next = if (isStartup) "HOME" else "LIST:$listId"
+                                        settingsRepo.appearance.setStartupDestination(next)
+                                        snackbarHostState.showSnackbar(
+                                            if (isStartup) "The app now opens on Home" else "The app now opens on this list"
+                                        )
+                                    }
+                                }
+                            )
+                            if(list.value?.isSystemList == false) {
+                                DropdownMenuItem(
+                                    text = { Text("Edit list") },
+                                    leadingIcon = { Icon(Icons.Rounded.Edit, contentDescription = null) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        vm.listEditBottomSheetState.show(listId)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Delete list") },
+                                    leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        vm.showDeleteDialog.value = true
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -229,7 +281,8 @@ fun ListRoute(
                             modifier = Modifier
                                 .animateItem()
                                 .longPressDraggableHandle(),
-                            endAction = SwipeableItemActions.DeleteAction {
+                            shape = episodeRowShape(index, items.itemCount),
+                            endAction = SwipeableItemActions.DeleteAction(label = "Remove from list") {
                                 vm.delete(item)
 
                                 SwipeableItemActionResult(
@@ -246,6 +299,8 @@ fun ListRoute(
 
                                     index = index,
                                     count = items.itemCount,
+                                    inQueue = item.episode?.id?.let { it in queueEpisodeIds },
+                                    playerVm = rowPlayerVm,
 
                                     colors = ListItemDefaults.segmentedColors(
                                         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -274,6 +329,7 @@ fun ListRoute(
         onDismiss = {
             vm.showDeleteDialog.value = false
         },
+        title = "Delete list?",
         itemName = list.value?.name ?: "",
         additionalText = stringResource(R.string.dialog_delete_confirmation_all_data_will_be_lost),
         onConfirm = {

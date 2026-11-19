@@ -23,7 +23,7 @@ CMAKE_ARGS="-DGGML_METAL=on" uv pip install -e ".[ml,dev]"
 hushcast-worker setup
 ```
 
-This downloads `ggml-base.en-q5_1.bin` and `Qwen3-Embedding-0.6B-Q8_0.gguf` into `~/.hushcast-worker/models/`, verifies checksums, copies `ad_tagger.onnx`, and checks `ffmpeg`/`ffprobe` and ML imports.
+This downloads `ggml-base.en-q5_1.bin` and `Qwen3-Embedding-0.6B-Q8_0.gguf` into `~/.hushcast-worker/models/` (the `--profile quality` uses `ggml-large-v3-turbo-q5_0.bin` and adds `Qwen2.5-3B-Instruct-Q4_K_M.gguf` for chapters and summaries). Every file is pinned to a fixed revision and checked against its SHA-256; an interrupted download resumes, and a file that fails the check is never put in place. When `torch` is installed, setup also fetches the MMS_FA word-alignment weights. It then copies `ad_tagger.onnx`, checks `ffmpeg`/`ffprobe` and the ML imports, and writes a launchd plist (macOS) or prints a systemd unit (Linux) so the worker can start at login.
 
 ### Run
 
@@ -32,6 +32,10 @@ hushcast-worker
 ```
 
 It prints your LAN URL, pairing token, and advertises `_hushcast._tcp.local.` over Bonjour/mDNS so the HushCast Android app can discover it in **Settings → HushCast → Desktop Companion**.
+
+**HTTPS (optional):** `hushcast-worker --tls-cert cert.pem --tls-key key.pem` serves HTTPS and prints the certificate fingerprint to pin on the phone. Both flags are required together.
+
+**Check a running worker:** `hushcast-worker health-check --url <worker URL>` checks `/v1/health` (status 200 and the current schema), retrying a few times. Add `--expect-deployment modal` for a Modal worker.
 
 ## Running Tests
 
@@ -78,7 +82,7 @@ uv run modal secret create hushcast-token HUSHCAST_WORKER_TOKEN="$TOKEN"
 
 ### 4. Download Models into Persistent Modal Storage (One-Time)
 
-This downloads `ggml-large-v3-turbo.bin` (~1.55 GB), `Qwen3-Embedding-0.6B-Q8_0.gguf` (~610 MB), `Qwen2.5-7B-Instruct-Q4_K_M.gguf` (~4.68 GB, for LLM chapters & summaries), and `ad_tagger.onnx` into a persistent Modal Volume named `hushcast-data`:
+This downloads the pinned models into a persistent Modal Volume named `hushcast-data`: `faster-whisper-large-v3-turbo` (~1.6 GB, the default speech-to-text), `ggml-large-v3-turbo.bin` (~1.55 GB, whisper.cpp fallback), `Qwen3-Embedding-0.6B-Q8_0.gguf` (~610 MB), `Qwen2.5-3B-Instruct-Q4_K_M.gguf` (~1.9 GB, for chapters and summaries) and `ad_tagger.onnx`. Each file is checked against its SHA-256 once and recorded, so later cold starts only check file sizes. Running this right after a deploy also saves the first cold start from doing the downloads and checks itself:
 
 ```bash
 uv run modal run modal_app.py::setup_models
@@ -136,7 +140,7 @@ On your phone:
   ```
   You can also run `uv run modal secret list` to confirm `hushcast-token` is in the active environment.
 - **Cold starts (scale-to-zero):** To save credits, Modal scales the GPU container down after 2 minutes of idle time (`scaledown_window=120`). The first **Test** or episode download after idle may take ~15–25 seconds while the T4 container boots; subsequent requests while warm are instant.
-- **Auto-deploy via GitHub Actions:** Pushing changes under `desktop-worker/` to `main` automatically deploys to Modal via [`.github/workflows/deploy-modal.yml`](../.github/workflows/deploy-modal.yml) once you add **`MODAL_TOKEN_ID`** and **`MODAL_TOKEN_SECRET`** (from [Modal Settings → API Tokens](https://modal.com/settings/tokens)) to your GitHub repository's **Settings → Secrets and variables → Actions**.
+- **Auto-deploy via GitHub Actions:** Pushing changes under `desktop-worker/` to `main` automatically deploys to Modal via [`.github/workflows/deploy-modal.yml`](../.github/workflows/deploy-modal.yml) once you add **`MODAL_TOKEN_ID`** and **`MODAL_TOKEN_SECRET`** (from [Modal Settings → API Tokens](https://modal.com/settings/tokens)) to your GitHub repository's **Settings → Secrets and variables → Actions**. After deploying, the workflow runs `hushcast-worker health-check` against the deployed URL. It uses the optional **`MODAL_WORKER_URL`** secret if you set one, otherwise the URL printed by `modal deploy`; if neither is available the check is skipped with a warning.
 - **Updating the worker manually:** After pulling new changes (`git pull origin main`), re-run `uv run modal deploy modal_app.py` inside `desktop-worker/`.
 - **Optional LLM Chat / Summaries:** If you also want an instruct GGUF model on Modal, upload or download it into `/data/models/` inside the `hushcast-data` volume.
 

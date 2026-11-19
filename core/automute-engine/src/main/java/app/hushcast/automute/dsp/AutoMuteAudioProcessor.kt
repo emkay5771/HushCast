@@ -11,8 +11,6 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sin
-import kotlin.math.tanh
 
 /**
  * Sample-accurate Media3 AudioProcessor for Feature A (Word-Level Auto-Muting).
@@ -30,8 +28,6 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
         private const val RAMP_MS_SILENCE = 8.0
         private const val RAMP_MS_DROP = 12.0
         private const val DUCK_FLOOR = 0.10f
-        private const val BEEP_FREQ_HZ = 1000.0
-        private const val BEEP_AMPLITUDE = 0.34f
         private const val VOLUME_BOOST_GAIN = 1.85f
         const val DEFAULT_ENCODER_DELAY_MS = 30L
     }
@@ -47,6 +43,10 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
 
     @Volatile
     var volumeBoostEnabled: Boolean = false
+
+    /** Which built-in tone the BEEP mode plays (and CUSTOM_SOUND falls back to). */
+    @Volatile
+    var bleepStyle: BleepStyle = BleepStyle.DEFAULT
 
     @Volatile
     var encoderDelayOffsetMs: Long = DEFAULT_ENCODER_DELAY_MS
@@ -239,9 +239,9 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
                 }
                 MuteActionMode.BEEP -> {
                     val origGain = cosineRampGain(framesFromStart, framesToEnd, rampFramesSilence, floor = 0.0f)
-                    val effectEnv = (1.0f - origGain).coerceIn(0.0f, 1.0f)
-                    val tone = sin(2.0 * PI * BEEP_FREQ_HZ * framesFromStart / sampleRateHz.coerceAtLeast(1)).toFloat() *
-                        BEEP_AMPLITUDE * effectEnv
+                    val style = bleepStyle
+                    val toneEnv = BleepTone.envelope(framesFromStart, framesToEnd, rampFramesTone(style))
+                    val tone = BleepTone.sample(style, framesFromStart.toLong(), sampleRateHz) * toneEnv
                     copyFrameWithGainAndMix(inputBuffer, out, origGain, tone)
                 }
                 MuteActionMode.CUSTOM_SOUND -> {
@@ -252,8 +252,9 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
                         val srcIdx = ((framesFromStart.toLong() * customSoundSampleRateHz) / sampleRateHz.coerceAtLeast(1)).toInt() % pcm.size
                         pcm[srcIdx] * effectEnv
                     } else {
-                        sin(2.0 * PI * BEEP_FREQ_HZ * framesFromStart / sampleRateHz.coerceAtLeast(1)).toFloat() *
-                            BEEP_AMPLITUDE * effectEnv
+                        val style = bleepStyle
+                        BleepTone.sample(style, framesFromStart.toLong(), sampleRateHz) *
+                            BleepTone.envelope(framesFromStart, framesToEnd, rampFramesTone(style))
                     }
                     copyFrameWithGainAndMix(inputBuffer, out, origGain, mixSample)
                 }
@@ -306,6 +307,9 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
             }
         }
     }
+
+    private fun rampFramesTone(style: BleepStyle): Int =
+        ((BleepTone.rampMs(style) * sampleRateHz) / 1000.0).roundToInt().coerceAtLeast(1)
 
     private fun cosineRampGain(
         framesFromStart: Int,

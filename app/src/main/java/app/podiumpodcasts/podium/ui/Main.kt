@@ -34,6 +34,7 @@ import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaf
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldDefaults
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldValue
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
+import app.podiumpodcasts.podium.ui.navigation.isBottomBar
 import androidx.compose.material3.adaptive.navigationsuite.rememberNavigationSuiteScaffoldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -69,10 +70,17 @@ import app.podiumpodcasts.podium.ui.view.model.PodcastDetailView
 import app.podiumpodcasts.podium.ui.view.model.PodcastEpisodeDetailView
 import app.podiumpodcasts.podium.ui.vm.MainViewModel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.getValue
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.parcelize.Parcelize
 import kotlinx.serialization.Serializable
+
+/**
+ * S3: the startup destination, loaded by [app.podiumpodcasts.podium.AppActivity] before the first
+ * frame (while the splash screen is up).  Null when nobody provided it; [Main] then uses Home.
+ */
+val LocalStartupDestination = androidx.compose.runtime.staticCompositionLocalOf<NavKey?> { null }
 
 @Serializable
 sealed class DetailPaneKey : Parcelable {
@@ -171,40 +179,24 @@ fun Main(
             .toSet()
     }
 
+    // S3: the startup destination is read before the first frame (AppActivity holds the splash
+    // screen until it's known) and handed down here, so composition never blocks on DataStore.
+    val preloadedStartKey = LocalStartupDestination.current ?: Home
     val initialRoute = remember(deepLink) {
-        if (deepLink?.route != null) {
-            deepLink.route
-        } else {
-            val dest = kotlinx.coroutines.runBlocking {
-                settingsRepository.appearance.startupDestination.first()
-            }
-            when {
-                dest.startsWith("LIST:") -> {
-                    val id = dest.removePrefix("LIST:").toIntOrNull()
-                    if (id != null) app.podiumpodcasts.podium.ui.navigation.List(id) else Home
-                }
-                else -> {
-                    runCatching {
-                        app.podiumpodcasts.podium.ui.navigation.NavBarItems.valueOf(dest).navKey
-                    }.getOrNull() ?: Home
-                }
-            }
-        }
+        deepLink?.route ?: preloadedStartKey
     }
+    // B6: where Back from another root goes.  Follows the setting if it changes while running.
+    val startKey by remember(settingsRepository) {
+        settingsRepository.appearance.startupDestination
+            .map { app.podiumpodcasts.podium.ui.navigation.parseStartupDestination(it) }
+    }.collectAsState(preloadedStartKey)
 
     val backStack = rememberNavBackStack(initialRoute)
 
     val listDetailNavigator = rememberListDetailPaneScaffoldNavigator<DetailPaneKey>()
 
     val navigationScaffoldState = rememberNavigationSuiteScaffoldState()
-    val rawLayoutType =
-        NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
-    val navigationScaffoldLayoutType =
-        if (rawLayoutType == NavigationSuiteType.NavigationBar) {
-            NavigationSuiteType.ShortNavigationBarCompact
-        } else {
-            rawLayoutType
-        }
+    val navigationScaffoldLayoutType = app.podiumpodcasts.podium.ui.navigation.appNavigationSuiteType()
 
     fun listDetailBack() {
         scope.launch {
@@ -226,8 +218,7 @@ fun Main(
     }
 
     LaunchedEffect(backStack.last(), enabledBottomBarNavKeys, listDetailNavigator.scaffoldValue.primary) {
-        if(navigationScaffoldLayoutType != NavigationSuiteType.ShortNavigationBarCompact &&
-            navigationScaffoldLayoutType != NavigationSuiteType.NavigationBar) return@LaunchedEffect
+        if (!navigationScaffoldLayoutType.isBottomBar()) return@LaunchedEffect
 
         val entry = backStack.last()
         if(entry is PodiumNavKey) {
@@ -277,13 +268,19 @@ fun Main(
                         * floatingMediaPlayerHeightAnimation.value,
                 LocalFloatingMediaPlayerShown provides floatingMediaPlayerShown.value
             ) {
+                // B6: Back on a root tab that isn't the startup destination goes to the startup
+                // destination (not always Home).  On the startup destination the system handles
+                // Back and leaves the app.
                 androidx.activity.compose.BackHandler(
                     enabled = backStack.size == 1 &&
-                        backStack.lastOrNull() != Home &&
+                        backStack.lastOrNull() != startKey &&
                         !listDetailNavigator.canNavigateBack(BackNavigationBehavior.PopUntilScaffoldValueChange)
                 ) {
-                    backStack.clear()
-                    backStack.add(Home)
+                    val action = app.podiumpodcasts.podium.ui.navigation.resolveSystemBack(backStack.toList(), startKey)
+                    if (action is app.podiumpodcasts.podium.ui.navigation.BackAction.ReplaceRoot) {
+                        backStack.clear()
+                        backStack.add(action.key)
+                    }
                 }
                 NavigableListDetailPaneScaffold(
                     defaultBackBehavior = BackNavigationBehavior.PopLatest,
@@ -317,13 +314,19 @@ fun Main(
                                 onBack = {
                                     if(listDetailNavigator.canNavigateBack(BackNavigationBehavior.PopUntilScaffoldValueChange)) {
                                         listDetailBack()
-                                    } else if (backStack.size > 1) {
-                                        backStack.removeLastOrNull()
-                                    } else if (backStack.lastOrNull() != Home) {
-                                        backStack.clear()
-                                        backStack.add(Home)
+                                    } else {
+                                        when (val action = app.podiumpodcasts.podium.ui.navigation.resolveSystemBack(backStack.toList(), startKey)) {
+                                            app.podiumpodcasts.podium.ui.navigation.BackAction.Pop -> backStack.removeLastOrNull()
+                                            is app.podiumpodcasts.podium.ui.navigation.BackAction.ReplaceRoot -> {
+                                                backStack.clear()
+                                                backStack.add(action.key)
+                                            }
+                                            app.podiumpodcasts.podium.ui.navigation.BackAction.None -> Unit
+                                        }
                                     }
                                 },
+
+                                startKey = startKey,
 
                                 onClickPodcast = { origin ->
                                     scope.launch {

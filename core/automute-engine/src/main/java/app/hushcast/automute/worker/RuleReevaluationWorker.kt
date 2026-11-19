@@ -34,7 +34,14 @@ class RuleReevaluationWorker(
         val rules = db.dao().getEnabledRules().map { it.toDomain() }
         val compiled = app.hushcast.automute.matcher.WordMatcher.compileRules(rules, defaultActionMode)
         val refs = db.dao().getAllWordIndexRefs()
+        val currentSha = db.dao().getAllStatuses().associate { it.episodeId to it.fileSha256 }
         for (ref in refs) {
+            // A5: an episode's older file hashes keep their word index for reuse, but must not get
+            // mute segments back after the analyzer cleared them.
+            val sha = currentSha[ref.episodeId]
+            if (!sha.isNullOrBlank() && sha != ref.fileSha256) continue
+            // Rules matching SRT/VTT words with estimated times get widened windows here; the
+            // words are re-aligned with Whisper the next time the episode is analyzed or played.
             analyzer.reevaluateMuteRulesWithCompiled(
                 fileSha256 = ref.fileSha256,
                 episodeId = ref.episodeId,

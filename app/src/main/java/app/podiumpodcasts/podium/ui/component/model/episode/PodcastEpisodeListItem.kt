@@ -45,7 +45,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -85,7 +87,10 @@ fun PodcastEpisodeListItem(
     count: Int = 0,
     isSelected: Boolean = false,
     showArtwork: Boolean = true,
+    /** S7: from the list's one Set of queued ids.  Null looks it up here. */
     inQueue: Boolean? = null,
+    /** S7: pass the list's player view model so each row doesn't look it up. */
+    playerVm: MediaPlayerViewModel? = null,
     onLongClick: (() -> Unit)? = null,
     colors: ListItemColors = ListItemDefaults.segmentedColors(),
     onClick: () -> Unit
@@ -93,7 +98,7 @@ fun PodcastEpisodeListItem(
     val context = LocalContext.current
     val db = app.podiumpodcasts.podium.ui.helper.LocalDatabase.current
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val playerVm = viewModel<MediaPlayerViewModel>()
+    val playerVm = playerVm ?: viewModel<MediaPlayerViewModel>()
     val autoMuteDb = remember(context) { AutoMuteDatabase.getInstance(context) }
     val analysisStatus by remember(bundle.episode.id, autoMuteDb) {
         autoMuteDb.statusMapFlow
@@ -127,20 +132,38 @@ fun PodcastEpisodeListItem(
         )
     }
 
-    val isDownloaded = bundle.download?.state == PodcastEpisodeDownloadState.DOWNLOADED.value
-    val isDownloading = bundle.download?.state == PodcastEpisodeDownloadState.DOWNLOADING.value
-    val isFailed = bundle.download?.state == PodcastEpisodeDownloadState.FAILED.value
+    // Item 2: a download waiting in the "Download removed · Undo" window already looks removed.
+    val removalPending = bundle.episode.id in app.podiumpodcasts.podium.ui.component.common.swipeable.PendingDownloadDeletes.hiddenIds
+    val isDownloaded = !removalPending && bundle.download?.state == PodcastEpisodeDownloadState.DOWNLOADED.value
+    val isDownloading = !removalPending && bundle.download?.state == PodcastEpisodeDownloadState.DOWNLOADING.value
+    val isFailed = !removalPending && bundle.download?.state == PodcastEpisodeDownloadState.FAILED.value
     val isProcessed = readinessBadge == ReadinessBadge.READY || readinessBadge == ReadinessBadge.WORD_MUTE_READY
     val isAnalyzing = readinessBadge == ReadinessBadge.ANALYZING
     val isInQueue = inQueue ?: playerVm.queue.contains(bundle.episode.id)
-    val isCurrentlyEpisode = playerVm.metadataEpisodeId == bundle.episode.id
-    val isActivelyPlaying = isCurrentlyEpisode && playerVm.isPlaying
-
-    val shape = if (count == 1) {
-        RoundedCornerShape(16.dp)
-    } else {
-        ListItemDefaults.segmentedShapes(index = index, count = count).shape
+    // S7: derived per row, so play/pause elsewhere only recomposes the row it concerns.
+    val isCurrentlyEpisode by remember(playerVm, bundle.episode.id) {
+        androidx.compose.runtime.derivedStateOf { playerVm.metadataEpisodeId == bundle.episode.id }
     }
+    val isActivelyPlaying by remember(playerVm, bundle.episode.id) {
+        androidx.compose.runtime.derivedStateOf {
+            playerVm.metadataEpisodeId == bundle.episode.id && playerVm.isPlaying
+        }
+    }
+
+    val shape = episodeRowShape(index = index, count = count)
+
+    // D1: one spoken summary of the row's state, e.g. "Played, downloaded, HushCast ready".
+    val stateSummary = episodeRowStateDescription(
+        isPlayed = isPlayed,
+        hasProgress = hasProgress,
+        isInQueue = isInQueue,
+        isDownloaded = isDownloaded,
+        isDownloading = isDownloading,
+        downloadFailed = isFailed,
+        isProcessed = isProcessed,
+        isAnalyzing = isAnalyzing,
+        isPlayingNow = isActivelyPlaying
+    )
     val containerColor = if (isSelected) {
         MaterialTheme.colorScheme.primaryContainer
     } else {
@@ -222,7 +245,7 @@ fun PodcastEpisodeListItem(
                 )
             }
             androidx.compose.material3.DropdownMenuItem(
-                text = { Text(if (isPlayed) "Mark unplayed" else "Mark played") },
+                text = { Text(if (isPlayed) "Mark as unplayed" else "Mark as played") },
                 onClick = {
                     showContextMenu = false
                     scope.launch {
@@ -238,7 +261,11 @@ fun PodcastEpisodeListItem(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
-            .then(clickModifier),
+            .then(clickModifier)
+            .semantics {
+                stateDescription = stateSummary
+                if (onLongClick != null) selected = isSelected
+            },
         shape = shape,
         color = containerColor
     ) {
@@ -488,6 +515,52 @@ fun PodcastEpisodeListItem(
         }
     }
     }
+}
+
+/**
+ * The row's outline: one rounded card when it's alone, otherwise its slot in the segmented
+ * group.  M11: swipe rows pass the same shape to [app.podiumpodcasts.podium.ui.component.common.swipeable.SwipeableItem]
+ * so the action tray behind the row has matching corners.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun episodeRowShape(index: Int, count: Int): androidx.compose.ui.graphics.Shape =
+    if (count <= 1) {
+        RoundedCornerShape(16.dp)
+    } else {
+        ListItemDefaults.segmentedShapes(index = index, count = count).shape
+    }
+
+/** D1: what TalkBack says about an episode row's state, most important first. */
+fun episodeRowStateDescription(
+    isPlayed: Boolean,
+    hasProgress: Boolean,
+    isInQueue: Boolean,
+    isDownloaded: Boolean,
+    isDownloading: Boolean,
+    downloadFailed: Boolean,
+    isProcessed: Boolean,
+    isAnalyzing: Boolean,
+    isPlayingNow: Boolean
+): String {
+    val parts = ArrayList<String>(5)
+    when {
+        isPlayingNow -> parts += "Playing"
+        isPlayed -> parts += "Played"
+        hasProgress -> parts += "In progress"
+        else -> parts += "Unplayed"
+    }
+    if (isInQueue) parts += "in Up Next"
+    when {
+        isDownloading -> parts += "downloading"
+        downloadFailed -> parts += "download failed"
+        isDownloaded -> parts += "downloaded"
+    }
+    when {
+        isAnalyzing -> parts += "HushCast processing"
+        isProcessed -> parts += "HushCast ready"
+    }
+    return parts.joinToString(", ")
 }
 
 private fun formatPocketCastsDuration(

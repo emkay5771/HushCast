@@ -80,7 +80,6 @@ fun NewEpisodesRoute(
 
     val newEpisodes = vm.newEpisodes.collectAsLazyPagingItems()
     val context = androidx.compose.ui.platform.LocalContext.current
-    var isRefreshing by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var showOverflowMenu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     var showMarkAllConfirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
     val pullState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
@@ -88,20 +87,22 @@ fun NewEpisodesRoute(
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     val snackbarHostState = remember { SnackbarHostState() }
+    // Item 1: spins only while the update runs; offline and failed refreshes say so.
+    val refreshState = app.podiumpodcasts.podium.ui.component.common.rememberPodcastRefreshState(snackbarHostState)
 
     if (showMarkAllConfirm) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showMarkAllConfirm = false },
-            title = { Text("Mark all as listened?") },
-            text = { Text("This marks all unplayed episodes from your subscribed podcasts as listened.") },
+            title = { Text("Mark all as played?") },
+            text = { Text("This marks all unplayed episodes from your subscribed podcasts as played.") },
             confirmButton = {
                 androidx.compose.material3.Button(onClick = {
                     showMarkAllConfirm = false
                     vm.markAllPlayed()
                     scope.launch {
-                        snackbarHostState.showSnackbar("Marked all episodes as listened")
+                        snackbarHostState.showSnackbar("Marked all episodes as played")
                     }
-                }) { Text("Mark all") }
+                }) { Text("Mark as played") }
             },
             dismissButton = {
                 androidx.compose.material3.TextButton(onClick = { showMarkAllConfirm = false }) { Text("Cancel") }
@@ -162,7 +163,7 @@ fun NewEpisodesRoute(
                                     }
                                 )
                                 androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text("Mark all as listened") },
+                                    text = { Text("Mark all as played") },
                                     leadingIcon = {
                                         androidx.compose.material3.Icon(
                                             androidx.compose.material.icons.Icons.Rounded.Done,
@@ -181,27 +182,14 @@ fun NewEpisodesRoute(
             )
         }
     ) { inset ->
-        val refreshWorkInfos by androidx.work.WorkManager.getInstance(context)
-            .getWorkInfosForUniqueWorkFlow(
-                app.podiumpodcasts.podium.background.worker.PeriodicPodcastUpdateWorker.INSTANT_UNIQUE_NAME
-            )
-            .collectAsState(initial = emptyList())
-        val isWorkRefreshing = refreshWorkInfos.any {
-            it.state == androidx.work.WorkInfo.State.ENQUEUED ||
-                it.state == androidx.work.WorkInfo.State.RUNNING
-        }
         androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-            isRefreshing = isWorkRefreshing || isRefreshing,
+            isRefreshing = refreshState.isRefreshing,
             state = pullState,
-            onRefresh = {
-                if (!isWorkRefreshing && !isRefreshing) {
-                    app.podiumpodcasts.podium.background.worker.PeriodicPodcastUpdateWorker.enqueueNow(context)
-                }
-            },
+            onRefresh = { refreshState.refresh() },
             indicator = {
                 androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.LoadingIndicator(
                     state = pullState,
-                    isRefreshing = isWorkRefreshing || isRefreshing,
+                    isRefreshing = refreshState.isRefreshing,
                     modifier = Modifier.align(androidx.compose.ui.Alignment.TopCenter)
                 )
             },
@@ -218,14 +206,14 @@ fun NewEpisodesRoute(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 androidx.compose.material3.FilterChip(
-                    selected = vm.excludeListened.value,
-                    onClick = { vm.excludeListened.value = !vm.excludeListened.value },
-                    label = { Text("Exclude listened") }
+                    selected = vm.excludePlayed.value,
+                    onClick = { vm.excludePlayed.value = !vm.excludePlayed.value },
+                    label = { Text("Exclude played") }
                 )
                 androidx.compose.material3.FilterChip(
                     selected = vm.onlyInProgress.value,
                     onClick = { vm.onlyInProgress.value = !vm.onlyInProgress.value },
-                    label = { Text("In Progress") }
+                    label = { Text("In progress") }
                 )
                 androidx.compose.material3.FilterChip(
                     selected = vm.onlyDownloaded.value,
@@ -267,10 +255,12 @@ fun NewEpisodesRoute(
                             scope = scope,
                             modifier = Modifier.animateItem(),
                             snackbarHostState = snackbarHostState,
+                            shape = app.podiumpodcasts.podium.ui.component.model.episode.episodeRowShape(it, newEpisodes.itemCount),
                             startAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
                                 actionType = itemSwipeRightAction,
                                 bundle = item,
                                 playerVm = playerVm,
+                                inQueue = inQueue,
                                 onMarkPlayed = { markPlayed ->
                                     vm.markPlayed(item, markPlayed)
                                     if (markPlayed) {
@@ -286,6 +276,7 @@ fun NewEpisodesRoute(
                                 ),
                                 bundle = item,
                                 playerVm = playerVm,
+                                inQueue = inQueue,
                                 onMarkPlayed = { markPlayed ->
                                     vm.markPlayed(item, markPlayed)
                                     if (markPlayed) {
@@ -294,6 +285,7 @@ fun NewEpisodesRoute(
                                 }
                             ),
                             endAction = SwipeableItemActions.CheckAction(
+                                isChecked = item.playState?.played == true,
                                 onAction = {
                                     val markPlayed = !(item.playState?.played ?: false)
                                     vm.markPlayed(item, markPlayed)
@@ -302,8 +294,8 @@ fun NewEpisodesRoute(
                                     }
 
                                     SwipeableItemActionResult(
-                                        isDismissed = vm.excludeListened.value && markPlayed,
-                                        message = if (markPlayed) "Marked as listened" else "Marked as unlistened",
+                                        isDismissed = vm.excludePlayed.value && markPlayed,
+                                        message = if (markPlayed) "Marked as played" else "Marked as unplayed",
                                         onUndo = {
                                             vm.markPlayed(item, !markPlayed)
                                         }
@@ -318,6 +310,8 @@ fun NewEpisodesRoute(
 
                                 index = it,
                                 count = newEpisodes.itemCount,
+                                inQueue = inQueue,
+                                playerVm = playerVm,
 
                                 colors = ListItemDefaults.segmentedColors(
                                     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh

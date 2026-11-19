@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -50,14 +51,28 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.podiumpodcasts.podium.api.chapters.ResolvedChapter
 
+/** The chapter playing at [positionMs]: the one containing it, else the last one already started. */
+internal fun currentChapterIndexAt(chapters: List<ResolvedChapter>, positionMs: Long): Int =
+    chapters.indexOfFirst { positionMs in it.startMs until it.endMs }
+        .takeIf { it >= 0 }
+        ?: chapters.indexOfLast { positionMs >= it.startMs }
+
+/**
+ * S4/S6: the position comes in as state and is read only in derived state and in the current
+ * row's draw phase.  While [active] is false (the page is off-screen) it isn't read at all; the
+ * list keeps the last position it saw.
+ */
 @Composable
 fun PlayerChaptersTab(
     chapters: List<ResolvedChapter>,
     skippedPublishedStarts: Set<Long>,
-    currentPositionMs: Long,
+    positionMsState: androidx.compose.runtime.State<Long>,
     onToggleSkip: (publishedStartMs: Long, skip: Boolean) -> Unit,
     onSelectChapter: (chapter: ResolvedChapter, isCurrent: Boolean) -> Unit,
     targetChapterIndex: Int? = null,
+    /** Called once the tab has scrolled to [targetChapterIndex], so the caller can clear it (item 7). */
+    onTargetConsumed: () -> Unit = {},
+    active: Boolean = true,
     contentBottomPadding: androidx.compose.ui.unit.Dp = 88.dp,
     modifier: Modifier = Modifier
 ) {
@@ -66,19 +81,30 @@ fun PlayerChaptersTab(
     val listState = rememberLazyListState()
     var editSkipsMode by remember { mutableStateOf(false) }
 
-    val currentChapterIndex = remember(chapters, currentPositionMs) {
-        chapters.indexOfFirst { currentPositionMs in it.startMs until it.endMs }
-            .takeIf { it >= 0 }
-            ?: chapters.indexOfLast { currentPositionMs >= it.startMs }
+    // Off-screen: a frozen copy of the position, so nothing here follows the ticker.
+    val frozenPos = remember(active) {
+        androidx.compose.runtime.mutableLongStateOf(
+            androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { positionMsState.value }
+        )
+    }
+    val posState: androidx.compose.runtime.State<Long> = if (active) positionMsState else frozenPos
+
+    val currentChapterIndex by remember(chapters, posState) {
+        androidx.compose.runtime.derivedStateOf { currentChapterIndexAt(chapters, posState.value) }
     }
 
-    // C2 & C5: Open scrolled to the target/current chapter, accounting for the header row (+1)
-    LaunchedEffect(chapters.size, targetChapterIndex) {
-        val targetChapter = targetChapterIndex ?: currentChapterIndex
-        if (targetChapter >= 0) {
-            val targetIdx = (targetChapter + 1).coerceIn(0, chapters.size)
-            listState.scrollToItem(targetIdx)
+    // C2 & C5: open scrolled to the current chapter, accounting for the header row (+1).
+    LaunchedEffect(chapters.size) {
+        if (targetChapterIndex == null && currentChapterIndex >= 0) {
+            listState.scrollToItem((currentChapterIndex + 1).coerceIn(0, chapters.size))
         }
+    }
+    // A chapter picked from the Playing page: scroll to it once, then let the caller clear it.
+    LaunchedEffect(targetChapterIndex, chapters.size) {
+        val target = targetChapterIndex ?: return@LaunchedEffect
+        if (chapters.isEmpty()) return@LaunchedEffect
+        if (target >= 0) listState.scrollToItem((target + 1).coerceIn(0, chapters.size))
+        onTargetConsumed()
     }
 
     val skippedCount = remember(chapters, skippedPublishedStarts) {
@@ -137,10 +163,7 @@ fun PlayerChaptersTab(
             val isPlayed = currentChapterIndex > idx
             val isSkipped = chapter.publishedStartMs in skippedPublishedStarts
             val chapterDurationSec = ((chapter.endMs - chapter.startMs) / 1000L).coerceAtLeast(0L)
-            val progressFraction = if (isCurrent && chapter.endMs > chapter.startMs) {
-                ((currentPositionMs - chapter.startMs).toFloat() / (chapter.endMs - chapter.startMs).toFloat())
-                    .coerceIn(0f, 1f)
-            } else 0f
+            val currentFill = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f)
 
             val rowAlpha = when {
                 isSkipped && !editSkipsMode -> 0.50f
@@ -180,21 +203,24 @@ fun PlayerChaptersTab(
             }
 
             Box(
-                modifier = rowModifier.alpha(rowAlpha)
+                modifier = rowModifier
+                    .alpha(rowAlpha)
+                    .then(
+                        if (isCurrent && chapter.endMs > chapter.startMs) {
+                            // Progress fill drawn from the live position (draw phase only).
+                            Modifier.drawBehind {
+                                val fraction = ((posState.value - chapter.startMs).toFloat() /
+                                    (chapter.endMs - chapter.startMs).toFloat()).coerceIn(0f, 1f)
+                                if (fraction > 0f) {
+                                    drawRect(
+                                        color = currentFill,
+                                        size = size.copy(width = size.width * fraction)
+                                    )
+                                }
+                            }
+                        } else Modifier
+                    )
             ) {
-                if (isCurrent && progressFraction > 0f) {
-                    Box(
-                        modifier = Modifier
-                            .matchParentSize()
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(progressFraction)
-                                .fillMaxSize()
-                                .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.42f))
-                        )
-                    }
-                }
 
                 Row(
                     modifier = Modifier

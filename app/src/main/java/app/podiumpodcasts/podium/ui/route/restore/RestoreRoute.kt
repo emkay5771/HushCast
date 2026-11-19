@@ -151,7 +151,7 @@ fun RestoreRoute() {
                     is State.OverwriteWarning -> {
                         InfoLayout(
                             icon = Icons.Rounded.Warning,
-                            title = { stringResource(R.string.common_are_you_sure) }
+                            title = { stringResource(R.string.route_restore_confirm_title) }
                         ) {
                             Text(
                                 text = stringResource(R.string.route_restore_confirmation),
@@ -170,7 +170,7 @@ fun RestoreRoute() {
                                     contentPadding = ButtonDefaults.contentPaddingFor(size),
                                 ) {
                                     Text(
-                                        text = stringResource(R.string.common_action_abort),
+                                        text = stringResource(R.string.common_action_cancel),
                                         style = ButtonDefaults.textStyleFor(size)
                                     )
                                 }
@@ -185,7 +185,7 @@ fun RestoreRoute() {
                                     contentPadding = ButtonDefaults.contentPaddingFor(size),
                                 ) {
                                     Text(
-                                        text = stringResource(R.string.common_action_continue),
+                                        text = stringResource(R.string.route_restore_action_restore),
                                         style = ButtonDefaults.textStyleFor(size)
                                     )
                                 }

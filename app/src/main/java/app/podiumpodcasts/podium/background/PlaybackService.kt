@@ -71,6 +71,40 @@ const val COMMAND_SET_SEEK_FORWARD_INCREMENT =
     "app.podiumpodcasts.podium.COMMAND_SET_SEEK_FORWARD_INCREMENT"
 
 const val EXTRA_SLEEP_TIMER_TRIGGER = "sleep_timer_trigger"
+/** Which kind of sleep timer runs: [SleepTimerModes.TIME], [SleepTimerModes.END_OF_EPISODE] or [SleepTimerModes.END_OF_CHAPTER]. */
+const val EXTRA_SLEEP_TIMER_MODE = "sleep_timer_mode"
+/** For "End of chapter": the playback position (ms) the timer stops at; follows seeks. */
+const val EXTRA_SLEEP_TIMER_END_MS = "sleep_timer_end_ms"
+
+/** Sleep timer kinds shared by the service and the UI (also the strings the session command sends). */
+object SleepTimerModes {
+    const val TIME = "TIME"
+    const val END_OF_EPISODE = "END_OF_EPISODE"
+    const val END_OF_CHAPTER = "END_OF_CHAPTER"
+
+    fun isPositionBased(mode: String?): Boolean = mode == END_OF_EPISODE || mode == END_OF_CHAPTER
+}
+
+/**
+ * Which playback speed applies (I7): the podcast's own speed when it has one, else the global
+ * speed.  A podcast speed of 0 (or less) means "no override", which is how the settings store it.
+ */
+object PlaybackSpeedResolver {
+    enum class Scope { GLOBAL, PODCAST }
+
+    fun hasOverride(podcastSpeed: Float?): Boolean =
+        podcastSpeed != null && !podcastSpeed.isNaN() && podcastSpeed > 0f
+
+    fun resolve(podcastSpeed: Float?, globalSpeed: Float?): Float = when {
+        hasOverride(podcastSpeed) -> podcastSpeed!!
+        globalSpeed != null && !globalSpeed.isNaN() && globalSpeed > 0f -> globalSpeed
+        else -> 1f
+    }
+
+    /** Where a speed the user picks should be saved when they haven't chosen a scope explicitly. */
+    fun scopeFor(origin: String?, podcastSpeed: Float?): Scope =
+        if (!origin.isNullOrBlank() && hasOverride(podcastSpeed)) Scope.PODCAST else Scope.GLOBAL
+}
 
 @OptIn(UnstableApi::class)
 class PlaybackService : MediaLibraryService() {
@@ -117,6 +151,13 @@ class PlaybackService : MediaLibraryService() {
         private set
     private var sleepTimerChapterMessage: PlayerMessage? = null
     private var sleepTimerEndOfEpisode: Boolean = false
+    /** Kept so stopping or replacing the timer can remove them (they used to leak and cancel later timers). */
+    private var sleepTimerEndOfEpisodeListener: Player.Listener? = null
+    private var sleepTimerChapterListener: Player.Listener? = null
+    /** [SleepTimerModes] value of the running timer, published so the UI can count down from the position. */
+    private var sleepTimerMode: String? = null
+    /** "End of chapter" target position; -1 when not used. */
+    private var sleepTimerEndPositionMs: Long = -1L
     private val sleepTimerFadeDurationMs = 10_000L
     private val sleepTimerRunnable = Runnable {
         sleepTimerTrigger = null
@@ -238,17 +279,34 @@ class PlaybackService : MediaLibraryService() {
             HushCastEngineBridge.loadFromSettings(settingsRepository, this@PlaybackService)
             val backInc = settingsRepository.behavior.playerSeekBackIncrement.first()
             val fwdInc = settingsRepository.behavior.playerSeekForwardIncrement.first()
-            val speed = settingsRepository.behavior.playerPlaybackSpeed.first()
             val trimSilence = settingsRepository.behavior.trimSilence.first()
             currentSeekBackIncrementMs = backInc
             currentSeekForwardIncrementMs = fwdInc
             exoPlayer.setSeekBackIncrementMs(backInc)
             exoPlayer.setSeekForwardIncrementMs(fwdInc)
-            exoPlayer.setPlaybackSpeed(speed)
+            // Speed is applied by the per-item speed observer below (I7).
             exoPlayer.skipSilenceEnabled = trimSilence
             mediaSession?.setMediaButtonPreferences(buildMediaButtons(exoPlayer))
         }
 
+        // I7: each item plays at its podcast's speed, or the global speed when the podcast has none.
+        // Re-resolved on every item change and whenever either setting changes.
+        scope.launch {
+            speedItemKey
+                .flatMapLatest { key ->
+                    val origin = key?.origin
+                    val podcastFlow = if (origin.isNullOrBlank()) flowOf(0f)
+                    else settingsRepository.behavior.podcastPlaybackSpeed(origin)
+                    combine(podcastFlow, settingsRepository.behavior.playerPlaybackSpeed) { podcast, global ->
+                        PlaybackSpeedResolver.resolve(podcast, global)
+                    }
+                }
+                .collect { target ->
+                    if (kotlin.math.abs(exoPlayer.playbackParameters.speed - target) > 0.001f) {
+                        exoPlayer.setPlaybackSpeed(target)
+                    }
+                }
+        }
         scope.launch {
             settingsRepository.behavior.trimSilence.distinctUntilChanged().collect { exoPlayer.skipSilenceEnabled = it }
         }
@@ -264,6 +322,12 @@ class PlaybackService : MediaLibraryService() {
             settingsRepository.hushCast.sponsorSkipSoundUri.distinctUntilChanged().collect {
                 HushCastEngineBridge.sponsorSkipSoundUri = it
             }
+        }
+        scope.launch {
+            settingsRepository.hushCast.bleepStyle.distinctUntilChanged().collect { HushCastEngineBridge.bleepStyle = it }
+        }
+        scope.launch {
+            settingsRepository.hushCast.skipSound.distinctUntilChanged().collect { HushCastEngineBridge.skipSound = it }
         }
         scope.launch {
             settingsRepository.hushCast.muteCustomSoundUri.distinctUntilChanged().collect {
@@ -422,6 +486,27 @@ class PlaybackService : MediaLibraryService() {
     private var loadHushCastJob: Job? = null
     private val activeEpisodeIdFlow = MutableStateFlow<String?>(null)
 
+    /** The playing item, for the speed observer (I7).  A new episode re-applies its speed. */
+    private data class SpeedItemKey(val origin: String?, val episodeId: String?)
+    private val speedItemKey = MutableStateFlow<SpeedItemKey?>(null)
+
+    /**
+     * A speed the user chose outside the speed sheet (e.g. the notification's speed button): apply
+     * it and save it to the scope in use, the podcast's own speed when it has one, else the global one.
+     */
+    fun applyUserSpeed(speed: Float) {
+        if (speed <= 0f) return
+        mediaSession?.player?.setPlaybackSpeed(speed)
+        val origin = getOrigin()
+        scope.launch {
+            val podcastSpeed = origin?.let { settingsRepository.behavior.podcastPlaybackSpeed(it).first() }
+            when (PlaybackSpeedResolver.scopeFor(origin, podcastSpeed)) {
+                PlaybackSpeedResolver.Scope.PODCAST -> settingsRepository.behavior.setPodcastPlaybackSpeed(origin!!, speed)
+                PlaybackSpeedResolver.Scope.GLOBAL -> settingsRepository.behavior.setPlayerPlaybackSpeed(speed)
+            }
+        }
+    }
+
     private fun loadHushCastForEpisode(episodeId: String, origin: String) {
         HushCastEngineBridge.currentEpisodeId = episodeId
         activeEpisodeIdFlow.value = episodeId
@@ -450,6 +535,14 @@ class PlaybackService : MediaLibraryService() {
 
             val epBundle = db.podcastEpisodes().getSyncNullable(episodeId)
             val episodeDurationMs = (epBundle?.episode?.duration ?: 0) * 1000L
+
+            // SRT/VTT transcripts only have cue-level times: fix the times around words that a
+            // rule matches (a short Whisper pass, only when needed).
+            epBundle?.episode?.craftDownloadFile(this@PlaybackService)?.takeIf { it.exists() }?.let { file ->
+                app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueRealignIfNeeded(
+                    this@PlaybackService, episodeId, file.absolutePath, HushCastEngineBridge.defaultActionMode
+                )
+            }
 
             // C1: fetch feed chapters if not yet stored
             val chaptersUrl = epBundle?.episode?.chaptersUrl.orEmpty()
@@ -759,7 +852,7 @@ class PlaybackService : MediaLibraryService() {
             if (last?.episode?.id == episodeId) {
                 val timestamp = System.currentTimeMillis()
                 if ((timestamp - last.history.timestamp) < 1000L * 60 * 60 * 4) {
-                    db.podcastHistory().updateTimestamp(episodeId = episodeId, timestamp = timestamp)
+                    db.podcastHistory().updateTimestamp(id = last.history.id, timestamp = timestamp)
                     return@launch
                 }
             }
@@ -770,6 +863,7 @@ class PlaybackService : MediaLibraryService() {
     private fun registerPlayStateListener() {
         mediaSession?.player?.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                speedItemKey.value = SpeedItemKey(mediaItem?.getOrigin(), mediaItem?.getEpisodeId())
                 updatePlayState()
                 onEpisodeStarted(mediaItem)
                 mediaSession?.let { session ->
@@ -854,6 +948,8 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onIsPlayingChanged(isPlaying: Boolean) {
+                // S11: on-device analysis runs on half the threads while audio plays.
+                app.hushcast.automute.engine.AnalysisThrottle.playbackActive = isPlaying
                 if (isPlaying) {
                     val mediaId = exoPlayer.currentMediaItem?.mediaId
                     if (intelligentPlaybackResumptionEnabled &&
@@ -888,7 +984,9 @@ class PlaybackService : MediaLibraryService() {
             }
 
             override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) {
-                scope.launch { settingsRepository.behavior.setPlayerPlaybackSpeed(playbackParameters.speed) }
+                // I7: no settings write here.  This fires for per-podcast speeds and slider previews
+                // too, and used to overwrite the global speed with them.  The speed sheet and
+                // applyUserSpeed() save to the chosen scope themselves.
                 mediaSession?.setCustomLayout(buildMediaButtons(exoPlayer))
                 super.onPlaybackParametersChanged(playbackParameters)
             }
@@ -954,16 +1052,26 @@ class PlaybackService : MediaLibraryService() {
     private fun publishSleepTimerExtra() {
         val extras = Bundle().apply {
             putLong(EXTRA_SLEEP_TIMER_TRIGGER, sleepTimerTrigger ?: 0L)
+            if (sleepTimerTrigger != null) {
+                putString(EXTRA_SLEEP_TIMER_MODE, sleepTimerMode ?: SleepTimerModes.TIME)
+                putLong(EXTRA_SLEEP_TIMER_END_MS, sleepTimerEndPositionMs)
+            }
         }
         mediaSession?.setSessionExtras(extras)
     }
 
     fun stopSleepTimer() {
         sleepTimerTrigger = null
+        sleepTimerMode = null
+        sleepTimerEndPositionMs = -1L
         sleepTimerHandler.removeCallbacks(sleepTimerRunnable)
         sleepTimerHandler.removeCallbacks(sleepTimerFadeRunnable)
         sleepTimerChapterMessage?.let { runCatching { it.cancel() } }
         sleepTimerChapterMessage = null
+        sleepTimerEndOfEpisodeListener?.let { exoPlayer.removeListener(it) }
+        sleepTimerEndOfEpisodeListener = null
+        sleepTimerChapterListener?.let { exoPlayer.removeListener(it) }
+        sleepTimerChapterListener = null
         if (sleepTimerEndOfEpisode) {
             sleepTimerEndOfEpisode = false
             exoPlayer.pauseAtEndOfMediaItems = false
@@ -975,6 +1083,7 @@ class PlaybackService : MediaLibraryService() {
     fun startSleepTimer(trigger: Long) {
         stopSleepTimer()
         sleepTimerTrigger = trigger
+        sleepTimerMode = SleepTimerModes.TIME
         val delay = (trigger - System.currentTimeMillis()).coerceAtLeast(0L)
 
         sleepTimerHandler.postDelayed(sleepTimerRunnable, delay)
@@ -985,40 +1094,76 @@ class PlaybackService : MediaLibraryService() {
     fun startSleepTimerEndOfEpisode(approxTrigger: Long = 0L) {
         stopSleepTimer()
         sleepTimerEndOfEpisode = true
-        sleepTimerTrigger = approxTrigger.takeIf { it > 0L }
+        // The UI counts down from the position; the trigger only says a timer is on.
+        sleepTimerTrigger = approxTrigger.takeIf { it > 0L } ?: System.currentTimeMillis()
+        sleepTimerMode = SleepTimerModes.END_OF_EPISODE
         exoPlayer.pauseAtEndOfMediaItems = true
-        exoPlayer.addListener(object : Player.Listener {
+        val listener = object : Player.Listener {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
                 if (!playWhenReady && reason == Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM) {
-                    exoPlayer.removeListener(this)
                     stopSleepTimer()
                 }
             }
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-                exoPlayer.removeListener(this)
                 stopSleepTimer()
             }
-        })
+        }
+        sleepTimerEndOfEpisodeListener = listener
+        exoPlayer.addListener(listener)
         publishSleepTimerExtra()
     }
 
     fun startSleepTimerAtPosition(positionMs: Long, approxTrigger: Long = 0L) {
         stopSleepTimer()
-        sleepTimerTrigger = approxTrigger.takeIf { it > 0L }
+        sleepTimerTrigger = approxTrigger.takeIf { it > 0L } ?: System.currentTimeMillis()
+        sleepTimerMode = SleepTimerModes.END_OF_CHAPTER
+        armChapterEndMessage(positionMs)
+        // "End of chapter" follows the listener: a seek re-arms it for the chapter now playing, and
+        // another episode cancels it (the message is tied to the item it was created on).
+        val listener = object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                stopSleepTimer()
+            }
+
+            override fun onPositionDiscontinuity(
+                oldPosition: Player.PositionInfo,
+                newPosition: Player.PositionInfo,
+                reason: Int
+            ) {
+                if (reason != Player.DISCONTINUITY_REASON_SEEK &&
+                    reason != Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT &&
+                    reason != Player.DISCONTINUITY_REASON_SKIP
+                ) return
+                val pos = newPosition.positionMs
+                val chapter = HushCastEngineBridge.currentResolvedChapters
+                    .firstOrNull { pos >= it.startMs && pos < it.endMs }
+                if (chapter == null) {
+                    stopSleepTimer()
+                    return
+                }
+                sleepTimerChapterMessage?.let { runCatching { it.cancel() } }
+                armChapterEndMessage(chapter.endMs)
+                publishSleepTimerExtra()
+            }
+        }
+        sleepTimerChapterListener = listener
+        exoPlayer.addListener(listener)
+        publishSleepTimerExtra()
+    }
+
+    private fun armChapterEndMessage(positionMs: Long) {
+        sleepTimerEndPositionMs = positionMs.coerceAtLeast(0L)
         sleepTimerChapterMessage = exoPlayer.createMessage { _, _ ->
             Handler(Looper.getMainLooper()).post {
                 sleepTimerChapterMessage = null
-                sleepTimerTrigger = null
-                publishSleepTimerExtra()
                 exoPlayer.pause()
-                exoPlayer.volume = 1.0f
+                stopSleepTimer()
             }
         }
             .setLooper(Looper.getMainLooper())
             .setPosition(positionMs.coerceAtLeast(0L))
             .setDeleteAfterDelivery(true)
             .send()
-        publishSleepTimerExtra()
     }
 
     fun syncIfEnabled() {
@@ -1032,6 +1177,7 @@ class PlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        app.hushcast.automute.engine.AnalysisThrottle.playbackActive = false
         updatePlayStateHandler.removeCallbacks(updatePlayStateRunnable)
         sleepTimerHandler.removeCallbacksAndMessages(null)
         scheduledMessages.forEach { runCatching { it.cancel() } }

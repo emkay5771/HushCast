@@ -10,13 +10,15 @@ import sys
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from . import __version__
 from .audio import download_audio_streaming_sha256
@@ -33,7 +35,7 @@ from .models import (
     JobState,
 )
 from .pipeline import AnalysisBackend, detect_accelerator
-from .storage import WorkerCache
+from .storage import WorkerCache, normalize_sha256
 
 logger = logging.getLogger("hushcast_worker.server")
 
@@ -41,7 +43,6 @@ AudioDownloader = Callable[
     [str, Path, Optional[Callable[[int, int], None]]], Awaitable[tuple[str, str]]
 ]
 
-_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 _CTRL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]|\x1b\[[0-9;]*[A-Za-z]")
 
 
@@ -92,9 +93,13 @@ def _sanitize_log_text(text: str, max_len: int = 80) -> str:
 
 
 def _validate_sha256(sha256: str) -> str:
-    if not _SHA256_RE.match(sha256):
+    clean = normalize_sha256(sha256)
+    if clean is None:
         raise HTTPException(status_code=400, detail="Invalid sha256 parameter")
-    return sha256.lower()
+    return clean
+
+
+_TERMINAL_STATES = (JobState.READY, JobState.FAILED, JobState.CANCELLED)
 
 
 class _JobConsoleLogger:
@@ -196,12 +201,30 @@ def create_app(
     else:
         active_downloader = downloader
 
+    # V24: job-state files are written on one background thread, in order, so neither the
+    # event loop nor the download callbacks wait on disk. Shutdown drains the queue.
+    persist_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="hushcast-persist")
+
+    def _in_background(fn, *args) -> None:
+        try:
+            persist_executor.submit(fn, *args)
+        except RuntimeError:  # executor already shut down (app stopping): write inline
+            fn(*args)
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastAPI):
+        try:
+            yield
+        finally:
+            await asyncio.to_thread(persist_executor.shutdown, wait=True)
+
     app = FastAPI(
         title="HushCast Desktop Worker",
         version=__version__,
         docs_url=None if public_deployment else "/docs",
         redoc_url=None if public_deployment else "/redoc",
         openapi_url=None if public_deployment else "/openapi.json",
+        lifespan=_lifespan,
     )
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 
@@ -237,6 +260,16 @@ def create_app(
     gpu_semaphore = asyncio.Semaphore(1)
     loop_ref: list[Optional[asyncio.AbstractEventLoop]] = [None]
     caffeinate_proc: list[object] = [None]
+    # V17: audio the phone asked us to delete while a running job still needs it, and the
+    # audio each job downloaded (known before the job's fileSha256 is published).
+    pending_audio_deletes: set[str] = set()
+    job_audio_sha: dict[str, str] = {}
+
+    def _sha_in_use(sha: str) -> bool:
+        for jid, j in list(jobs.items()):
+            if j.state not in _TERMINAL_STATES and (j.fileSha256 == sha or job_audio_sha.get(jid) == sha):
+                return True
+        return False
 
     def _maybe_start_caffeinate() -> None:
         if sys.platform != "darwin" or caffeinate_proc[0] is not None:
@@ -299,12 +332,16 @@ def create_app(
         jobs[job_id] = updated
         _notify_job(job_id)
         now = time.monotonic()
-        is_terminal = new_state in (JobState.READY, JobState.FAILED, JobState.CANCELLED)
+        is_terminal = new_state in _TERMINAL_STATES
         if is_terminal or new_state != current.state or (now - last_job_save_ts.get(job_id, 0.0)) >= 5.0:
             last_job_save_ts[job_id] = now
-            cache.save_job(updated)
+            _in_background(cache.save_job, updated)
         if is_terminal:
             _maybe_stop_caffeinate()
+            sha = updated.fileSha256 or job_audio_sha.get(job_id)
+            if sha and sha in pending_audio_deletes and not _sha_in_use(sha):
+                pending_audio_deletes.discard(sha)
+                _in_background(cache.delete_audio, sha)
 
     def _cancel_in_flight(jid: Optional[str]) -> None:
         if not jid or jid not in jobs:
@@ -335,38 +372,47 @@ def create_app(
                 detail="Invalid or missing HushCast pairing token",
             )
 
+    def _backend_health() -> Optional[dict]:
+        # Runs in a worker thread: models_ready() imports the ML libraries the first time,
+        # detect_accelerator() may import torch, and list_ready() stats every cached file.
+        if not backend.models_ready():
+            return None
+        cache_bytes, disk_free = cache.cache_stats()
+        return {
+            "accelerator": detect_accelerator(),
+            "gpuName": getattr(backend, "gpu_name", lambda: None)(),
+            "modelsLoaded": bool(getattr(backend, "models_loaded", lambda: False)()),
+            "whisperModel": backend.whisper_model_name(),
+            "chatModelReady": backend.chat_model_ready(),
+            "cachedEpisodes": len(cache.list_ready()),
+            "cacheBytes": cache_bytes,
+            "diskFreeBytes": disk_free,
+        }
+
     @app.get("/v1/health", response_model=DesktopHealthResponse)
     async def health() -> DesktopHealthResponse:
-        ready = backend.models_ready()
-        if not ready:
+        info = await asyncio.to_thread(_backend_health)
+        if info is None:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Worker models or ML dependencies are not ready. Run 'hushcast-worker setup'.",
             )
-        cache_bytes, disk_free = await asyncio.to_thread(cache.cache_stats)
         active_title = None
         if active_gpu_job_id and active_gpu_job_id in jobs:
             active_title = jobs[active_gpu_job_id].episodeId
-        models_loaded = bool(getattr(backend, "models_loaded", lambda: False)())
-        gpu_name = getattr(backend, "gpu_name", lambda: None)()
         return DesktopHealthResponse(
             status="ok",
             version=__version__,
             apiVersion=2,
             pipelineVersion=PIPELINE_VERSION,
             hostname="" if public_deployment else socket.gethostname(),
-            accelerator=detect_accelerator(),
             deployment=deployment_kind or ("modal" if public_deployment else "local"),
-            gpuName=gpu_name,
-            modelsReady=ready,
-            modelsLoaded=models_loaded,
-            whisperModel=backend.whisper_model_name(),
-            chatModelReady=backend.chat_model_ready(),
-            cachedEpisodes=len(cache.list_ready()),
+            modelsReady=True,
             queueDepth=len(gpu_queue_order),
+            queuePosition=len(gpu_queue_order) + (1 if active_gpu_job_id else 0),
+            coldStart=not info["modelsLoaded"],
             activeJob=active_title,
-            cacheBytes=cache_bytes,
-            diskFreeBytes=disk_free,
+            **info,
         )
 
     @app.post(
@@ -377,7 +423,7 @@ def create_app(
     )
     async def submit_job(req: DesktopJobRequest) -> DesktopJobResponse:
         loop_ref[0] = asyncio.get_running_loop()
-        if not backend.models_ready():
+        if not await asyncio.to_thread(backend.models_ready):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Worker models or ML dependencies are not ready.",
@@ -397,7 +443,7 @@ def create_app(
                     fileSha256=existing_sha,
                 )
                 jobs[job_id] = resp
-                cache.save_job(resp)
+                _in_background(cache.save_job, resp)
                 logger.info(
                     "[%s] Cache hit for '%s' (sha=%s)",
                     job_id[:8],
@@ -432,7 +478,7 @@ def create_app(
         )
         jobs[job_id] = job
         last_job_save_ts[job_id] = time.monotonic()
-        cache.save_job(job)
+        _in_background(cache.save_job, job)
         url_to_job_id[req.audioUrl] = job_id
         if req.episodeId:
             episode_to_job_id[req.episodeId] = job_id
@@ -451,6 +497,7 @@ def create_app(
             job_tasks.pop(job_id, None)
             job_cancel_events.pop(job_id, None)
             job_change_events.pop(job_id, None)
+            job_audio_sha.pop(job_id, None)
             jobs_in_thread.discard(job_id)
             if job_id in gpu_queue_order:
                 gpu_queue_order.remove(job_id)
@@ -489,6 +536,10 @@ def create_app(
             kwargs["feed_chapters_url"] = req.feedChaptersUrl
         if "feed_chapters_type" in sig.parameters:
             kwargs["feed_chapters_type"] = req.feedChaptersType
+        if "episode_title" in sig.parameters:
+            kwargs["episode_title"] = req.title or None
+        if "podcast_title" in sig.parameters:
+            kwargs["podcast_title"] = req.podcastTitle
         return fn(**kwargs)
 
     async def _run_job(job_id: str, req: DesktopJobRequest, cancel_event: threading.Event) -> None:
@@ -506,18 +557,13 @@ def create_app(
                         gpu_queue_order.remove(job_id)
                     try:
                         existing_sha = cache.lookup_by_url(req.audioUrl, require_audio=False)
-                        existing_bundle = cache.get_bundle(existing_sha) if existing_sha else None
+                        existing_bundle = (
+                            await asyncio.to_thread(cache.get_bundle, existing_sha) if existing_sha else None
+                        )
                         audio_ok = (stage_req == "SUMMARY_CHAPTERS") or (existing_sha is not None and cache.has_audio(existing_sha))
                         if existing_sha and existing_bundle is not None and audio_ok:
                             cached_audio = cache.audio_path(existing_sha) if cache.has_audio(existing_sha) else None
-                            emb_path = cache.embeddings_path(existing_sha)
-                            existing_emb = None
-                            if emb_path.exists():
-                                try:
-                                    import numpy as np
-                                    existing_emb = np.load(emb_path, allow_pickle=False)
-                                except Exception:
-                                    existing_emb = None
+                            existing_emb = await asyncio.to_thread(cache.load_embeddings, existing_sha)
 
                             def on_reprocess_progress(state: JobState, pct: int, stage_lbl: str) -> None:
                                 if cancel_event.is_set():
@@ -551,7 +597,8 @@ def create_app(
                             if cancel_event.is_set():
                                 return
 
-                            cache.save_reprocessed(
+                            await asyncio.to_thread(
+                                cache.save_reprocessed,
                                 sha256=existing_sha,
                                 bundle=bundle,
                                 embeddings=new_emb,
@@ -608,9 +655,12 @@ def create_app(
                 if cancel_event.is_set():
                     tmp_audio.unlink(missing_ok=True)
                     return
+                # Claim the audio before staging, so a DELETE of it waits for this job (V17).
+                job_audio_sha[job_id] = sha256
 
                 # Stage audio early (V5) and fix B11 (keep freshly downloaded audio if missing on cache hit)
-                staged_audio = cache.stage_audio(
+                staged_audio = await asyncio.to_thread(
+                    cache.stage_audio,
                     sha256=sha256,
                     audio_tmp_path=tmp_audio,
                     content_type=content_type,
@@ -817,7 +867,7 @@ def create_app(
         dependencies=[Depends(verify_auth)],
     )
     async def list_episodes() -> list[DesktopReadyEpisode]:
-        return cache.list_ready()
+        return await asyncio.to_thread(cache.list_ready)
 
     @app.get(
         "/v1/episodes/{sha256}/bundle",
@@ -854,6 +904,28 @@ def create_app(
             },
         )
 
+    @app.delete(
+        "/v1/episodes/{sha256}/audio",
+        status_code=status.HTTP_204_NO_CONTENT,
+        response_class=Response,
+        dependencies=[Depends(verify_auth)],
+    )
+    async def delete_audio(sha256: str) -> Response:
+        """V17: the phone verified its own copy, so drop ours. The bundle stays.
+
+        204 whether the file was deleted or was already gone. If a running job still uses
+        the audio, it is deleted when that job finishes.
+        """
+        clean_sha = _validate_sha256(sha256)
+        if _sha_in_use(clean_sha):
+            pending_audio_deletes.add(clean_sha)
+            logger.info("Audio %s is in use by a running job; deleting it when the job ends", clean_sha[:12])
+        else:
+            removed = await asyncio.to_thread(cache.delete_audio, clean_sha)
+            if removed and on_state_change:
+                await asyncio.to_thread(on_state_change)
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
     @app.post(
         "/v1/search",
         response_model=DesktopSearchResponse,
@@ -876,7 +948,7 @@ def create_app(
             jid for jid, j in jobs.items()
             if j.state not in (JobState.READY, JobState.FAILED, JobState.CANCELLED)
         }
-        res = cache.clear(audio_only=audio_only, active_job_ids=active_ids)
+        res = await asyncio.to_thread(cache.clear, audio_only=audio_only, active_job_ids=active_ids)
         if on_state_change:
             await asyncio.to_thread(on_state_change)
         return res

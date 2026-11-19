@@ -40,7 +40,30 @@ enum class AppColorPalette(val label: String, val seedColorHex: Long) {
     EMERALD("Emerald", 0xFF2E7D32),
     AMBER("Amber", 0xFFEF6C00),
     CORAL("Coral", 0xFFD84315),
-    ROSE("Rose", 0xFFC2185B)
+    ROSE("Rose", 0xFFC2185B),
+    /** Uses the seed color saved in [SettingsRepository.Appearance.customSeedColor]. */
+    CUSTOM("Custom", 0xFF6750A4)
+}
+
+/** How MaterialKolor spreads the seed color across the scheme. */
+enum class AppPaletteStyle(val label: String) {
+    TONAL("Tonal"),
+    VIBRANT("Vibrant"),
+    EXPRESSIVE("Expressive"),
+    NEUTRAL("Neutral")
+}
+
+/** Contrast level passed to MaterialKolor (0 = standard). */
+enum class AppContrast(val label: String, val level: Double) {
+    STANDARD("Standard", 0.0),
+    MEDIUM("Medium", 0.5),
+    HIGH("High", 1.0)
+}
+
+/** Built-in sounds played when an ad is skipped. [WHOOSH] is the default. */
+enum class SkipSound(val label: String, val description: String) {
+    WHOOSH("Whoosh", "A soft rising sweep"),
+    TWO_NOTE("Soft two-note", "Two gentle rising notes")
 }
 
 enum class SubscriptionsLayout {
@@ -68,10 +91,10 @@ enum class AutoAddUpNextMode {
 }
 
 enum class EpisodeSwipeAction(val label: String) {
-    PLAY_NEXT("Add to Up Next (Play Next)"),
-    PLAY_LAST("Add to Up Next (Play Last)"),
-    MARK_PLAYED("Mark Played / Unplayed"),
-    DOWNLOAD("Download / Delete Download"),
+    PLAY_NEXT("Add to Up Next (Play next)"),
+    PLAY_LAST("Add to Up Next (Play last)"),
+    MARK_PLAYED("Mark played / unplayed"),
+    DOWNLOAD("Download / delete download"),
     NONE("None")
 }
 
@@ -99,8 +122,8 @@ enum class PlayerToolbarAction(val label: String) {
     TRANSCRIPT("Transcript"),
     FAVORITE("Favorite"),
     DOWNLOAD("Download"),
-    GO_TO_PODCAST("Go to Podcast"),
-    EPISODE_DETAILS("Episode Details & Notes"),
+    GO_TO_PODCAST("Go to podcast"),
+    EPISODE_DETAILS("Episode details & notes"),
     MARK_PLAYED("Mark played"),
     ANALYZE("Analyze with HushCast AI")
 }
@@ -111,6 +134,76 @@ data class CustomSoundPreset(
     val name: String,
     val uri: String
 )
+
+/**
+ * Custom sounds saved before 1.0.26 live only in the single-URI keys
+ * [SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI] and [SettingsKeys.HUSHCAST_SPONSOR_SKIP_SOUND_URI],
+ * which also mean "the selected sound".  These pure helpers put them into the sound list, so the
+ * selection keys can later be cleared without losing the sound.
+ */
+object LegacyCustomSounds {
+    const val MUTE_NAME = "Custom Mute Sound"
+    const val SKIP_NAME = "Custom Skip Chime"
+
+    fun muteId(uri: String): String = "legacy_mute_${uri.hashCode()}"
+    fun skipId(uri: String): String = "legacy_skip_${uri.hashCode()}"
+
+    /** The saved sound list; empty when nothing is saved, null when it can't be read. */
+    fun parse(rawJson: String?): List<CustomSoundPreset>? =
+        if (rawJson.isNullOrBlank()) {
+            emptyList()
+        } else {
+            runCatching {
+                kotlinx.serialization.json.Json.decodeFromString<List<CustomSoundPreset>>(rawJson)
+            }.getOrNull()
+        }
+
+    fun encode(sounds: List<CustomSoundPreset>): String =
+        kotlinx.serialization.json.Json.encodeToString(sounds)
+
+    /** [stored] plus an entry for each legacy URI that isn't in it yet (same ids as before 1.0.31). */
+    fun withLegacy(
+        stored: List<CustomSoundPreset>,
+        legacyMuteUri: String?,
+        legacySkipUri: String?
+    ): List<CustomSoundPreset> {
+        val result = stored.toMutableList()
+        val mute = legacyMuteUri?.takeIf { it.isNotBlank() }
+        if (mute != null && result.none { it.uri == mute }) {
+            result += CustomSoundPreset(id = muteId(mute), name = MUTE_NAME, uri = mute)
+        }
+        val skip = legacySkipUri?.takeIf { it.isNotBlank() }
+        if (skip != null && result.none { it.uri == skip }) {
+            result += CustomSoundPreset(id = skipId(skip), name = SKIP_NAME, uri = skip)
+        }
+        return result
+    }
+
+    sealed interface Migration {
+        /** Write [sounds] as the new list. */
+        data class Write(val sounds: List<CustomSoundPreset>) : Migration
+
+        /** Every legacy sound is already in the list. */
+        data object UpToDate : Migration
+
+        /** The saved list can't be read; leave it alone rather than overwrite it. */
+        data object Unreadable : Migration
+    }
+
+    fun migrate(rawJson: String?, legacyMuteUri: String?, legacySkipUri: String?): Migration {
+        val stored = parse(rawJson) ?: return Migration.Unreadable
+        val merged = withLegacy(stored, legacyMuteUri, legacySkipUri)
+        return if (merged.size == stored.size) Migration.UpToDate else Migration.Write(merged)
+    }
+
+    /**
+     * Before 1.0.31, picking a built-in tone left the custom mute URI behind.  While the tone is
+     * in use (saved mode BEEP) that URI is a leftover, not a selection; clearing it once keeps
+     * "Sound" on the tone the user hears today.  The sound itself stays in the list.
+     */
+    fun isLeftoverMuteSelection(savedMuteActionMode: String?): Boolean =
+        savedMuteActionMode == app.hushcast.automute.dsp.MuteActionMode.BEEP.name
+}
 
 @kotlinx.serialization.Serializable
 data class PlayerTabConfig(
@@ -200,7 +293,17 @@ object SettingsKeys {
     val HUSHCAST_FAST_ATTENTION = booleanPreferencesKey("hushcast_fast_attention")
     val HUSHCAST_ANALYZE_CHARGING_ONLY = booleanPreferencesKey("hushcast_analyze_charging_only")
     val HUSHCAST_CUSTOM_SOUNDS_JSON = stringPreferencesKey("hushcast_custom_sounds_json")
+    /** Set once the pre-1.0.26 single-URI custom sounds have been written into the sound list. */
+    val HUSHCAST_LEGACY_SOUNDS_MIGRATED = booleanPreferencesKey("hushcast_legacy_sounds_migrated_v1")
     val HUSHCAST_DEV_MODE = booleanPreferencesKey("hushcast_dev_mode")
+    val HUSHCAST_BLEEP_STYLE = stringPreferencesKey("hushcast_bleep_style")
+    val HUSHCAST_SKIP_SOUND = stringPreferencesKey("hushcast_skip_sound")
+    val APPEARANCE_CUSTOM_SEED_COLOR = longPreferencesKey("appearance_custom_seed_color")
+    val APPEARANCE_PALETTE_STYLE = stringPreferencesKey("appearance_palette_style")
+    val APPEARANCE_CONTRAST = stringPreferencesKey("appearance_contrast")
+    val APPEARANCE_PLAYER_BLUR_BACKGROUND = booleanPreferencesKey("appearance_player_blur_background")
+    val APPEARANCE_PLAYER_BLUR_SHEETS = booleanPreferencesKey("appearance_player_blur_sheets")
+    val BEHAVIOR_PLAYER_TOOLBAR_VISIBLE_COUNT = intPreferencesKey("behavior_player_toolbar_visible_count")
 
     val SYNC_ENABLE = booleanPreferencesKey("sync_enable")
     val SYNC_INTERVAL_MINUTES = intPreferencesKey("sync_interval_minutes")
@@ -282,6 +385,52 @@ class SettingsRepository(val context: Context) {
 
         suspend fun setEnableDynamicColors(enable: Boolean) = dataStore.edit { preferences ->
             preferences[SettingsKeys.APPEARANCE_ENABLE_DYNAMIC_COLORS] = enable
+        }
+
+        /** Seed for [AppColorPalette.CUSTOM], as ARGB. */
+        val customSeedColor: Flow<Long> = dataStore.data
+            .map { preferences ->
+                preferences[SettingsKeys.APPEARANCE_CUSTOM_SEED_COLOR] ?: AppColorPalette.CUSTOM.seedColorHex
+            }
+
+        suspend fun setCustomSeedColor(argb: Long) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_CUSTOM_SEED_COLOR] = argb or 0xFF000000L
+        }
+
+        val paletteStyle: Flow<AppPaletteStyle> = dataStore.data
+            .map { preferences ->
+                runCatching { preferences[SettingsKeys.APPEARANCE_PALETTE_STYLE]?.let { AppPaletteStyle.valueOf(it) } }
+                    .getOrNull() ?: AppPaletteStyle.TONAL
+            }
+
+        suspend fun setPaletteStyle(style: AppPaletteStyle) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_PALETTE_STYLE] = style.name
+        }
+
+        val contrast: Flow<AppContrast> = dataStore.data
+            .map { preferences ->
+                runCatching { preferences[SettingsKeys.APPEARANCE_CONTRAST]?.let { AppContrast.valueOf(it) } }
+                    .getOrNull() ?: AppContrast.STANDARD
+            }
+
+        suspend fun setContrast(contrast: AppContrast) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_CONTRAST] = contrast.name
+        }
+
+        /** Blurred artwork behind the full player. */
+        val playerBlurBackground: Flow<Boolean> = dataStore.data
+            .map { preferences -> preferences[SettingsKeys.APPEARANCE_PLAYER_BLUR_BACKGROUND] ?: true }
+
+        suspend fun setPlayerBlurBackground(enable: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_PLAYER_BLUR_BACKGROUND] = enable
+        }
+
+        /** Blur the player behind its sheets, where the device supports window blur. */
+        val playerBlurSheets: Flow<Boolean> = dataStore.data
+            .map { preferences -> preferences[SettingsKeys.APPEARANCE_PLAYER_BLUR_SHEETS] ?: true }
+
+        suspend fun setPlayerBlurSheets(enable: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_PLAYER_BLUR_SHEETS] = enable
         }
 
         val useAlternativeBranding: Flow<Boolean> = dataStore.data
@@ -647,6 +796,16 @@ class SettingsRepository(val context: Context) {
             preferences[SettingsKeys.BEHAVIOR_PLAYER_TOOLBAR_ACTIONS] = actions.distinct().joinToString(",") { it.name }
         }
 
+        /** How many actions show in the player's toolbar before the ⋯ menu (3–5). */
+        val playerToolbarVisibleCount: Flow<Int> = dataStore.data
+            .map { preferences ->
+                (preferences[SettingsKeys.BEHAVIOR_PLAYER_TOOLBAR_VISIBLE_COUNT] ?: 4).coerceIn(3, 5)
+            }
+
+        suspend fun setPlayerToolbarVisibleCount(count: Int) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.BEHAVIOR_PLAYER_TOOLBAR_VISIBLE_COUNT] = count.coerceIn(3, 5)
+        }
+
         val playerTabsConfig: Flow<List<PlayerTabConfig>> = dataStore.data
             .map { preferences ->
                 val defaults = listOf(
@@ -744,7 +903,10 @@ class SettingsRepository(val context: Context) {
             preferences[SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI]?.takeIf { it.isNotBlank() }
         }
 
+        /** The selected custom mute sound; null when a built-in tone is chosen. */
         suspend fun setMuteCustomSoundUri(uri: String?) = dataStore.edit { preferences ->
+            // A pre-1.0.26 sound lives only in this key: keep it in the list before replacing it.
+            persistLegacySounds(preferences)
             if (uri.isNullOrBlank()) preferences.remove(SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI)
             else preferences[SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI] = uri
         }
@@ -762,6 +924,7 @@ class SettingsRepository(val context: Context) {
         }
 
         suspend fun setSponsorSkipSoundUri(uri: String?) = dataStore.edit { preferences ->
+            persistLegacySounds(preferences)
             if (uri.isNullOrBlank()) preferences.remove(SettingsKeys.HUSHCAST_SPONSOR_SKIP_SOUND_URI)
             else preferences[SettingsKeys.HUSHCAST_SPONSOR_SKIP_SOUND_URI] = uri
         }
@@ -843,37 +1006,29 @@ class SettingsRepository(val context: Context) {
             preferences[SettingsKeys.HUSHCAST_DEV_MODE] = enabled
         }
 
+        val bleepStyle: Flow<app.hushcast.automute.dsp.BleepStyle> = dataStore.data.map { preferences ->
+            app.hushcast.automute.dsp.BleepStyle.fromName(preferences[SettingsKeys.HUSHCAST_BLEEP_STYLE])
+        }
+
+        suspend fun setBleepStyle(style: app.hushcast.automute.dsp.BleepStyle) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.HUSHCAST_BLEEP_STYLE] = style.name
+        }
+
+        val skipSound: Flow<SkipSound> = dataStore.data.map { preferences ->
+            runCatching { preferences[SettingsKeys.HUSHCAST_SKIP_SOUND]?.let { SkipSound.valueOf(it) } }
+                .getOrNull() ?: SkipSound.WHOOSH
+        }
+
+        suspend fun setSkipSound(sound: SkipSound) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.HUSHCAST_SKIP_SOUND] = sound.name
+        }
+
+        /**
+         * The saved sound list.  Sounds saved before 1.0.26 are moved into it once at startup
+         * ([migrateLegacyCustomSoundsOnce]); until then they're added here, so they never vanish.
+         */
         val customSounds: Flow<List<CustomSoundPreset>> = dataStore.data.map { preferences ->
-            val raw = preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON]
-            val parsed = if (raw.isNullOrBlank()) {
-                emptyList()
-            } else {
-                runCatching {
-                    kotlinx.serialization.json.Json.decodeFromString<List<CustomSoundPreset>>(raw)
-                }.getOrNull().orEmpty()
-            }.toMutableList()
-            // Migrate any legacy single custom sound URI if not yet in list
-            val legacyMute = preferences[SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI]?.takeIf { it.isNotBlank() }
-            if (legacyMute != null && parsed.none { it.uri == legacyMute }) {
-                parsed.add(
-                    CustomSoundPreset(
-                        id = "legacy_mute_${legacyMute.hashCode()}",
-                        name = "Custom Mute Sound",
-                        uri = legacyMute
-                    )
-                )
-            }
-            val legacySkip = preferences[SettingsKeys.HUSHCAST_SPONSOR_SKIP_SOUND_URI]?.takeIf { it.isNotBlank() }
-            if (legacySkip != null && parsed.none { it.uri == legacySkip }) {
-                parsed.add(
-                    CustomSoundPreset(
-                        id = "legacy_skip_${legacySkip.hashCode()}",
-                        name = "Custom Skip Chime",
-                        uri = legacySkip
-                    )
-                )
-            }
-            parsed
+            storedSoundsWithLegacy(preferences)
         }
 
         suspend fun addCustomSound(name: String, uri: String): CustomSoundPreset {
@@ -883,53 +1038,79 @@ class SettingsRepository(val context: Context) {
                 uri = uri
             )
             dataStore.edit { preferences ->
-                val raw = preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON]
-                val current = if (raw.isNullOrBlank()) {
-                    emptyList()
-                } else {
-                    runCatching {
-                        kotlinx.serialization.json.Json.decodeFromString<List<CustomSoundPreset>>(raw)
-                    }.getOrNull().orEmpty()
-                }.toMutableList()
+                val current = storedSoundsWithLegacy(preferences).toMutableList()
                 current.add(preset)
-                preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON] =
-                    kotlinx.serialization.json.Json.encodeToString(current)
+                preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON] = LegacyCustomSounds.encode(current)
             }
             return preset
+        }
+
+        /**
+         * The saved sound list plus the entries for sounds saved before 1.0.26 (one URI per slot)
+         * that aren't in it yet.  Rename, delete and add write this list back, so those entries
+         * are kept too.
+         */
+        private fun storedSoundsWithLegacy(preferences: Preferences): List<CustomSoundPreset> =
+            LegacyCustomSounds.withLegacy(
+                stored = LegacyCustomSounds.parse(preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON]).orEmpty(),
+                legacyMuteUri = preferences[SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI],
+                legacySkipUri = preferences[SettingsKeys.HUSHCAST_SPONSOR_SKIP_SOUND_URI]
+            )
+
+        /**
+         * Writes legacy sounds that are only in the selection keys into the list.  Returns false
+         * when the saved list can't be read (it's left untouched then).
+         */
+        private fun persistLegacySounds(preferences: androidx.datastore.preferences.core.MutablePreferences): Boolean =
+            when (
+                val migration = LegacyCustomSounds.migrate(
+                    rawJson = preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON],
+                    legacyMuteUri = preferences[SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI],
+                    legacySkipUri = preferences[SettingsKeys.HUSHCAST_SPONSOR_SKIP_SOUND_URI]
+                )
+            ) {
+                is LegacyCustomSounds.Migration.Write -> {
+                    preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON] = LegacyCustomSounds.encode(migration.sounds)
+                    true
+                }
+                LegacyCustomSounds.Migration.UpToDate -> true
+                LegacyCustomSounds.Migration.Unreadable -> false
+            }
+
+        /**
+         * One-time startup migration: custom sounds saved before 1.0.26 are written into the sound
+         * list, so the mute/skip selection keys only mean "the selected sound" from then on.
+         */
+        suspend fun migrateLegacyCustomSoundsOnce() {
+            dataStore.edit { preferences ->
+                if (preferences[SettingsKeys.HUSHCAST_LEGACY_SOUNDS_MIGRATED] == true) return@edit
+                // An unreadable list is left alone and retried next start; the read path still
+                // shows the legacy sounds meanwhile.
+                if (persistLegacySounds(preferences)) {
+                    if (LegacyCustomSounds.isLeftoverMuteSelection(preferences[SettingsKeys.HUSHCAST_MUTE_ACTION_MODE])) {
+                        preferences.remove(SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI)
+                    }
+                    preferences[SettingsKeys.HUSHCAST_LEGACY_SOUNDS_MIGRATED] = true
+                }
+            }
         }
 
         suspend fun renameCustomSound(id: String, newName: String) {
             val trimmed = newName.trim()
             if (trimmed.isEmpty()) return
             dataStore.edit { preferences ->
-                val raw = preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON]
-                val current = if (raw.isNullOrBlank()) {
-                    emptyList()
-                } else {
-                    runCatching {
-                        kotlinx.serialization.json.Json.decodeFromString<List<CustomSoundPreset>>(raw)
-                    }.getOrNull().orEmpty()
-                }
+                val current = storedSoundsWithLegacy(preferences)
                 val updated = current.map { if (it.id == id) it.copy(name = trimmed) else it }
-                preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON] =
-                    kotlinx.serialization.json.Json.encodeToString(updated)
+                preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON] = LegacyCustomSounds.encode(updated)
             }
         }
 
         suspend fun removeCustomSound(id: String) {
             dataStore.edit { preferences ->
-                val raw = preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON]
-                val current = if (raw.isNullOrBlank()) {
-                    emptyList()
-                } else {
-                    runCatching {
-                        kotlinx.serialization.json.Json.decodeFromString<List<CustomSoundPreset>>(raw)
-                    }.getOrNull().orEmpty()
-                }
+                val current = storedSoundsWithLegacy(preferences)
                 val removed = current.firstOrNull { it.id == id }
                 val updated = current.filterNot { it.id == id }
-                preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON] =
-                    kotlinx.serialization.json.Json.encodeToString(updated)
+                preferences[SettingsKeys.HUSHCAST_CUSTOM_SOUNDS_JSON] = LegacyCustomSounds.encode(updated)
                 if (removed != null) {
                     if (preferences[SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI] == removed.uri) {
                         preferences.remove(SettingsKeys.HUSHCAST_MUTE_CUSTOM_SOUND_URI)

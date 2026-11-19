@@ -1,3 +1,81 @@
+# HushCast v1.0.31-hushcast
+
+## What's New
+- **Transcripts**:
+  - **Whole sentences again**: The sentence splitter no longer cuts one word per line when a stretch has no punctuation. The worker and the phone use the same rule.
+  - **No more lowercase windows**: The worker prompts Whisper with the podcast and episode titles, so every 30-second window keeps capitals, punctuation and name spellings.
+  - **No more dropped words at window edges**: Hard cuts between windows are re-decoded and stitched, and sentences flow across window edges.
+  - **Speaker labels and paragraphs**: Transcripts show "Speaker N" again and group sentences into paragraphs, on screen and in the exported text.
+  - **Publisher transcripts**: When a feed lists several transcripts, the app tries them best format first (JSON, VTT, SRT, then HTML) and shows the first that loads. The worker spot-checks word-level publisher timings against the audio, and only uses aligned SRT/VTT text when nearly all of it lines up.
+  - The pipeline version is now 6, so episodes are re-processed with these fixes.
+- **Processing**:
+  - **Mute mode applies again**: Words you've added follow the global mute mode. Existing words are switched over once.
+  - **Analyze buttons always run**: Up Next, the player and the episode page share one path. A tap replaces a queued charging-only job, uses your worker when it's switched on, and says when it's waiting for a charger.
+  - **One meaning for the worker switch**: The worker is used only when it's switched on and has an address, everywhere. If it's off, the phone does the work and says so.
+  - **Re-process from the player**: The HushCast sheet offers "Re-process episode", or "Update processing" when a newer pipeline is available.
+  - **Progress ring**: The HushCast icon shows a progress ring again while an episode is processing.
+  - **Re-runs**: Stale results re-run on your worker when it's switched on; otherwise on the phone, only while charging on unmetered Wi-Fi. Three per refresh, or ten while charging on Wi-Fi. Re-runs use the feed's transcript when there is one, keep the old results if they fail, and no longer loop or restart each other.
+  - **Cloud jobs**: "Cancel processing" stops the cloud job. A retried download re-attaches to its running job instead of starting a second one, and the phone cancels the job when it gives up waiting.
+  - **Worker status**: A failed worker job shows why. An out-of-date worker is flagged. While a job waits, the row says the cloud GPU is starting or how many jobs are ahead. The worker deletes its copy of the audio once the phone has it.
+  - **Dynamic ad insertion**: Ad breaks are placed after the last word before the ad, not mid-clip, and words are shifted instead of stretched across ads. MP3 clips seek through a cached table, about 10× faster on long episodes.
+  - **SRT/VTT word times**: Words a rule matches inside estimated cues are muted for the whole cue until a short Whisper pass fixes their times, which runs when the episode plays.
+  - **Lighter on the phone**: Analysis uses fewer threads while audio plays or the phone is warm, a second tap no longer restarts a running analysis, and leftover checkpoints and old-file results are cleaned up.
+- **Player**:
+  - **Layout**: The artwork sizes to the available space and the title is centered. The chapter row has matching buttons and a thin progress bar. The skip and undo pill sits on the artwork, and play/pause always uses the primary color.
+  - **Seek bar**: A rounded M3E track with a gap at the handle; marks are clipped to the track.
+  - **Scrubbing**: The scrub card floats above the bar without moving the page. It names the chapter you'd land in and gives a haptic tick at each chapter boundary.
+  - **Swipe up for Up Next**: Swiping up anywhere above the seek bar opens Up Next. A small "Up Next" grip shows that it's there.
+  - **Toolbar**: Choose how many toolbar icons show (3, 4 or 5), and drag to reorder them in Customize player, with a live preview and Reset to default.
+  - **Blur**: A blurred-artwork background behind the player, and blur behind the player's sheets where the device supports it. Both can be switched off in Appearance.
+  - **Per-podcast speed works**: A podcast's own speed is applied whenever its episodes play, and changing the speed no longer overwrites the global speed. The notification's speed button follows the same rule.
+  - **Sleep timer**: End of chapter and End of episode count down from the playback position and speed, and hold while paused. Switching or cancelling a timer no longer cancels a later one, and End of chapter follows seeks.
+  - **Episode page**: No longer flashes the previous episode; chapter taps, including a chapter at 0:00, seek correctly. "Unmute word" unmutes that spot.
+  - **Transcript**: Sponsor blocks have a "Play anyway" button. Long-press a line to play from it, copy it, or mute or unmute a word. The overlay animates in and out and supports predictive back.
+  - **HushCast sheet**: Auto-skip is "Confirmed sponsors" or "All detected ads", with a per-podcast reset. Mute style is a segmented row.
+  - **⋯ menu**: One "Process episode" item and Share; developer details appear only in developer mode.
+  - **Smoother**: The Playing page no longer redraws twice a second, the selected tab survives rotation, sheets animate closed, and colors cross-fade between episodes.
+  - The mini player's ad marks use the theme color.
+- **Sounds**:
+  - **Mute sound**: Choose Soft tone (the new default), Warm boop or Classic bleep, each with a Test button.
+  - **Skip sound**: Choose Whoosh (the new default) or Soft two-note.
+  - Custom sounds saved before 1.0.26 are moved into your sound list once, so they can be renamed and deleted, and picking a tone no longer loses them. Custom-sound previews stop after 5 seconds.
+- **Home, Lists & Navigation**:
+  - **Refresh**: Pull-to-refresh tells you when you're offline instead of spinning forever, stops once your feeds are in, and says when a refresh or some podcasts failed.
+  - **Removing downloads**: Swiping away a download can be undone without re-downloading; the file is deleted only after the Undo message goes away. The episode that's playing can't be removed.
+  - **Back**: Back from a tab goes to your startup tab.
+  - **Steady grid**: The Home grid no longer reshuffles when you come back to it.
+  - **Folders**: Organize Folders opens again, and folders can be reordered by dragging.
+  - **Long-press a podcast**: Adds Settings; Mark all as played and Unsubscribe ask first.
+  - **Top bars**: Search from Home. List and Downloads show a count or size and keep extra actions in a menu.
+  - **Lists under the mini player**: Tab screens no longer add the system bar padding twice, so lists scroll under the mini player down to the nav bar.
+  - **M3E navigation layouts**: The short nav bar on phones, its wide form in landscape, and the wide rail on tablets and foldables. Tabs fade through when you switch.
+  - **Faster start**: A splash screen instead of a blocking startup, and a baseline profile.
+  - **History**: An episode played again no longer appears several times; existing duplicates are cleaned up once.
+  - Library → Up Next opens the tapped episode again. Bottom-bar tab names match the tab labels.
+- **Feeds & Background Work**:
+  - **Faster refresh**: Chapter files are fetched only for new or changed episodes, in parallel, after notifications and auto-download, with back-off for broken links.
+  - **One parse per feed**, and feeds that rarely change still pick up chapter and transcript links once after this update.
+  - New-episode counts stay correct after a refresh, and download notifications appear only once a download actually starts.
+- **Settings & Appearance**:
+  - **Grouped settings**: Every settings page, including per-podcast settings, uses the same grouped lists with headers. Group shapes number themselves. The HushCast cards and loose boxes are gone.
+  - **One name per mute mode**: Silence, Duck, Sound and Skip, used everywhere.
+  - **Appearance redesign**: a live preview; mode buttons with icons; one row of color swatches (Wallpaper, eight palettes and a new **Custom** color with a hue slider, suggestions and a hex field); "Fine-tune colors" for color style and contrast; dark background tiles; a Player group with the artwork-color and blur switches; a Navigation group.
+  - **Small screens**: Segmented buttons and labels fit on 360 dp screens.
+- **Accessibility & Copy**:
+  - Episode rows announce their state ("Played, downloaded, HushCast ready"); switch rows are announced as switches; swipe actions are named.
+  - Undo, the streaming pill and color swatches have 48 dp touch targets.
+  - Dialogs name their action ("Delete download?" → Delete / Cancel), and the app says "played" everywhere.
+  - Filled icons for the selected tab, outlined for the rest.
+- **Cloud & Desktop Worker**:
+  - **Pinned models**: Every model is pinned to a fixed version and checked by SHA-256; downloads resume and bad files are never used. Cold starts no longer reach Hugging Face.
+  - **Faster embeddings on Modal**: llama-cpp-python now matches the lock file (0.3.37), so embeddings are batched again.
+  - **Reliable jobs**: Jobs that wait too long for a GPU fail cleanly instead of starting later; health reports real model and queue state; progress writes no longer block the server.
+  - **Deploy check**: Every deploy ends with a health check.
+  - **Mac worker**: Setup verifies every file and installs a launchd service; HTTPS with certificate pinning; the server stays responsive during jobs.
+  - **Leaner**: Lower memory use, faster audio decoding and batched word alignment on the GPU.
+
+---
+
 # HushCast v1.0.30-hushcast
 
 ## What's New

@@ -24,6 +24,19 @@ interface EpisodeChapterDao {
     @Insert
     suspend fun insertAll(chapters: List<EpisodeChapterModel>)
 
+    @Query(
+        """
+        SELECT c.episodeId AS episodeId,
+               SUM(CASE WHEN c.source IN ('json', 'podlove') THEN 1 ELSE 0 END) AS feedCount,
+               SUM(CASE WHEN c.source != 'generated' THEN 1 ELSE 0 END) AS publisherCount
+        FROM episodeChapter c
+        INNER JOIN podcastEpisode e ON e.id = c.episodeId
+        WHERE e.origin = :origin
+        GROUP BY c.episodeId
+        """
+    )
+    suspend fun chapterCountsForOrigin(origin: String): List<app.podiumpodcasts.podium.api.db.model.EpisodeChapterCounts>
+
     @Transaction
     suspend fun replaceByEpisode(episodeId: String, chapters: List<EpisodeChapterModel>) {
         val prevSource = getByEpisodeSync(episodeId).firstOrNull()?.source

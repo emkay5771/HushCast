@@ -78,7 +78,16 @@ data class PodcastEpisodeModel(
     @ColumnInfo("chaptersUrl", defaultValue = "")
     val chaptersUrl: String = "",
     @ColumnInfo("chaptersType", defaultValue = "")
-    val chaptersType: String = ""
+    val chaptersType: String = "",
+    /** Every other feed transcript, best first: a JSON array of `{url, type}` (T5). */
+    @ColumnInfo("transcriptAlternatesJson", defaultValue = "")
+    val transcriptAlternatesJson: String = "",
+    /** Failed or empty chapter-URL fetches during feed refresh, for backoff. */
+    @ColumnInfo("chaptersFetchFailures", defaultValue = "0")
+    val chaptersFetchFailures: Int = 0,
+    /** Epoch ms before which a refresh doesn't retry the chapters URL. */
+    @ColumnInfo("chaptersRetryAfter", defaultValue = "0")
+    val chaptersRetryAfter: Long = 0L
 ) {
     @android.annotation.SuppressLint("RestrictedApi")
     fun createMediaItem(
@@ -141,3 +150,14 @@ data class PodcastEpisodeModel(
         return File(podcastDownloadsDir, audioUrl.sha256())
     }
 }
+
+/**
+ * The feed transcripts to try, in order: the primary one, then the alternates (T5).
+ * Each pair is (url, type); the type can be blank.
+ */
+fun PodcastEpisodeModel.transcriptCandidates(): List<Pair<String, String>> =
+    app.podiumpodcasts.podium.api.rss.TranscriptRanking.candidates(
+        primaryUrl = transcriptUrl,
+        primaryType = transcriptType,
+        alternatesJson = transcriptAlternatesJson
+    )

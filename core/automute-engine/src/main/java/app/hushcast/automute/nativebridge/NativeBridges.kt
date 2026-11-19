@@ -146,5 +146,8 @@ internal object LlamaJni {
     external fun embed(handle: Long, texts: Array<ByteArray>): FloatArray
 
     @JvmStatic
+    external fun setThreads(handle: Long, threads: Int)
+
+    @JvmStatic
     external fun free(handle: Long)
 }

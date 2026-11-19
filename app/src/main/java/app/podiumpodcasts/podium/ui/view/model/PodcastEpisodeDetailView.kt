@@ -50,6 +50,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -225,14 +226,24 @@ fun PodcastEpisodeDetailView(
                 key = "episode_detail_shared"
             )
             val detailMediaVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
-            androidx.compose.runtime.LaunchedEffect(episode.id, episode.duration) {
+            LaunchedEffect(episode.id, episode.duration) {
                 detailPlayerVm.bindEpisode(episode.id, episode.duration * 1000L)
             }
-            val detailChapters by detailPlayerVm.resolvedChapters.collectAsState(initial = emptyList())
-            val detailTranscriptState by detailPlayerVm.transcriptState.collectAsState(
-                initial = app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.TranscriptLoadState.Loading
-            )
-            val detailMutes by detailPlayerVm.muteSegments.collectAsState(initial = emptyList())
+            val chaptersScoped by detailPlayerVm.resolvedChaptersScoped.collectAsState()
+            val transcriptScoped by detailPlayerVm.transcriptStateScoped.collectAsState()
+            val mutesScoped by detailPlayerVm.muteSegmentsScoped.collectAsState()
+            val adsScoped by detailPlayerVm.adSegmentsScoped.collectAsState()
+            val detailChapters = chaptersScoped.valueFor(episode.id) ?: emptyList()
+            val detailTranscriptState = transcriptScoped.valueFor(episode.id)
+                ?: app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.TranscriptLoadState.Loading
+            val detailMutes = mutesScoped.valueFor(episode.id) ?: emptyList()
+            val detailAds = adsScoped.valueFor(episode.id) ?: emptyList()
+            val devMode by app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
+                .hushCast.devMode.collectAsState(initial = false)
+            var pendingWordMute by remember { mutableStateOf<app.hushcast.automute.engine.Word?>(null) }
+            var showNeedsDownloadDialog by remember { mutableStateOf(false) }
+            val pageScope = rememberCoroutineScope()
+            val pageDb = app.podiumpodcasts.podium.ui.helper.LocalDatabase.current
 
             // Pocket Casts-style balanced action row
             Surface(
@@ -288,7 +299,7 @@ fun PodcastEpisodeDetailView(
                     val isAlreadyDownloaded = bundle.download?.state ==
                         app.podiumpodcasts.podium.api.db.model.PodcastEpisodeDownloadState.DOWNLOADED.value
                     val hasDesktopUrl = remember(downloadContext) {
-                        app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(downloadContext).isNotBlank()
+                        app.hushcast.automute.engine.HushCastPrefs.isWorkerActive(downloadContext)
                     }
                     if (showSaveToList) {
                         app.podiumpodcasts.podium.ui.dialog.bottomsheet.SaveToListBottomSheet(
@@ -317,97 +328,126 @@ fun PodcastEpisodeDetailView(
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("Play Last") },
+                                text = { Text("Play last") },
                                 onClick = {
                                     showMoreMenu = false
                                     detailMediaVm.enqueue(downloadContext, bundle)
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("Save to List") },
+                                text = { Text("Save to list") },
                                 onClick = {
                                     showMoreMenu = false
                                     showSaveToList = true
                                 }
                             )
-                            if (detailChapters.isEmpty()) {
-                                DropdownMenuItem(
-                                    text = { Text("Generate chapters") },
-                                    onClick = {
-                                        showMoreMenu = false
-                                        downloadScope.launch {
-                                            val localFile = episode.craftDownloadFile(downloadContext)
-                                            if (isAlreadyDownloaded && !hasDesktopUrl && localFile.exists()) {
-                                                app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueAnalyzeNow(
-                                                    context = downloadContext,
-                                                    episodeId = episode.id,
-                                                    audioPath = localFile.absolutePath,
-                                                    actionMode = app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode,
-                                                    episodeTitle = episode.title
-                                                )
-                                            } else {
-                                                app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
-                                                    context = downloadContext,
-                                                    db = downloadDb,
-                                                    episodeId = episode.id,
-                                                    downloadMethod = if (hasDesktopUrl) {
-                                                        app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
-                                                    } else {
-                                                        app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
-                                                    },
-                                                    forceReprocess = isAlreadyDownloaded
-                                                )
-                                            }
-                                        }
-                                    }
-                                )
-                            }
                             DropdownMenuItem(
-                                text = { Text("Process with HushCast") },
+                                text = { Text("Share") },
+                                onClick = {
+                                    showMoreMenu = false
+                                    val link = episode.link.ifBlank { episode.audioUrl }
+                                    val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(android.content.Intent.EXTRA_SUBJECT, episode.title)
+                                        putExtra(
+                                            android.content.Intent.EXTRA_TEXT,
+                                            if (link.isBlank()) episode.title else "${episode.title}\n$link"
+                                        )
+                                    }
+                                    runCatching {
+                                        downloadContext.startActivity(
+                                            android.content.Intent.createChooser(shareIntent, "Share episode")
+                                        )
+                                    }
+                                }
+                            )
+                            // I13: one entry, routed like every other "Process" button.
+                            DropdownMenuItem(
+                                text = { Text("Process episode") },
                                 onClick = {
                                     showMoreMenu = false
                                     downloadScope.launch {
-                                        val localFile = episode.craftDownloadFile(downloadContext)
-                                        if (isAlreadyDownloaded && !hasDesktopUrl && localFile.exists()) {
-                                            app.hushcast.automute.storage.AutoMuteDatabase.getInstance(downloadContext)
-                                                .dao()
-                                                .upsertStatus(
-                                                    app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
-                                                        episodeId = episode.id,
-                                                        badge = app.hushcast.automute.dsp.ReadinessBadge.ANALYZING.name,
-                                                        progressPercent = 0,
-                                                        stageLabel = "Queued for AI analysis…"
-                                                    )
-                                                )
-                                            app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueAnalyzeNow(
-                                                context = downloadContext,
-                                                episodeId = episode.id,
-                                                audioPath = localFile.absolutePath,
-                                                actionMode = app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode,
-                                                episodeTitle = episode.title
-                                            )
+                                        val outcome = app.podiumpodcasts.podium.ui.hushcast.HushCastAnalyze.start(
+                                            context = downloadContext,
+                                            db = downloadDb,
+                                            episodeId = episode.id,
+                                            actionMode = app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode
+                                        )
+                                        if (outcome == app.podiumpodcasts.podium.ui.hushcast.HushCastAnalyze.Outcome.NEEDS_DOWNLOAD) {
+                                            showNeedsDownloadDialog = true
                                         } else {
-                                            app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
-                                                context = downloadContext,
-                                                db = downloadDb,
-                                                episodeId = episode.id,
-                                                downloadMethod = if (hasDesktopUrl) {
-                                                    app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
-                                                } else {
-                                                    app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
-                                                },
-                                                forceReprocess = isAlreadyDownloaded
-                                            )
+                                            android.widget.Toast.makeText(
+                                                downloadContext,
+                                                app.podiumpodcasts.podium.ui.hushcast.HushCastAnalyze.message(outcome),
+                                                android.widget.Toast.LENGTH_SHORT
+                                            ).show()
                                         }
                                     }
                                 }
                             )
-                            if (hasDesktopUrl) {
+                            // Stage-specific variants, for testing only.
+                            if (devMode) {
+                                androidx.compose.material3.HorizontalDivider()
+                                if (detailChapters.isEmpty()) {
+                                    DropdownMenuItem(
+                                        text = { Text("Generate chapters (developer)") },
+                                        onClick = {
+                                            showMoreMenu = false
+                                            downloadScope.launch {
+                                                val localFile = episode.craftDownloadFile(downloadContext)
+                                                val hasFile = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { localFile.exists() }
+                                                if (isAlreadyDownloaded && !hasDesktopUrl && hasFile) {
+                                                    app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueAnalyzeNow(
+                                                        context = downloadContext,
+                                                        episodeId = episode.id,
+                                                        audioPath = localFile.absolutePath,
+                                                        actionMode = app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode,
+                                                        episodeTitle = episode.title
+                                                    )
+                                                } else {
+                                                    app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                                        context = downloadContext,
+                                                        db = downloadDb,
+                                                        episodeId = episode.id,
+                                                        downloadMethod = if (hasDesktopUrl) {
+                                                            app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP
+                                                        } else {
+                                                            app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
+                                                        },
+                                                        forceReprocess = isAlreadyDownloaded
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    )
+                                }
+                                if (hasDesktopUrl) {
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                if (isAlreadyDownloaded) "Refresh on worker (developer)"
+                                                else "Download via worker (developer)"
+                                            )
+                                        },
+                                        onClick = {
+                                            showMoreMenu = false
+                                            downloadScope.launch {
+                                                app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                                    context = downloadContext,
+                                                    db = downloadDb,
+                                                    episodeId = episode.id,
+                                                    downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP,
+                                                    forceReprocess = isAlreadyDownloaded
+                                                )
+                                            }
+                                        }
+                                    )
+                                }
                                 DropdownMenuItem(
                                     text = {
                                         Text(
-                                            if (isAlreadyDownloaded) "Refresh on Desktop / Cloud"
-                                            else "Download via Desktop / Cloud"
+                                            if (isAlreadyDownloaded) "Re-download and analyze on phone (developer)"
+                                            else "Download and analyze on phone (developer)"
                                         )
                                     },
                                     onClick = {
@@ -417,54 +457,69 @@ fun PodcastEpisodeDetailView(
                                                 context = downloadContext,
                                                 db = downloadDb,
                                                 episodeId = episode.id,
-                                                downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP,
-                                                forceReprocess = isAlreadyDownloaded
+                                                downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
+                                            )
+                                        }
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            if (isAlreadyDownloaded) "Re-download audio only (developer)"
+                                            else "Download audio only (developer)"
+                                        )
+                                    },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        downloadScope.launch {
+                                            app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                                context = downloadContext,
+                                                db = downloadDb,
+                                                episodeId = episode.id,
+                                                downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS
                                             )
                                         }
                                     }
                                 )
                             }
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        if (isAlreadyDownloaded) "Re-download & Analyze On-Device"
-                                        else "Download & Analyze On-Device"
-                                    )
-                                },
-                                onClick = {
-                                    showMoreMenu = false
-                                    downloadScope.launch {
-                                        app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
-                                            context = downloadContext,
-                                            db = downloadDb,
-                                            episodeId = episode.id,
-                                            downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
-                                        )
-                                    }
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        if (isAlreadyDownloaded) "Re-download Audio Only (Skip Analysis)"
-                                        else "Download Audio Only (Skip Analysis)"
-                                    )
-                                },
-                                onClick = {
-                                    showMoreMenu = false
-                                    downloadScope.launch {
-                                        app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
-                                            context = downloadContext,
-                                            db = downloadDb,
-                                            episodeId = episode.id,
-                                            downloadMethod = app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS
-                                        )
-                                    }
-                                }
-                            )
                         }
                     }
                 }
+            }
+
+            if (showNeedsDownloadDialog) {
+                androidx.compose.material3.AlertDialog(
+                    onDismissRequest = { showNeedsDownloadDialog = false },
+                    title = { Text("Download and process this episode?") },
+                    text = { Text("HushCast needs the episode on your phone to transcribe it and find ads.") },
+                    confirmButton = {
+                        androidx.compose.material3.Button(
+                            onClick = {
+                                showNeedsDownloadDialog = false
+                                pageScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    val method = if (app.hushcast.automute.engine.HushCastPrefs.isWorkerActive(context)) {
+                                        app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO
+                                    } else {
+                                        app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE
+                                    }
+                                    app.podiumpodcasts.podium.manager.DownloadManager.downloadEpisode(
+                                        context = context,
+                                        db = pageDb,
+                                        episodeId = episode.id,
+                                        downloadMethod = method
+                                    )
+                                }
+                            }
+                        ) {
+                            Text("Download & process")
+                        }
+                    },
+                    dismissButton = {
+                        androidx.compose.material3.TextButton(onClick = { showNeedsDownloadDialog = false }) {
+                            Text("Cancel")
+                        }
+                    }
+                )
             }
 
             // T1 & C6: Transcript & Chapters on Episode Detail page
@@ -534,12 +589,31 @@ fun PodcastEpisodeDetailView(
                     onDismissRequest = { showDetailTranscriptSheet = false }
                 ) {
                     Box(modifier = Modifier.fillMaxWidth().height(640.dp)) {
+                        val isCurrentEpisode = detailMediaVm.metadataEpisodeId == episode.id
+                        val livePos = detailMediaVm.rememberLivePositionMsState(100L)
+                        val notPlayingPos = remember { androidx.compose.runtime.mutableLongStateOf(0L) }
+                        val detailAdWindows = remember(detailAds) { detailAds.map { it.toDomain() } }
+                        val autoSkipStarts = remember(detailAdWindows, isCurrentEpisode) {
+                            if (!isCurrentEpisode) emptySet()
+                            else app.podiumpodcasts.podium.background.HushCastEngineBridge.adSkipObserver
+                                .getActiveAutoSkipRanges().map { it.startMs }.toSet()
+                        }
                         app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.TranscriptOverlay(
                             state = detailTranscriptState,
                             episodeTitle = episode.title,
-                            currentPositionMs = if (detailMediaVm.metadataEpisodeId == episode.id) detailMediaVm.rememberLivePositionMs(100L) else 0L,
-                            isPlaying = detailMediaVm.metadataEpisodeId == episode.id && detailMediaVm.isPlaying,
-                            muteWindows = detailMutes.map { it.toDomain() },
+                            positionMsState = if (isCurrentEpisode) livePos else notPlayingPos,
+                            isPlaying = isCurrentEpisode && detailMediaVm.isPlaying,
+                            muteWindows = remember(detailMutes) { detailMutes.map { it.toDomain() } },
+                            adWindows = detailAdWindows,
+                            autoSkipAdStarts = autoSkipStarts,
+                            // T3: only for the episode that's playing (the skip state lives in the player).
+                            onPlayAnyway = if (isCurrentEpisode) {
+                                { ad ->
+                                    app.podiumpodcasts.podium.background.HushCastEngineBridge.adSkipObserver.bypassAd(ad.startMs)
+                                    detailMediaVm.seek(ad.startMs)
+                                    if (!detailMediaVm.isPlaying) detailMediaVm.play()
+                                }
+                            } else null,
                             onClose = { showDetailTranscriptSheet = false },
                             onSeekToMs = { posMs ->
                                 if (detailMediaVm.metadataEpisodeId != episode.id) {
@@ -548,9 +622,9 @@ fun PodcastEpisodeDetailView(
                                     detailMediaVm.seek(posMs)
                                 }
                             },
-                            onMuteWord = { word ->
-                                detailPlayerVm.addMuteWordRule(word.text, app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode)
-                            },
+                            // Item 5: same as the player: unmute turns this spot's segment(s) off,
+                            // mute adds the word to the list.
+                            onMuteWord = { word -> pendingWordMute = word },
                             onShareTxt = { lines ->
                                 detailPlayerVm.shareTranscriptTxt(context, episode.title, lines)
                             },
@@ -561,6 +635,18 @@ fun PodcastEpisodeDetailView(
                         )
                     }
                 }
+            }
+
+            pendingWordMute?.let { word ->
+                app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.WordMuteDialog(
+                    word = word,
+                    muteSegments = detailMutes,
+                    onUnmuteSegments = { ids -> detailPlayerVm.setMuteSegmentsEnabled(ids, false) },
+                    onAddMuteWord = { clean ->
+                        detailPlayerVm.addMuteWordRule(clean, app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode)
+                    },
+                    onDismiss = { pendingWordMute = null }
+                )
             }
 
             // Show notes expanded by default (Pocket Casts style)
@@ -587,7 +673,7 @@ fun PodcastEpisodeDetailView(
                             Spacer(Modifier.height(16.dp))
 
                             DetailsList(
-                                items = listOf(
+                                items = listOfNotNull(
                                     DetailsListItemModel(
                                         icon = Icons.Rounded.Person,
                                         label = R.string.common_author,
@@ -614,19 +700,20 @@ fun PodcastEpisodeDetailView(
                                         label = R.string.common_rss_feed,
                                         value = episode.origin
                                     ),
-                                    DetailsListItemModel(
+                                    // I13: the audio URL and GUID are for debugging; developer mode only.
+                                    if (devMode) DetailsListItemModel(
                                         icon = Icons.Rounded.AudioFile,
                                         label = R.string.common_audio_file,
                                         value = episode.audioUrl,
                                         onClick = {
                                             uriHandler.openUri(episode.audioUrl)
                                         }
-                                    ),
-                                    DetailsListItemModel(
+                                    ) else null,
+                                    if (devMode) DetailsListItemModel(
                                         icon = Icons.AutoMirrored.Rounded.Label,
                                         label = R.string.common_guid,
                                         value = episode.guid
-                                    )
+                                    ) else null
                                 )
                             )
             }

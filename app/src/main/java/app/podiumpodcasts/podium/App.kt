@@ -14,6 +14,7 @@ import coil3.request.crossfade
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import app.hushcast.automute.storage.migrateRulesToDefaultModeOnce
 
 class App : Application(), SingletonImageLoader.Factory {
     private var foregroundSyncScheduled = false
@@ -26,6 +27,19 @@ class App : Application(), SingletonImageLoader.Factory {
         MainScope().launch {
             app.podiumpodcasts.podium.background.HushCastEngineBridge.loadFromSettings(settingsRepository)
             PodcastGridOrganization.init(this@App)
+        }
+        MainScope().launch(kotlinx.coroutines.Dispatchers.IO) {
+            // Custom sounds saved before 1.0.26 live only in the "selected sound" keys.  Copy them
+            // into the sound list once, so picking a built-in tone can clear the selection safely.
+            runCatching { settingsRepository.hushCast.migrateLegacyCustomSoundsOnce() }
+        }
+        MainScope().launch(kotlinx.coroutines.Dispatchers.IO) {
+            // Rules saved before 1.0.31 stored the global mode's name, so mode changes never reached
+            // them.  Switch them to follow the global mode once.
+            runCatching {
+                val dao = app.hushcast.automute.storage.AutoMuteDatabase.getInstance(this@App).dao()
+                dao.migrateRulesToDefaultModeOnce(this@App)
+            }
         }
 
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {

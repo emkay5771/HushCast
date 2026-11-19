@@ -139,7 +139,8 @@ class MediaLibrarySessionCallback(
                 val currentSpeed = session.player.playbackParameters.speed
                 val presets = service.speedPresets.sorted()
                 val nextSpeed = presets.firstOrNull { it > currentSpeed + 0.01f } ?: presets.firstOrNull() ?: 1.0f
-                session.player.setPlaybackSpeed(nextSpeed)
+                // Saves to the podcast's own speed or the global one, whichever is in effect.
+                service.applyUserSpeed(nextSpeed)
 
                 return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }

@@ -58,6 +58,8 @@ class Transcriber(
     useDtw: Boolean = true,
     useFlashAttn: Boolean = false,
     isTiny: Boolean = false,
+    /** S11: asked before every call, so heat or playback lowers the threads at the next chunk. */
+    private val threadsProvider: (() -> Int)? = null,
 ) : AutoCloseable {
     private var handle = WhisperJni.load(modelPath, useDtw, useFlashAttn, isTiny)
 
@@ -87,8 +89,9 @@ class Transcriber(
         val endSample = endSec?.let { (it * 16000.0).roundToInt().coerceIn(startSample, pcm.size) } ?: -1
 
         val cb = app.hushcast.automute.nativebridge.WhisperCallbacks(onProgress, shouldAbort)
+        val nThreads = (threadsProvider?.invoke() ?: threads).coerceAtLeast(1)
         val r = WhisperJni.transcribeRange(
-            handle, pcm.handle, startSample, endSample, threads, language, beamSize, vadModelPath, cb
+            handle, pcm.handle, startSample, endSample, nThreads, language, beamSize, vadModelPath, cb
         )
         val times = r[0] as FloatArray
         val texts = r[1] as Array<*>

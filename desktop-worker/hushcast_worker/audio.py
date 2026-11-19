@@ -263,10 +263,66 @@ def decode_audio_16k_mono(
     return pcm, float(len(pcm) / 16000.0)
 
 
+# W8: decoded audio is resampled in blocks of about this many seconds instead of one codec frame
+# (~26 ms for MP3) at a time, which cut the Python overhead of the decode loop.
+RESAMPLE_BLOCK_SEC = 20.0
+
+
+def _iter_decoded_blocks(container, block_sec: float = RESAMPLE_BLOCK_SEC):
+    """
+    Yields the decoded audio of `container` as a few large `av.AudioFrame`s (about `block_sec`
+    each) built from consecutive codec frames with numpy, in order. swresample is a streaming
+    filter, so resampling the blocks gives the same samples as resampling every codec frame.
+    A change of format, layout or rate starts a new block. If a block can't be rebuilt (an
+    unusual layout), the original frames are yielded one by one from then on.
+    """
+    from fractions import Fraction
+
+    import av
+
+    pending: list = []
+    pending_n = 0
+    key = None
+    fed = 0
+    batching = True
+
+    def _flush():
+        nonlocal pending, pending_n, fed, batching
+        frames, n = pending, pending_n
+        pending, pending_n = [], 0
+        if batching:
+            try:
+                arrays = [f.to_ndarray() for f in frames]
+                arr = arrays[0] if len(arrays) == 1 else np.concatenate(arrays, axis=1)
+                big = av.AudioFrame.from_ndarray(arr, format=key[0], layout=key[1])
+                big.sample_rate = key[2]
+                big.time_base = Fraction(1, key[2])
+                big.pts = fed
+                fed += n
+                return [big]
+            except Exception:
+                logger.debug("Could not batch decoded frames; resampling frame by frame", exc_info=True)
+                batching = False
+        return frames
+
+    for frame in container.decode(audio=0):
+        fk = (frame.format.name, frame.layout.name, int(frame.sample_rate))
+        if pending and fk != key:
+            yield from _flush()
+        key = fk
+        pending.append(frame)
+        pending_n += int(frame.samples)
+        if not batching or pending_n >= block_sec * fk[2]:
+            yield from _flush()
+    if pending:
+        yield from _flush()
+
+
 def decode_audio_streams(
     audio_path: Path,
     *,
     max_seconds: float = MAX_DECODED_SECONDS,
+    block_sec: float = RESAMPLE_BLOCK_SEC,
 ) -> tuple[np.ndarray, np.ndarray, Optional[np.ndarray], float]:
     """
     Single-pass decode producing both:
@@ -278,10 +334,11 @@ def decode_audio_streams(
 
     max_16k = int(max_seconds * 16000)
     max_24k = int(max_seconds * 24000)
+    limit_msg = f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit"
     container = av.open(str(audio_path))
     try:
         audio_stream = container.streams.audio[0] if container.streams.audio else None
-        is_stereo = bool(audio_stream and getattr(audio_stream.channels, "__int__", lambda: 1)() >= 2)
+        is_stereo = False
         if audio_stream is not None:
             try:
                 is_stereo = int(audio_stream.channels) >= 2
@@ -301,66 +358,56 @@ def decode_audio_streams(
         total_16k = 0
         total_24k = 0
 
+        def _handle_16k(resampled) -> None:
+            nonlocal total_16k
+            a16 = resampled.to_ndarray().reshape(-1)
+            total_16k += len(a16)
+            if total_16k > max_16k:
+                raise ValueError(limit_msg)
+            chunks_16k.append(a16)
+
         def _handle_24k(resampled) -> None:
             nonlocal total_24k
             arr = resampled.to_ndarray()
             # PyAV 'flt' planar vs packed: (channels, samples) or (1, samples*channels)
             if arr.ndim == 2 and arr.shape[0] >= 2:
-                left = arr[0]
-                right = arr[1]
-                mid = (left + right) * np.float32(0.5)
-                side = (left - right) * np.float32(0.5)
-                n_s = len(mid)
-                total_24k += n_s
-                if total_24k > max_24k:
-                    raise ValueError(f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit")
-                chunks_24k_mid.append(mid)
-                chunks_24k_side.append(side)
+                left, right = arr[0], arr[1]
+            elif is_stereo and arr.ndim == 2 and arr.shape[0] == 1 and arr.shape[1] >= 2:
+                lr = arr.reshape(-1, 2)
+                left, right = lr[:, 0], lr[:, 1]
             else:
                 flat = arr.reshape(-1)
-                if is_stereo and len(flat) >= 2 and arr.ndim == 2 and arr.shape[0] == 1:
-                    # Packed stereo fallback if ever returned
-                    lr = flat.reshape(-1, 2)
-                    mid = (lr[:, 0] + lr[:, 1]) * np.float32(0.5)
-                    side = (lr[:, 0] - lr[:, 1]) * np.float32(0.5)
-                    total_24k += len(mid)
-                    if total_24k > max_24k:
-                        raise ValueError(f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit")
-                    chunks_24k_mid.append(mid)
-                    chunks_24k_side.append(side)
-                else:
-                    total_24k += len(flat)
-                    if total_24k > max_24k:
-                        raise ValueError(f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit")
-                    chunks_24k_mid.append(flat)
+                total_24k += len(flat)
+                if total_24k > max_24k:
+                    raise ValueError(limit_msg)
+                chunks_24k_mid.append(flat)
+                return
+            mid = (left + right) * np.float32(0.5)
+            side = (left - right) * np.float32(0.5)
+            total_24k += len(mid)
+            if total_24k > max_24k:
+                raise ValueError(limit_msg)
+            chunks_24k_mid.append(mid)
+            chunks_24k_side.append(side)
 
-        for frame in container.decode(audio=0):
-            for r16 in resampler_16k.resample(frame):
-                a16 = r16.to_ndarray().reshape(-1)
-                total_16k += len(a16)
-                if total_16k > max_16k:
-                    raise ValueError(f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit")
-                chunks_16k.append(a16)
-            for r24 in resampler_24k.resample(frame):
+        for block in _iter_decoded_blocks(container, block_sec):
+            for r16 in resampler_16k.resample(block):
+                _handle_16k(r16)
+            for r24 in resampler_24k.resample(block):
                 _handle_24k(r24)
-
         for r16 in resampler_16k.resample(None):
-            a16 = r16.to_ndarray().reshape(-1)
-            total_16k += len(a16)
-            if total_16k > max_16k:
-                raise ValueError(f"Decoded audio exceeds {int(max_seconds // 3600)}-hour limit")
-            chunks_16k.append(a16)
+            _handle_16k(r16)
         for r24 in resampler_24k.resample(None):
             _handle_24k(r24)
 
-        pcm_16k = np.concatenate(chunks_16k).astype(np.float32) if chunks_16k else np.zeros(0, dtype=np.float32)
+        pcm_16k = np.concatenate(chunks_16k).astype(np.float32, copy=False) if chunks_16k else np.zeros(0, dtype=np.float32)
         pcm_24k_mid = (
-            np.concatenate(chunks_24k_mid).astype(np.float32)
+            np.concatenate(chunks_24k_mid).astype(np.float32, copy=False)
             if chunks_24k_mid
             else np.zeros(0, dtype=np.float32)
         )
         pcm_24k_side = (
-            np.concatenate(chunks_24k_side).astype(np.float32)
+            np.concatenate(chunks_24k_side).astype(np.float32, copy=False)
             if (is_stereo and chunks_24k_side and len(chunks_24k_side) == len(chunks_24k_mid))
             else None
         )

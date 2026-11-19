@@ -212,6 +212,9 @@
     <string name="route_podcast_settings">Paramètres du podcast</string>
     <string name="route_restore">Restaurer depuis une sauvegarde</string>
     <string name="route_restore_action_restart_app">Redémarrer l\'app</string>
+    <string name="route_restore_action_restore">Restaurer</string>
+    <string name="route_restore_confirm_title">Remplacer vos données ?</string>
+    <string name="common_action_cancel">Annuler</string>
     <string name="route_restore_confirmation">Restaurer depuis un fichier de sauvegarde écrasera la base de données actuelle. Toutes les données seront perdues.</string>
     <string name="route_restore_invalid_backup_file">Fichier de sauvegarde invalide</string>
     <string name="route_restore_invalid_backup_file_text">Veuillez sélectionner un fichier de sauvegarde %1$s valide.</string>
