@@ -346,17 +346,52 @@ fun PlayerSeekBar(
                     val threshold3 = 120.dp.toPx()
                     val edgePad = 10.dp.toPx()
                     val trackW = (width - edgePad * 2f).coerceAtLeast(1f)
+                    val touchSlop = viewConfiguration.touchSlop
 
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        down.consume()
+                        val startX = down.position.x
+                        val startY = down.position.y
+                        var startedHorizontal = false
+
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id }
+                                ?: event.changes.firstOrNull()
+                                ?: break
+
+                            if (!change.pressed) {
+                                // Quick tap without dragging past touchSlop -> seek to tapped position.
+                                if (!change.isConsumed) {
+                                    change.consume()
+                                    val tapFrac = ((change.position.x - edgePad) / trackW).coerceIn(0f, 1f)
+                                    val targetMs = (tapFrac * safeDuration).toLong().coerceIn(0L, safeDuration)
+                                    onSeekToMs(targetMs)
+                                }
+                                return@awaitEachGesture
+                            }
+
+                            val dxTotal = change.position.x - startX
+                            val dyTotal = change.position.y - startY
+                            if (abs(dyTotal) > touchSlop && abs(dyTotal) > abs(dxTotal)) {
+                                // Vertical swipe (e.g. closing the player sheet or opening Up Next):
+                                // leave the gesture unconsumed and do not scrub.
+                                return@awaitEachGesture
+                            }
+                            if (abs(dxTotal) > touchSlop && abs(dxTotal) >= abs(dyTotal)) {
+                                startedHorizontal = true
+                                change.consume()
+                                break
+                            }
+                        }
+
+                        if (!startedHorizontal) return@awaitEachGesture
+
                         isDragging = true
                         scrubSpeed = 1f
-                        var currentFrac = ((down.position.x - edgePad) / trackW).coerceIn(0f, 1f)
+                        var currentFrac = ((startX - edgePad) / trackW).coerceIn(0f, 1f)
                         dragFraction = currentFrac
-
-                        var lastX = down.position.x
-                        val startY = down.position.y
+                        var lastX = startX
 
                         while (true) {
                             val event = awaitPointerEvent()

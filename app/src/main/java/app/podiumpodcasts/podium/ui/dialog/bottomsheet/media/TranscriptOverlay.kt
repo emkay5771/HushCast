@@ -296,6 +296,15 @@ fun TranscriptOverlay(
 
     // Ad blocks the user chose to play this time; their "Play anyway" goes away.
     var playedAnywayStarts by remember { mutableStateOf(emptySet<Long>()) }
+    var expandedAdStarts by remember { mutableStateOf(emptySet<Long>()) }
+
+    LaunchedEffect(currentMatchLineIdx, lines, adWindows) {
+        val matchLine = currentMatchLineIdx?.let { lines.getOrNull(it) } ?: return@LaunchedEffect
+        val matchAd = adForLine(matchLine, adWindows)
+        if (matchAd != null && matchAd.startMs !in expandedAdStarts) {
+            expandedAdStarts = expandedAdStarts + matchAd.startMs
+        }
+    }
     // Row actions menu (long-press): which line, and the word pressed, if any (T3).
     var menuLineIdx by remember { mutableStateOf<Int?>(null) }
     var menuWord by remember { mutableStateOf<Word?>(null) }
@@ -559,6 +568,10 @@ fun TranscriptOverlay(
                                 lines.getOrNull(idx - 1)?.let { adForLine(it, adWindows) }
                             }
                             val adStartsHere = lineAd != null && lineAd != prevLineAd
+                            val isAdExpanded = lineAd == null || lineAd.startMs in expandedAdStarts
+                            if (!isAdExpanded && !adStartsHere) {
+                                return@itemsIndexed
+                            }
 
                             val bgColor = when {
                                 isCurrentSearchMatch -> MaterialTheme.colorScheme.tertiaryContainer
@@ -626,6 +639,14 @@ fun TranscriptOverlay(
                                 if (adStartsHere && lineAd != null) {
                                     SponsorBlockHeader(
                                         ad = lineAd,
+                                        isExpanded = isAdExpanded,
+                                        onToggleExpand = {
+                                            expandedAdStarts = if (isAdExpanded) {
+                                                expandedAdStarts - lineAd.startMs
+                                            } else {
+                                                expandedAdStarts + lineAd.startMs
+                                            }
+                                        },
                                         showPlayAnyway = onPlayAnyway != null &&
                                             lineAd.startMs in autoSkipAdStarts &&
                                             lineAd.startMs !in playedAnywayStarts,
@@ -636,6 +657,7 @@ fun TranscriptOverlay(
                                     )
                                 }
 
+                                if (isAdExpanded) {
                                 Box {
                                     Column(
                                         modifier = Modifier
@@ -787,6 +809,7 @@ fun TranscriptOverlay(
                                         }
                                     }
                                 }
+                                }
                             }
                         }
                     }
@@ -822,43 +845,64 @@ fun TranscriptOverlay(
     }
 }
 
-/** The label above a sponsor block in the transcript, with "Play anyway" when it will be skipped (T3). */
+/** The label above a sponsor block in the transcript, with an expander and "Play anyway" when skipped (T3). */
 @Composable
 private fun SponsorBlockHeader(
     ad: AdWindow,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
     showPlayAnyway: Boolean,
     onPlayAnyway: () -> Unit
 ) {
-    Row(
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = if (isExpanded) 0.28f else 0.42f),
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp)
-            .padding(start = 12.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(bottom = if (isExpanded) 4.dp else 0.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(
+                onClickLabel = if (isExpanded) "Collapse sponsor transcript" else "Expand sponsor transcript",
+                onClick = onToggleExpand
+            )
     ) {
-        Icon(
-            imageVector = Icons.Rounded.SkipNext,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.tertiary,
-            modifier = Modifier.size(18.dp)
-        )
-        Spacer(Modifier.width(6.dp))
-        val seconds = ((ad.endMs - ad.startMs) / 1000L).coerceAtLeast(0L)
-        Text(
-            text = "${formatAdDisplayLabel(ad)} · ${seconds}s",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.tertiary,
-            modifier = Modifier.weight(1f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        if (showPlayAnyway) {
-            TextButton(
-                onClick = onPlayAnyway,
-                modifier = Modifier.heightIn(min = 48.dp)
-            ) {
-                Text("Play anyway")
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.SkipNext,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(Modifier.width(6.dp))
+            val seconds = ((ad.endMs - ad.startMs) / 1000L).coerceAtLeast(0L)
+            Text(
+                text = "${formatAdDisplayLabel(ad)} · ${seconds}s",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (showPlayAnyway) {
+                TextButton(
+                    onClick = onPlayAnyway,
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("Play anyway")
+                }
             }
+            Icon(
+                imageVector = if (isExpanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+                contentDescription = if (isExpanded) "Collapse sponsor transcript" else "Expand sponsor transcript",
+                tint = MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.size(20.dp)
+            )
         }
     }
 }

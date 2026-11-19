@@ -971,7 +971,7 @@ fun MediaPlayerBottomSheet(
                                         )
                                     }
 
-                                    Spacer(Modifier.height(10.dp))
+                                    Spacer(Modifier.height(14.dp))
                                 }
                             }
 
@@ -1119,7 +1119,6 @@ fun MediaPlayerBottomSheet(
                                 onToggleMoreMenu = { showMoreMenu = it },
                                 onPerformAction = ::performToolbarAction
                             )
-                            UpNextGrip(onClick = { showQueueBottomSheet = true })
                           }
                         } else {
                             // Mini playback strip for Details / Chapters tabs
@@ -1682,7 +1681,7 @@ private fun PlayerActionToolbar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 14.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -1756,7 +1755,7 @@ private fun PlayerActionToolbar(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun PlayerMoreActionsSheet(
     overflowActions: List<PlayerToolbarAction>,
@@ -1779,15 +1778,29 @@ private fun PlayerMoreActionsSheet(
         onDismissRequest = onDismiss
     ) {
         PlayerSheetBlur()
+        val itemColors = androidx.compose.material3.ListItemDefaults.segmentedColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        )
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp)
-                .padding(bottom = 16.dp)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(androidx.compose.material3.ListItemDefaults.SegmentedGap)
         ) {
-            overflowActions.forEach { action ->
-                androidx.compose.material3.ListItem(
-                    headlineContent = { Text(action.uiLabel()) },
+            overflowActions.forEachIndexed { idx, action ->
+                androidx.compose.material3.SegmentedListItem(
+                    onClick = {
+                        hideThen {
+                            onDismiss()
+                            onPerformAction(action)
+                        }
+                    },
+                    shapes = androidx.compose.material3.ListItemDefaults.segmentedShapes(
+                        index = idx,
+                        count = overflowActions.size
+                    ),
+                    colors = itemColors,
                     leadingContent = {
                         Icon(
                             imageVector = playerToolbarActionIcon(
@@ -1800,40 +1813,36 @@ private fun PlayerMoreActionsSheet(
                             contentDescription = null
                         )
                     },
-                    colors = androidx.compose.material3.ListItemDefaults.colors(
-                        containerColor = Color.Transparent
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable {
-                            hideThen {
-                                onDismiss()
-                                onPerformAction(action)
-                            }
-                        }
+                    content = { Text(action.uiLabel()) },
+                    modifier = if (overflowActions.size == 1) {
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                    } else {
+                        Modifier.fillMaxWidth()
+                    }
                 )
             }
             if (overflowActions.isNotEmpty()) {
-                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                Spacer(Modifier.height(10.dp))
             }
-            androidx.compose.material3.ListItem(
-                headlineContent = { Text("Customize player") },
+            androidx.compose.material3.SegmentedListItem(
+                onClick = {
+                    hideThen {
+                        onDismiss()
+                        onOpenCustomize()
+                    }
+                },
+                shapes = androidx.compose.material3.ListItemDefaults.segmentedShapes(
+                    index = 0,
+                    count = 1
+                ),
+                colors = itemColors,
                 leadingContent = {
                     Icon(Icons.Rounded.Tune, contentDescription = null)
                 },
-                colors = androidx.compose.material3.ListItemDefaults.colors(
-                    containerColor = Color.Transparent
-                ),
+                content = { Text("Customize player") },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable {
-                        hideThen {
-                            onDismiss()
-                            onOpenCustomize()
-                        }
-                    }
+                    .clip(RoundedCornerShape(16.dp))
             )
         }
     }
@@ -1871,30 +1880,5 @@ private fun PlayerSkipPill(
                 Text("Skip ${formatAdDisplayLabel(ad)}")
             }
         }
-    }
-}
-
-/** A small "Up Next" grip under the toolbar, so the swipe-up gesture is discoverable (R18). */
-@Composable
-private fun UpNextGrip(onClick: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClickLabel = "Open Up Next", onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-    ) {
-        Box(
-            Modifier
-                .size(width = 32.dp, height = 4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-        )
-        Spacer(Modifier.height(2.dp))
-        Text(
-            text = "Up Next",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
     }
 }
