@@ -462,15 +462,6 @@ fun MediaPlayerBottomSheet(
         enable = enableArtworkColors,
         seedColor = vm.metadataImageSeedColor
     ) {
-        val blurredArtwork = app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.rememberBlurredArtwork(
-            artworkUri = vm.mediaMetadata?.artworkUri?.toString(),
-            enabled = blurBackground
-        )
-        val backdropAlpha by animateFloatAsState(
-            targetValue = if (blurBackground && blurredArtwork != null) 1f else 0f,
-            animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
-            label = "playerBackdropAlpha"
-        )
         ModalBottomSheet(
             sheetState = sheetState,
             sheetMaxWidth = androidx.compose.ui.unit.Dp.Infinity,
@@ -490,17 +481,21 @@ fun MediaPlayerBottomSheet(
                 label = "transportScale"
             ) { open -> if (open) 0.80f else 1f }
 
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight()
-                    // R19: blurred artwork behind the player, blending into the sheet at the top.
-                    .playerBackdrop(
-                        image = blurredArtwork,
-                        scrimColor = androidx.compose.material3.BottomSheetDefaults.ContainerColor,
-                        alpha = backdropAlpha
-                    )
             ) {
+                // R19: blurred artwork behind the player, blending into the sheet at the top.
+                PlayerBackdropLayer(
+                    artworkUri = vm.mediaMetadata?.artworkUri?.toString(),
+                    enabled = blurBackground,
+                    scrimColor = androidx.compose.material3.BottomSheetDefaults.ContainerColor,
+                    modifier = Modifier.matchParentSize()
+                )
+                Column(
+                    modifier = Modifier.fillMaxSize()
+                ) {
                 // Top row: Collapse, Tabs, Up Next.  T2: slides away (instead of popping) while the
                 // transcript is open.
                 AnimatedVisibility(
@@ -1198,6 +1193,7 @@ fun MediaPlayerBottomSheet(
                       }
                     }
                 }
+            }
             }
         }
     }

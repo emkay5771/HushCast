@@ -2,7 +2,14 @@ package app.podiumpodcasts.podium.ui.dialog.bottomsheet.media
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.os.Build
 import android.view.WindowManager
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -12,6 +19,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -23,6 +32,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogWindowProvider
 import app.podiumpodcasts.podium.ui.theme.applyDarkStyle
 import coil3.ImageLoader
@@ -33,6 +43,78 @@ import coil3.size.Size
 import coil3.toBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+
+/**
+ * Renders the player's blurred-artwork background (R19).
+ *
+ * On Android 12+ (API 31+), animates a GPU [Modifier.blur] radius via [animateDpAsState] alongside
+ * an alpha crossfade. On older Android versions, falls back to a pre-blurred 40 px bitmap with an
+ * [animateFloatAsState] alpha crossfade.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun PlayerBackdropLayer(
+    artworkUri: String?,
+    enabled: Boolean,
+    scrimColor: Color,
+    modifier: Modifier = Modifier
+) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val context = LocalContext.current
+        var artwork by remember { mutableStateOf<ImageBitmap?>(null) }
+        LaunchedEffect(artworkUri, enabled) {
+            if (artworkUri.isNullOrBlank()) {
+                artwork = null
+            } else if (enabled) {
+                artwork = loadArtworkBitmap(context, artworkUri, targetPx = 240)
+            }
+        }
+        val blurRadius by animateDpAsState(
+            targetValue = if (enabled && artwork != null) 48.dp else 0.dp,
+            animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+            label = "playerBackdropBlur"
+        )
+        val alpha by animateFloatAsState(
+            targetValue = if (enabled && artwork != null) 1f else 0f,
+            animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+            label = "playerBackdropAlpha"
+        )
+        val bmp = artwork
+        if (bmp != null && alpha > 0f) {
+            Box(modifier = modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .blur(radius = blurRadius, edgeTreatment = BlurredEdgeTreatment.Rectangle)
+                        .playerBackdropImage(bmp, alpha)
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .playerBackdropScrim(scrimColor, alpha)
+                )
+            }
+        }
+    } else {
+        val blurredArtwork = rememberBlurredArtwork(artworkUri = artworkUri, enabled = enabled)
+        val alpha by animateFloatAsState(
+            targetValue = if (enabled && blurredArtwork != null) 1f else 0f,
+            animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+            label = "playerBackdropAlphaFallback"
+        )
+        if (blurredArtwork != null && alpha > 0f) {
+            Box(
+                modifier = modifier
+                    .fillMaxSize()
+                    .playerBackdrop(
+                        image = blurredArtwork,
+                        scrimColor = scrimColor,
+                        alpha = alpha
+                    )
+            )
+        }
+    }
+}
 
 /**
  * The player's blurred-artwork background (R19).  The artwork is loaded at 40 px, box-blurred
@@ -53,13 +135,9 @@ fun rememberBlurredArtwork(artworkUri: String?, enabled: Boolean): ImageBitmap? 
     return image
 }
 
-/**
- * Draws [image] stretched behind the content, under a scrim in [scrimColor] that is solid at the
- * top (so it meets the sheet's drag-handle band without a seam) and lighter lower down.
- */
-fun Modifier.playerBackdrop(image: ImageBitmap?, scrimColor: Color, alpha: Float = 1f): Modifier {
+private fun Modifier.playerBackdropImage(image: ImageBitmap, alpha: Float): Modifier {
     val clamped = alpha.coerceIn(0f, 1f)
-    if (image == null || clamped <= 0f) return this
+    if (clamped <= 0f) return this
     return drawBehind {
         drawImage(
             image = image,
@@ -70,6 +148,13 @@ fun Modifier.playerBackdrop(image: ImageBitmap?, scrimColor: Color, alpha: Float
             alpha = 0.85f * clamped,
             filterQuality = FilterQuality.High
         )
+    }
+}
+
+private fun Modifier.playerBackdropScrim(scrimColor: Color, alpha: Float): Modifier {
+    val clamped = alpha.coerceIn(0f, 1f)
+    if (clamped <= 0f) return this
+    return drawBehind {
         drawRect(
             brush = Brush.verticalGradient(
                 0f to scrimColor.copy(alpha = scrimColor.alpha * clamped),
@@ -83,6 +168,29 @@ fun Modifier.playerBackdrop(image: ImageBitmap?, scrimColor: Color, alpha: Float
         )
     }
 }
+
+/**
+ * Draws [image] stretched behind the content, under a scrim in [scrimColor] that is solid at the
+ * top (so it meets the sheet's drag-handle band without a seam) and lighter lower down.
+ */
+fun Modifier.playerBackdrop(image: ImageBitmap?, scrimColor: Color, alpha: Float = 1f): Modifier {
+    val clamped = alpha.coerceIn(0f, 1f)
+    if (image == null || clamped <= 0f) return this
+    return playerBackdropImage(image, clamped).playerBackdropScrim(scrimColor, clamped)
+}
+
+private suspend fun loadArtworkBitmap(context: Context, uri: String, targetPx: Int): ImageBitmap? =
+    withContext(Dispatchers.IO) {
+        runCatching {
+            val request = ImageRequest.Builder(context)
+                .data(uri)
+                .size(Size(targetPx, targetPx))
+                .allowHardware(false)
+                .build()
+            val result = ImageLoader(context).execute(request) as? SuccessResult ?: return@runCatching null
+            Bitmap.createScaledBitmap(result.image.toBitmap(), targetPx, targetPx, true).asImageBitmap()
+        }.getOrNull()
+    }
 
 private suspend fun loadBlurred(context: Context, uri: String): ImageBitmap? = withContext(Dispatchers.IO) {
     runCatching {
