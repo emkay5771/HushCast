@@ -32,6 +32,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.podiumpodcasts.podium.R
+import app.podiumpodcasts.podium.ui.component.common.SheetOverscroll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
@@ -61,6 +62,7 @@ fun CountryCodeSelectorDialog(
             onDismiss()
         }
     ) {
+        SheetOverscroll {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -128,6 +130,7 @@ fun CountryCodeSelectorDialog(
                     )
                 }
             }
+        }
         }
     }
 }

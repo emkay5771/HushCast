@@ -7,6 +7,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import app.podiumpodcasts.podium.api.db.model.PodcastModel
+import app.podiumpodcasts.podium.ui.component.common.SheetOverscroll
 import app.podiumpodcasts.podium.ui.view.model.PodcastSettingsView
 import kotlinx.coroutines.launch
 
@@ -31,6 +32,7 @@ fun PodcastSettingsBottomSheet(
         contentWindowInsets = { WindowInsets() },
         dragHandle = null,
     ) {
+        SheetOverscroll {
         PodcastSettingsView(
             podcast = podcast,
             onBack = {
@@ -40,5 +42,6 @@ fun PodcastSettingsBottomSheet(
                 }
             }
         )
+        }
     }
 }

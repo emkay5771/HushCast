@@ -96,6 +96,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
+import app.podiumpodcasts.podium.ui.component.common.SheetOverscroll
 import app.podiumpodcasts.podium.ui.component.settings.SegmentedButtonLabel
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -1074,6 +1075,7 @@ private fun ColorSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState
     ) {
+        SheetOverscroll {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1209,6 +1211,7 @@ private fun ColorSheet(
                     onClick = { onSave(draftSeed, draftStyle, draftContrast) }
                 ) { Text("Save") }
             }
+        }
         }
     }
 }

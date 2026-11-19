@@ -1,3 +1,14 @@
+# HushCast v1.0.37-hushcast
+
+## What's New
+- **Player: the "double bounce" when switching tabs is gone**:
+  - Swiping between Playing, Details and Chapters no longer stretches the new page the wrong way about a third of a second after it lands. This happened on every tab, not just the first and last.
+  - Pulling past the end of a list in any bottom sheet and letting go now springs back straight away, instead of holding the stretch for a moment first. This covers the player's tabs, Up Next, the country picker, folders, filters and sort order, save to list, downloads, podcast preview and settings, the player's customize and HushCast sheets, and the color and swipe-action sheets in Settings.
+  - Cause: Material 3's bottom sheet joins every fling inside it with a 300 ms settle, and reports a sideways swipe's speed back as unused. Sheets now let go of the stretch when your finger lifts, and the fling after it can't restart it. Stretching while you drag looks the same as before.
+- **The player's tab underline follows your swipe** instead of jumping across after the page has settled (Discover's topics already did; both now share one implementation).
+
+---
+
 # HushCast v1.0.36-hushcast
 
 ## What's New

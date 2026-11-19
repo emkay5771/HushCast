@@ -152,7 +152,9 @@ import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.api.chapters.ResolvedChapter
 import app.podiumpodcasts.podium.background.HushCastEngineBridge
 import app.podiumpodcasts.podium.manager.DownloadManager
+import app.podiumpodcasts.podium.ui.component.common.SheetOverscroll
 import app.podiumpodcasts.podium.ui.component.common.SwitchableDynamicMaterialExpressiveTheme
+import app.podiumpodcasts.podium.ui.component.common.pagerFollowingIndicator
 import app.podiumpodcasts.podium.ui.component.media.CastingBypassNoticeBanner
 import app.podiumpodcasts.podium.ui.component.media.OneTapUndoAdSkipBanner
 import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
@@ -484,6 +486,8 @@ fun MediaPlayerBottomSheet(
             sheetMaxWidth = androidx.compose.ui.unit.Dp.Infinity,
             onDismissRequest = onDismiss
         ) {
+            // Stretch overscroll without the sheet's "stretch, pause, bounce" (see SheetOverscroll).
+            SheetOverscroll {
             val spatialSpec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
             val fastEffects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
             val transcriptTransition = updateTransition(targetState = showTranscriptOverlay, label = "transcriptOverlay")
@@ -541,21 +545,24 @@ fun MediaPlayerBottomSheet(
                         }
 
                         if (visibleTabs.size > 1) {
-                            val selectedIdx = visibleTabs.indexOf(selectedTab).coerceAtLeast(0)
+                            // The indicator and the selected tab follow the pager while it moves.
+                            // They used to follow selectedTab, which changes only once the pager has
+                            // settled, so the indicator only started across after the page stopped.
+                            val pagerIdx = pagerState.currentPage.coerceIn(0, visibleTabs.lastIndex)
                             SecondaryTabRow(
-                                selectedTabIndex = selectedIdx,
+                                selectedTabIndex = pagerIdx,
                                 modifier = Modifier.weight(1f),
                                 containerColor = Color.Transparent,
                                 divider = {},
                                 indicator = {
                                     TabRowDefaults.SecondaryIndicator(
-                                        modifier = Modifier.tabIndicatorOffset(selectedIdx, matchContentSize = false)
+                                        modifier = pagerFollowingIndicator(pagerState, matchContentSize = false)
                                     )
                                 }
                             ) {
-                                visibleTabs.forEach { tab ->
+                                visibleTabs.forEachIndexed { index, tab ->
                                     Tab(
-                                        selected = selectedTab == tab,
+                                        selected = pagerIdx == index,
                                         onClick = { selectedTab = tab },
                                         text = {
                                             Text(
@@ -603,9 +610,6 @@ fun MediaPlayerBottomSheet(
                 ) {
                     HorizontalPager(
                         state = pagerState,
-                        // Standard stretch at the first/last tab, without the second bounce.
-                        flingBehavior = app.podiumpodcasts.podium.ui.component.common
-                            .rememberSingleBouncePagerFlingBehavior(pagerState),
                         userScrollEnabled = !showTranscriptOverlay,
                         beyondViewportPageCount = 1,
                         modifier = Modifier.fillMaxSize()
@@ -1248,6 +1252,7 @@ fun MediaPlayerBottomSheet(
                         )
                     }
                 }
+            }
             }
             }
         }

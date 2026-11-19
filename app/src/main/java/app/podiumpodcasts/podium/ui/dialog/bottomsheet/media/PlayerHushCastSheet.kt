@@ -68,6 +68,7 @@ import app.hushcast.automute.storage.WordIndexBlob
 import app.podiumpodcasts.podium.SettingsRepository
 import app.podiumpodcasts.podium.api.chapters.ResolvedChapter
 import app.podiumpodcasts.podium.background.HushCastEngineBridge
+import app.podiumpodcasts.podium.ui.component.common.SheetOverscroll
 import app.podiumpodcasts.podium.ui.component.media.EpisodeReadinessBadge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -164,6 +165,7 @@ fun PlayerHushCastSheet(
         sheetState = sheetState,
         onDismissRequest = onDismiss
     ) {
+        SheetOverscroll {
         PlayerSheetBlur()
         Column(
             modifier = Modifier
@@ -678,6 +680,7 @@ fun PlayerHushCastSheet(
             }
 
             Spacer(Modifier.height(16.dp))
+        }
         }
     }
 }

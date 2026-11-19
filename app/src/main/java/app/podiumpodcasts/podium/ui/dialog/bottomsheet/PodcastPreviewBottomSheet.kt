@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.podiumpodcasts.podium.api.db.model.PodcastModel
 import app.podiumpodcasts.podium.api.model.PodcastPreviewModel
+import app.podiumpodcasts.podium.ui.component.common.SheetOverscroll
 import app.podiumpodcasts.podium.ui.view.model.PodcastPreviewView
 import kotlinx.coroutines.launch
 
@@ -55,6 +56,7 @@ fun PodcastPreviewBottomSheet(
             contentWindowInsets = { WindowInsets() },
             dragHandle = null,
         ) {
+            SheetOverscroll {
             Column(
                 modifier = Modifier.fillMaxHeight(0.8f)
             ) {
@@ -69,6 +71,7 @@ fun PodcastPreviewBottomSheet(
                         }
                     }
                 )
+            }
             }
         }
     }

@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.paging.compose.collectAsLazyPagingItems
 import app.podiumpodcasts.podium.R
+import app.podiumpodcasts.podium.ui.component.common.SheetOverscroll
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.vm.list.SaveToListBottomSheetViewModel
 
@@ -45,6 +46,7 @@ fun SaveToListBottomSheet(
             onDismiss()
         }
     ) {
+        SheetOverscroll {
         LazyColumn(
             Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(24.dp),
@@ -98,6 +100,7 @@ fun SaveToListBottomSheet(
                     )
                 }
             }
+        }
         }
     }
 }

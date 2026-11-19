@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder
 import app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrderBy
+import app.podiumpodcasts.podium.ui.component.common.SheetOverscroll
 import app.podiumpodcasts.podium.ui.component.model.podcast.PodcastSearchFilterOrderBarState
 import kotlinx.coroutines.launch
 
@@ -77,6 +78,7 @@ fun PodcastOrderBottomSheet(
             }
         }
     ) {
+        SheetOverscroll {
         LazyColumn(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
@@ -148,6 +150,7 @@ fun PodcastOrderBottomSheet(
                     Text(stringResource(item.label))
                 }
             }
+        }
         }
     }
 }

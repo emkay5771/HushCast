@@ -36,6 +36,7 @@ import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeDownloadState
 import app.podiumpodcasts.podium.manager.DownloadManager
 import app.podiumpodcasts.podium.ui.component.DetailsList
 import app.podiumpodcasts.podium.ui.component.DetailsListItemModel
+import app.podiumpodcasts.podium.ui.component.common.SheetOverscroll
 import app.podiumpodcasts.podium.ui.formatFileSize
 import app.podiumpodcasts.podium.ui.formatPubDate
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
@@ -68,8 +69,9 @@ fun DownloadManagementBottomSheet(
         onDismissRequest = { onDismiss() },
         sheetState = sheetState
     ) {
+        SheetOverscroll {
         val cachedBundle = cachedBundle.value
-        if(cachedBundle.download == null) return@ModalBottomSheet
+        if(cachedBundle.download == null) return@SheetOverscroll
 
         val hasDesktopUrl = remember(context) {
             app.hushcast.automute.engine.HushCastPrefs.isWorkerActive(context)
@@ -182,6 +184,7 @@ fun DownloadManagementBottomSheet(
                     Text(stringResource(R.string.common_action_delete))
                 }
             }
+        }
         }
     }
 }

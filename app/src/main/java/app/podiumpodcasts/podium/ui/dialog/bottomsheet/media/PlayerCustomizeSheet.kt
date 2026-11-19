@@ -65,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.podiumpodcasts.podium.PlayerTabConfig
 import app.podiumpodcasts.podium.PlayerToolbarAction
+import app.podiumpodcasts.podium.ui.component.common.SheetOverscroll
 import kotlinx.coroutines.launch
 import sh.calvin.reorderable.ReorderableColumn
 
@@ -191,6 +192,7 @@ fun PlayerCustomizeSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         onDismissRequest = onDismiss
     ) {
+        SheetOverscroll {
         PlayerSheetBlur()
         Column(
             modifier = Modifier
@@ -372,6 +374,7 @@ fun PlayerCustomizeSheet(
             }
 
             Spacer(Modifier.height(16.dp))
+        }
         }
     }
 }

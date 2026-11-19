@@ -62,6 +62,7 @@ import app.podiumpodcasts.podium.PodcastFolder
 import app.podiumpodcasts.podium.PodcastGridOrganization
 import app.podiumpodcasts.podium.SubscriptionsBadgeMode
 import app.podiumpodcasts.podium.api.db.model.PodcastSubscriptionBundle
+import app.podiumpodcasts.podium.ui.component.common.SheetOverscroll
 import app.podiumpodcasts.podium.ui.component.model.SubscriptionCard
 import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
 import app.podiumpodcasts.podium.ui.theme.Typography
@@ -177,6 +178,7 @@ fun FolderBottomSheet(
     var isEditing by remember { mutableStateOf(false) }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
+        SheetOverscroll {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -361,6 +363,7 @@ fun FolderBottomSheet(
                 }
             }
             Spacer(Modifier.height(20.dp))
+        }
         }
     }
 

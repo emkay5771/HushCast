@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.podiumpodcasts.podium.ui.component.common.SheetOverscroll
 import app.podiumpodcasts.podium.ui.component.common.SwitchableDynamicMaterialExpressiveTheme
 import app.podiumpodcasts.podium.ui.component.media.MediaItemListItem
 import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
@@ -160,6 +161,8 @@ fun MediaPlayerQueueBottomSheet(
             sheetState = sheetState,
             onDismissRequest = onDismiss
         ) {
+            // Stretch overscroll without the sheet's "stretch, pause, bounce" (see SheetOverscroll).
+            SheetOverscroll {
             PlayerSheetBlur()
             Box(modifier = Modifier.fillMaxWidth()) {
             LazyColumn(
@@ -450,6 +453,7 @@ fun MediaPlayerQueueBottomSheet(
                 hostState = snackbarHostState,
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
+            }
             }
         }
     }

@@ -45,6 +45,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.podiumpodcasts.podium.R
+import app.podiumpodcasts.podium.ui.component.common.SheetOverscroll
 import app.podiumpodcasts.podium.ui.component.settings.SettingsGroupColumn
 import app.podiumpodcasts.podium.ui.component.settings.SettingsGroupPosition
 import app.podiumpodcasts.podium.ui.component.settings.SettingsGroupSurface
@@ -493,6 +494,7 @@ private fun PocketCastsSwipeActionsSheet(
     var editingSlot by remember { mutableStateOf<String?>(null) }
 
     androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss) {
+        SheetOverscroll {
         androidx.compose.foundation.layout.Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -576,6 +578,7 @@ private fun PocketCastsSwipeActionsSheet(
             }
 
             androidx.compose.foundation.layout.Spacer(Modifier.padding(bottom = 16.dp))
+        }
         }
     }
 
