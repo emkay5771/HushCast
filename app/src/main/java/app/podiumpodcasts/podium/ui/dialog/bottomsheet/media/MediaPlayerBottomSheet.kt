@@ -594,7 +594,7 @@ fun MediaPlayerBottomSheet(
                                 }
                             ) {
                                 Icon(
-                                    imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                                    imageVector = Icons.AutoMirrored.Rounded.PlaylistPlay,
                                     contentDescription = "Up Next (${vm.queue.size})"
                                 )
                             }
@@ -1846,6 +1846,9 @@ private fun PlayerTransportControls(
     onTogglePlay: () -> Unit,
     onSeekForward: () -> Unit
 ) {
+    val scope = rememberCoroutineScope()
+    val spinSpec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+    val effectsSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
     val backIcon = when (seekBackMs) {
         5000L -> Icons.Rounded.Replay5
         10000L -> Icons.Rounded.Replay10
@@ -1859,14 +1862,37 @@ private fun PlayerTransportControls(
         else -> Icons.Rounded.FastForward
     }
 
+    val backSpin = remember { androidx.compose.animation.core.Animatable(0f) }
+    val backScale = remember { androidx.compose.animation.core.Animatable(1f) }
+    val playScale = remember { androidx.compose.animation.core.Animatable(1f) }
+    val fwdSpin = remember { androidx.compose.animation.core.Animatable(0f) }
+    val fwdScale = remember { androidx.compose.animation.core.Animatable(1f) }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally),
         verticalAlignment = Alignment.CenterVertically
     ) {
         FilledTonalIconButton(
-            onClick = onSeekBack,
-            modifier = Modifier.size(60.dp)
+            onClick = {
+                onSeekBack()
+                scope.launch {
+                    backSpin.snapTo(-24f)
+                    backSpin.animateTo(0f, animationSpec = spinSpec)
+                }
+                scope.launch {
+                    backScale.snapTo(0.84f)
+                    backScale.animateTo(1f, animationSpec = spinSpec)
+                }
+            },
+            shapes = IconButtonDefaults.shapes(),
+            modifier = Modifier
+                .size(60.dp)
+                .graphicsLayer {
+                    rotationZ = backSpin.value
+                    scaleX = backScale.value
+                    scaleY = backScale.value
+                }
         ) {
             Icon(
                 imageVector = backIcon,
@@ -1878,20 +1904,61 @@ private fun PlayerTransportControls(
         // R7: play/pause is an action, not a toggle, so it keeps the primary color in both states
         // (as a toggle, "paused" used the dim unchecked colors and looked disabled).
         FilledIconButton(
-            onClick = onTogglePlay,
+            onClick = {
+                onTogglePlay()
+                scope.launch {
+                    playScale.snapTo(0.86f)
+                    playScale.animateTo(1f, animationSpec = spinSpec)
+                }
+            },
             shapes = IconButtonDefaults.shapes(),
-            modifier = Modifier.size(width = 96.dp, height = 68.dp)
+            modifier = Modifier
+                .size(width = 96.dp, height = 68.dp)
+                .graphicsLayer {
+                    scaleX = playScale.value
+                    scaleY = playScale.value
+                }
         ) {
-            Icon(
-                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                contentDescription = if (isPlaying) "Pause" else "Play",
-                modifier = Modifier.size(38.dp)
-            )
+            AnimatedContent(
+                targetState = isPlaying,
+                transitionSpec = {
+                    (androidx.compose.animation.scaleIn(initialScale = 0.65f, animationSpec = spinSpec) +
+                        fadeIn(animationSpec = effectsSpec))
+                        .togetherWith(
+                            androidx.compose.animation.scaleOut(targetScale = 0.65f, animationSpec = spinSpec) +
+                                fadeOut(animationSpec = effectsSpec)
+                        )
+                },
+                label = "playerPlayPauseIcon"
+            ) { playing ->
+                Icon(
+                    imageVector = if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = if (playing) "Pause" else "Play",
+                    modifier = Modifier.size(38.dp)
+                )
+            }
         }
 
         FilledTonalIconButton(
-            onClick = onSeekForward,
-            modifier = Modifier.size(60.dp)
+            onClick = {
+                onSeekForward()
+                scope.launch {
+                    fwdSpin.snapTo(24f)
+                    fwdSpin.animateTo(0f, animationSpec = spinSpec)
+                }
+                scope.launch {
+                    fwdScale.snapTo(0.84f)
+                    fwdScale.animateTo(1f, animationSpec = spinSpec)
+                }
+            },
+            shapes = IconButtonDefaults.shapes(),
+            modifier = Modifier
+                .size(60.dp)
+                .graphicsLayer {
+                    rotationZ = fwdSpin.value
+                    scaleX = fwdScale.value
+                    scaleY = fwdScale.value
+                }
         ) {
             Icon(
                 imageVector = forwardIcon,

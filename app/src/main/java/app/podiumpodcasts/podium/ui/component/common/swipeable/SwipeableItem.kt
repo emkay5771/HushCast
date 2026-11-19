@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -73,7 +74,7 @@ fun SwipeableItem(
     val undo = stringResource(R.string.common_action_undo)
     val spatialSpec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
 
-    val actionSlotWidthDp = 64.dp
+    val actionSlotWidthDp = 68.dp
     val startSlots = listOfNotNull(startAction, secondaryStartAction)
     val endSlots = listOfNotNull(endAction, secondaryEndAction)
     val startRevealPx = with(density) { (actionSlotWidthDp * startSlots.size).toPx() }
@@ -208,6 +209,7 @@ fun SwipeableItem(
                     animationSpec = MaterialTheme.motionScheme.fastEffectsSpec(),
                     label = "swipeStartPrimaryTint"
                 )
+                val startPrimaryShort = startAction.shortLabel()
                 Box(
                     modifier = Modifier
                         .width(actionSlotWidthDp)
@@ -215,19 +217,35 @@ fun SwipeableItem(
                         .clickable(onClickLabel = startPrimaryLabel) { executeAction(startPrimaryHandler) },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = primaryStyleResolved.icon,
-                        contentDescription = startPrimaryLabel,
-                        tint = primaryIconTint,
+                    androidx.compose.foundation.layout.Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
                         modifier = Modifier.graphicsLayer {
-                            val s = if (isFullStart) 1.25f else 1.0f
+                            val s = if (isFullStart) 1.2f else 1.0f
                             scaleX = s
                             scaleY = s
                         }
-                    )
+                    ) {
+                        Icon(
+                            imageVector = primaryStyleResolved.icon,
+                            contentDescription = startPrimaryLabel,
+                            tint = primaryIconTint,
+                            modifier = Modifier.androidx.compose.foundation.layout.size(20.dp)
+                        )
+                        if (startPrimaryShort.isNotEmpty()) {
+                            androidx.compose.material3.Text(
+                                text = startPrimaryShort,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = primaryIconTint,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
                 }
                 if (secondaryStartAction != null && !isFullStart) {
                     val secStyle = secondaryStartAction.style()
+                    val startSecondaryShort = secondaryStartAction.shortLabel()
                     Box(
                         modifier = Modifier
                             .width(actionSlotWidthDp)
@@ -236,11 +254,26 @@ fun SwipeableItem(
                             .clickable(onClickLabel = startSecondaryLabel) { executeAction(startSecondaryHandler) },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = secStyle.icon,
-                            contentDescription = startSecondaryLabel,
-                            tint = secStyle.iconTint
-                        )
+                        androidx.compose.foundation.layout.Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Icon(
+                                imageVector = secStyle.icon,
+                                contentDescription = startSecondaryLabel,
+                                tint = secStyle.iconTint,
+                                modifier = Modifier.androidx.compose.foundation.layout.size(20.dp)
+                            )
+                            if (startSecondaryShort.isNotEmpty()) {
+                                androidx.compose.material3.Text(
+                                    text = startSecondaryShort,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = secStyle.iconTint,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -261,6 +294,7 @@ fun SwipeableItem(
             ) {
                 if (secondaryEndAction != null && !isFullEnd) {
                     val secStyle = secondaryEndAction.style()
+                    val endSecondaryShort = secondaryEndAction.shortLabel()
                     Box(
                         modifier = Modifier
                             .width(actionSlotWidthDp)
@@ -269,14 +303,30 @@ fun SwipeableItem(
                             .clickable(onClickLabel = endSecondaryLabel) { executeAction(endSecondaryHandler) },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = secStyle.icon,
-                            contentDescription = endSecondaryLabel,
-                            tint = secStyle.iconTint
-                        )
+                        androidx.compose.foundation.layout.Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Icon(
+                                imageVector = secStyle.icon,
+                                contentDescription = endSecondaryLabel,
+                                tint = secStyle.iconTint,
+                                modifier = Modifier.androidx.compose.foundation.layout.size(20.dp)
+                            )
+                            if (endSecondaryShort.isNotEmpty()) {
+                                androidx.compose.material3.Text(
+                                    text = endSecondaryShort,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = secStyle.iconTint,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
                     }
                 }
                 val primaryStyleResolved = endAction.style()
+                val endPrimaryShort = endAction.shortLabel()
                 val primaryIconTint by animateColorAsState(
                     if (isFullEnd) primaryStyleResolved.activeIconTint else primaryStyleResolved.iconTint,
                     animationSpec = MaterialTheme.motionScheme.fastEffectsSpec(),
@@ -289,16 +339,31 @@ fun SwipeableItem(
                         .clickable(onClickLabel = endPrimaryLabel) { executeAction(endPrimaryHandler) },
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(
-                        imageVector = primaryStyleResolved.icon,
-                        contentDescription = endPrimaryLabel,
-                        tint = primaryIconTint,
+                    androidx.compose.foundation.layout.Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
                         modifier = Modifier.graphicsLayer {
-                            val s = if (isFullEnd) 1.25f else 1.0f
+                            val s = if (isFullEnd) 1.2f else 1.0f
                             scaleX = s
                             scaleY = s
                         }
-                    )
+                    ) {
+                        Icon(
+                            imageVector = primaryStyleResolved.icon,
+                            contentDescription = endPrimaryLabel,
+                            tint = primaryIconTint,
+                            modifier = Modifier.androidx.compose.foundation.layout.size(20.dp)
+                        )
+                        if (endPrimaryShort.isNotEmpty()) {
+                            androidx.compose.material3.Text(
+                                text = endPrimaryShort,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = primaryIconTint,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
+                    }
                 }
             }
         }

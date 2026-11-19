@@ -492,6 +492,23 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    fun insertInQueue(queuePos: Int, mediaItem: MediaItem) {
+        val controller = mediaController ?: return
+        if (controller.mediaItemCount == 0) {
+            controller.setMediaItem(mediaItem)
+            controller.prepare()
+            syncQueue(persist = true)
+            return
+        }
+        val insertIndex = when {
+            queuePos <= 0 -> (controller.currentMediaItemIndex + 1).coerceIn(0, controller.mediaItemCount)
+            queuePos < queueIndex.size -> queueIndex[queuePos].coerceIn(0, controller.mediaItemCount)
+            else -> controller.mediaItemCount
+        }
+        controller.addMediaItem(insertIndex, mediaItem)
+        syncQueue(persist = true)
+    }
+
     fun moveQueueItem(fromQueuePos: Int, toQueuePos: Int) {
         val controller = mediaController ?: return
         if (fromQueuePos == toQueuePos) return

@@ -1,3 +1,21 @@
+# HushCast v1.0.39-hushcast
+
+## What's New
+- **Transcript view no longer drops boundary words**:
+  - Fixed a bug where words at the start or end of a paragraph whose forced-aligned timestamps shifted slightly past the original segment bounds were omitted from the in-app transcript view.
+  - The worker also updates segment bounds to match forced-aligned word timings.
+- **Up Next queue delete & undo fixed**:
+  - Swiping an episode out of Up Next no longer leaves a stuck red delete row at the top of the queue, and tapping **Undo** restores the episode to its original queue position.
+- **Clearer episode swipe actions**:
+  - Queue swipe actions now use clearer top/bottom alignment icons (`Next` and `End`) and show short text labels directly beneath the icons in the swipe tray.
+- **Podcast-appropriate queue icon**:
+  - Replaced the music-note queue icon (`QueueMusic`) across the mini player, full player, Up Next empty state, and Episodes tab with non-music list/queue icons.
+- **M3E transport animations & larger system speed icon**:
+  - Added Material 3 Expressive shape morphs, bouncy spring scale kicks, and rotational skip feedback to Play/Pause and Skip buttons in both the full player and mini player.
+  - Scaled up the playback speed icons (`ic_speed_*`) for better readability in the Android system media notification.
+
+---
+
 # HushCast v1.0.38-hushcast
 
 ## What's New

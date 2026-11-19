@@ -200,6 +200,27 @@ class PlayerHelpersTest {
         org.junit.Assert.assertFalse(app.podiumpodcasts.podium.background.HushCastEngineBridge.isUndoValid(pending, "ep2", 120_000L))
     }
 
+    @Test
+    fun `assignWordsToParagraphs preserves boundary words shifted past segment bounds by forced alignment`() {
+        val p1 = listOf(Segment(start = 10.0, end = 12.0, text = "Bible study course.", speaker = 0))
+        val p2 = listOf(Segment(start = 12.6, end = 14.0, text = "Not created equal.", speaker = 1))
+        val words = listOf(
+            Word(9.85, 10.2, "Bible"),   // shifted 0.15s earlier than p1.start
+            Word(10.2, 10.6, "study"),
+            Word(11.7, 12.2, "course."), // shifted 0.20s past p1.end
+            Word(12.45, 12.8, "Not"),    // shifted 0.15s earlier than p2.start
+            Word(12.8, 13.2, "created"),
+            Word(13.8, 14.25, "equal.")  // shifted 0.25s past p2.end
+        )
+        val lines = app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.assignWordsToParagraphs(
+            listOf(p1, p2),
+            words
+        )
+        assertEquals(2, lines.size)
+        assertEquals(listOf("Bible", "study", "course."), lines[0].words.map { it.text })
+        assertEquals(listOf("Not", "created", "equal."), lines[1].words.map { it.text })
+    }
+
     private fun segment(id: Long, start: Long, end: Long, enabled: Boolean = true) = MuteSegmentEntity(
         id = id,
         fileSha256 = "sha",

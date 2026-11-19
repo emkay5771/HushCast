@@ -17,7 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.ClearAll
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Pause
@@ -283,7 +283,7 @@ fun MediaPlayerQueueBottomSheet(
                                 horizontalAlignment = Alignment.CenterHorizontally
                             ) {
                                 Icon(
-                                    imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                                    imageVector = Icons.AutoMirrored.Rounded.PlaylistPlay,
                                     contentDescription = null,
                                     modifier = Modifier.size(36.dp),
                                     tint = MaterialTheme.colorScheme.primary
@@ -321,17 +321,24 @@ fun MediaPlayerQueueBottomSheet(
                                 confirmValueChange = { value ->
                                     if (value != SwipeToDismissBoxValue.Settled) {
                                         val removedEpisodeId = mediaItem.getEpisodeId().orEmpty()
+                                        val removedQueuePos = localQueue.indexOfFirst {
+                                            it.getEpisodeId() == removedEpisodeId
+                                        }.takeIf { it >= 0 } ?: queueIndexIndex
+                                        if (removedQueuePos in localQueue.indices) {
+                                            localQueue.removeAt(removedQueuePos)
+                                        }
                                         if (removedEpisodeId.isNotEmpty()) {
                                             vm.dequeue(removedEpisodeId)
                                         }
                                         scope.launch {
+                                            snackbarHostState.currentSnackbarData?.dismiss()
                                             val result = snackbarHostState.showSnackbar(
                                                 message = "Removed from Up Next",
                                                 actionLabel = "Undo",
                                                 duration = androidx.compose.material3.SnackbarDuration.Short
                                             )
                                             if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
-                                                vm.playNextMediaItem(mediaItem)
+                                                vm.insertInQueue(removedQueuePos, mediaItem)
                                             }
                                         }
                                         true
@@ -340,6 +347,12 @@ fun MediaPlayerQueueBottomSheet(
                                     }
                                 }
                             )
+
+                            LaunchedEffect(itemKey) {
+                                if (dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
+                                    dismissState.snapTo(SwipeToDismissBoxValue.Settled)
+                                }
+                            }
 
                             LaunchedEffect(dismissState.targetValue) {
                                 if (dismissState.targetValue != SwipeToDismissBoxValue.Settled) {

@@ -1,14 +1,14 @@
 package app.podiumpodcasts.podium.ui.component.common.swipeable
 
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.PlaylistRemove
-import androidx.compose.material.icons.rounded.QueuePlayNext
 import androidx.compose.material.icons.rounded.RemoveDone
 import androidx.compose.material.icons.rounded.RestartAlt
+import androidx.compose.material.icons.rounded.VerticalAlignBottom
+import androidx.compose.material.icons.rounded.VerticalAlignTop
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
@@ -45,7 +45,8 @@ abstract class SwipeableItemAction(
     val style: @Composable () -> SwipeableItemActionStyle,
     val onActionHandler: @Composable () -> (suspend () -> SwipeableItemActionResult),
     /** M11: the action's name, for TalkBack's actions menu ("Play next", "Remove download"). */
-    val label: @Composable () -> String = { "" }
+    val label: @Composable () -> String = { "" },
+    val shortLabel: @Composable () -> String = { "" }
 )
 
 interface SwipeableItemActions {
@@ -65,7 +66,8 @@ interface SwipeableItemActions {
         onActionHandler = {
             onAction
         },
-        label = { label }
+        label = { label },
+        shortLabel = { "Delete" }
     )
 
     class CheckAction(
@@ -85,7 +87,8 @@ interface SwipeableItemActions {
         onActionHandler = {
             onAction
         },
-        label = { label ?: if (isChecked) "Mark as unplayed" else "Mark as played" }
+        label = { label ?: if (isChecked) "Mark as unplayed" else "Mark as played" },
+        shortLabel = { if (isChecked) "Unplayed" else "Played" }
     )
 
     class ResetAction(
@@ -104,7 +107,8 @@ interface SwipeableItemActions {
         onActionHandler = {
             onAction
         },
-        label = { label }
+        label = { label },
+        shortLabel = { "Reset" }
     )
 
     /**
@@ -122,8 +126,8 @@ interface SwipeableItemActions {
             SwipeableItemActionStyle(
                 icon = when {
                     queued -> Icons.Rounded.PlaylistRemove
-                    playNext -> Icons.Rounded.QueuePlayNext
-                    else -> Icons.AutoMirrored.Rounded.PlaylistAdd
+                    playNext -> Icons.Rounded.VerticalAlignTop
+                    else -> Icons.Rounded.VerticalAlignBottom
                 },
                 backgroundColor = MaterialTheme.colorScheme.primaryContainer,
                 iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -174,6 +178,14 @@ interface SwipeableItemActions {
                 queued -> "Remove from Up Next"
                 playNext -> "Play next"
                 else -> "Play last"
+            }
+        },
+        shortLabel = {
+            val queued = inQueue ?: playerVm.queue.contains(bundle.episode.id)
+            when {
+                queued -> "Remove"
+                playNext -> "Next"
+                else -> "End"
             }
         }
     )

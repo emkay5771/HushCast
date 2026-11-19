@@ -34,7 +34,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Forward
 import androidx.compose.material.icons.rounded.Forward10
 import androidx.compose.material.icons.rounded.Forward30
@@ -291,12 +291,17 @@ fun FloatingMediaPlayer(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     val spinSpec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
-                                    // Skip Back — M3E tonal icon button with built-in shape morph & rotational kick
+                                    // Skip Back — M3E tonal icon button with built-in shape morph, scale kick & rotational kick
                                     val backSpin = remember { Animatable(0f) }
+                                    val backScale = remember { Animatable(1f) }
                                     FilledTonalIconButton(
                                         modifier = Modifier
                                             .size(40.dp)
-                                            .graphicsLayer { rotationZ = backSpin.value },
+                                            .graphicsLayer {
+                                                rotationZ = backSpin.value
+                                                scaleX = backScale.value
+                                                scaleY = backScale.value
+                                            },
                                         shapes = IconButtonDefaults.shapes(),
                                         colors = IconButtonDefaults.filledTonalIconButtonColors(
                                             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
@@ -306,6 +311,10 @@ fun FloatingMediaPlayer(
                                             scope.launch {
                                                 backSpin.snapTo(-24f)
                                                 backSpin.animateTo(0f, animationSpec = spinSpec)
+                                            }
+                                            scope.launch {
+                                                backScale.snapTo(0.84f)
+                                                backScale.animateTo(1f, animationSpec = spinSpec)
                                             }
                                         }
                                     ) {
@@ -321,9 +330,15 @@ fun FloatingMediaPlayer(
                                         )
                                     }
 
-                                    // Play/Pause — M3E shape-morphing FilledIconToggleButton
+                                    // Play/Pause — M3E shape-morphing FilledIconToggleButton with bouncy spring kick
+                                    val playScale = remember { Animatable(1f) }
                                     FilledIconToggleButton(
-                                        modifier = Modifier.size(width = 52.dp, height = 46.dp),
+                                        modifier = Modifier
+                                            .size(width = 52.dp, height = 46.dp)
+                                            .graphicsLayer {
+                                                scaleX = playScale.value
+                                                scaleY = playScale.value
+                                            },
                                         shapes = IconButtonDefaults.toggleableShapes(),
                                         colors = IconButtonDefaults.filledIconToggleButtonColors(
                                             containerColor = MaterialTheme.colorScheme.primary,
@@ -337,6 +352,10 @@ fun FloatingMediaPlayer(
                                                 vm.pause()
                                             } else {
                                                 vm.play()
+                                            }
+                                            scope.launch {
+                                                playScale.snapTo(0.86f)
+                                                playScale.animateTo(1f, animationSpec = spinSpec)
                                             }
                                         }
                                     ) {
@@ -363,12 +382,17 @@ fun FloatingMediaPlayer(
                                         }
                                     }
 
-                                    // Skip Forward — M3E tonal icon button with built-in shape morph & rotational kick
+                                    // Skip Forward — M3E tonal icon button with built-in shape morph, scale kick & rotational kick
                                     val fwdSpin = remember { Animatable(0f) }
+                                    val fwdScale = remember { Animatable(1f) }
                                     FilledTonalIconButton(
                                         modifier = Modifier
                                             .size(40.dp)
-                                            .graphicsLayer { rotationZ = fwdSpin.value },
+                                            .graphicsLayer {
+                                                rotationZ = fwdSpin.value
+                                                scaleX = fwdScale.value
+                                                scaleY = fwdScale.value
+                                            },
                                         shapes = IconButtonDefaults.shapes(),
                                         colors = IconButtonDefaults.filledTonalIconButtonColors(
                                             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
@@ -378,6 +402,10 @@ fun FloatingMediaPlayer(
                                             scope.launch {
                                                 fwdSpin.snapTo(24f)
                                                 fwdSpin.animateTo(0f, animationSpec = spinSpec)
+                                            }
+                                            scope.launch {
+                                                fwdScale.snapTo(0.84f)
+                                                fwdScale.animateTo(1f, animationSpec = spinSpec)
                                             }
                                         }
                                     ) {
@@ -437,7 +465,7 @@ fun FloatingMediaPlayer(
                                             }
                                             Icon(
                                                 modifier = Modifier.size(18.dp),
-                                                imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
+                                                imageVector = Icons.AutoMirrored.Rounded.PlaylistPlay,
                                                 contentDescription = "Up Next"
                                             )
                                         }

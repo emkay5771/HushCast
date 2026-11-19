@@ -410,19 +410,7 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
         // transcript card did.  A paragraph ends when the speaker changes, an ad boundary is
         // crossed, after a long pause, or at a sentence end once it has grown long enough.
         val paragraphs = groupIntoParagraphs(splitSegs, adRanges)
-        return paragraphs.mapIndexed { idx, group ->
-            val start = group.first().start
-            val end = group.last().end
-            val paraWords = blob.words.filter { w -> w.start >= start - 0.05 && w.end <= end + 0.05 }
-            TranscriptLineUi(
-                index = idx,
-                startMs = (start * 1000.0).toLong().coerceAtLeast(0L),
-                endMs = (end * 1000.0).toLong().coerceAtLeast(0L),
-                speaker = group.first().speaker?.let { "Speaker ${it + 1}" },
-                text = group.joinToString(" ") { it.text.trim() }.trim(),
-                words = paraWords
-            )
-        }
+        return assignWordsToParagraphs(paragraphs, blob.words)
     }
 
     private fun mergeCueFragmentsIntoSentences(segments: List<Segment>): List<Segment> {
@@ -707,4 +695,44 @@ internal fun groupIntoParagraphs(
     }
     if (cur.isNotEmpty()) out.add(cur.toList())
     return out
+}
+
+internal fun assignWordsToParagraphs(
+    paragraphs: List<List<Segment>>,
+    words: List<Word>
+): List<TranscriptLineUi> {
+    if (paragraphs.isEmpty()) return emptyList()
+    var wordCursor = 0
+    return paragraphs.mapIndexed { idx, group ->
+        val start = group.first().start
+        val end = group.last().end
+        val paraWords = if (words.isEmpty()) {
+            emptyList()
+        } else if (idx == paragraphs.lastIndex) {
+            val tail = words.subList(wordCursor, words.size).toList()
+            wordCursor = words.size
+            tail
+        } else {
+            val nextStart = paragraphs[idx + 1].first().start
+            val boundary = 0.5 * (end + nextStart)
+            val startIdx = wordCursor
+            while (wordCursor < words.size) {
+                val w = words[wordCursor]
+                val mid = 0.5 * (w.start + w.end)
+                if (mid >= boundary) break
+                wordCursor++
+            }
+            words.subList(startIdx, wordCursor).toList()
+        }
+        val lineStart = paraWords.firstOrNull()?.start?.let { minOf(start, it) } ?: start
+        val lineEnd = paraWords.lastOrNull()?.end?.let { maxOf(end, it) } ?: end
+        TranscriptLineUi(
+            index = idx,
+            startMs = (lineStart * 1000.0).toLong().coerceAtLeast(0L),
+            endMs = (lineEnd * 1000.0).toLong().coerceAtLeast(0L),
+            speaker = group.first().speaker?.let { "Speaker ${it + 1}" },
+            text = group.joinToString(" ") { it.text.trim() }.trim(),
+            words = paraWords
+        )
+    }
 }

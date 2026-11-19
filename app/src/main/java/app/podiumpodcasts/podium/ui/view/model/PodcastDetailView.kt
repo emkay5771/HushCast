@@ -157,7 +157,7 @@ enum class Destinations(
     @StringRes val label: Int,
     val icon: ImageVector
 ) {
-    EPISODES(0, R.string.common_episodes, Icons.AutoMirrored.Filled.QueueMusic),
+    EPISODES(0, R.string.common_episodes, Icons.AutoMirrored.Rounded.FormatListBulleted),
     INFO(1, R.string.common_info, Icons.Default.Info)
 }
 

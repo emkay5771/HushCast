@@ -1285,6 +1285,14 @@ class LocalMlBackend:
                     pcm_16k, segments, words, cancel_event=cancel_event
                 )
                 if n_aligned > 0:
+                    if sum(s.nWords for s in segments) == len(words):
+                        pos = 0
+                        for seg in segments:
+                            if seg.nWords > 0:
+                                seg_words = words[pos : pos + seg.nWords]
+                                seg.start = seg_words[0].start
+                                seg.end = seg_words[-1].end
+                                pos += seg.nWords
                     on_progress(
                         JobState.TRANSCRIBING,
                         62,
