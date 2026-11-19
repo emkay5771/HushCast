@@ -1508,7 +1508,17 @@ def _make_fw_window_decoder(fw_model, pcm_16k, lang: str, sr: int = 16000):
         )
         out: list[WordDto] = []
         for seg in segs:
-            out.extend(_fw_words_to_dtos(getattr(seg, "words", None), float(getattr(seg, "start", 0.0))))
+            seg_words = _fw_words_to_dtos(getattr(seg, "words", None), float(getattr(seg, "start", 0.0)))
+            if not seg_words and (getattr(seg, "text", "") or "").strip():
+                toks = seg.text.split()
+                s0 = float(getattr(seg, "start", 0.0))
+                s1 = max(float(getattr(seg, "end", s0)), s0 + 0.01 * len(toks))
+                step = (s1 - s0) / len(toks)
+                seg_words = [
+                    WordDto(start=round(s0 + i * step, 3), end=round(s0 + (i + 1) * step, 3), text=" " + t)
+                    for i, t in enumerate(toks)
+                ]
+            out.extend(seg_words)
         return out
 
     return _decode

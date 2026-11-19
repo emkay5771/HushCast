@@ -690,6 +690,7 @@ class PlaybackService : MediaLibraryService() {
             }
         )
             .setPlayerCommand(Player.COMMAND_SEEK_BACK)
+            .setSlots(CommandButton.SLOT_BACK)
             .setCustomIconResId(
                 when (currentSeekBackIncrementMs) {
                     5000L -> R.drawable.ic_replay_5
@@ -711,6 +712,7 @@ class PlaybackService : MediaLibraryService() {
             }
         )
             .setPlayerCommand(Player.COMMAND_SEEK_FORWARD)
+            .setSlots(CommandButton.SLOT_FORWARD)
             .setCustomIconResId(
                 when (currentSeekForwardIncrementMs) {
                     5000L -> R.drawable.ic_forward_5
@@ -730,6 +732,7 @@ class PlaybackService : MediaLibraryService() {
         }
         val playbackSpeed = CommandButton.Builder(CommandButton.ICON_PLAYBACK_SPEED)
             .setSessionCommand(SessionCommand(COMMAND_CYCLE_SPEED, Bundle.EMPTY))
+            .setSlots(CommandButton.SLOT_OVERFLOW)
             .setCustomIconResId(speedIconResId(currentSpeed))
             .setDisplayName("${getString(R.string.common_action_toggle_playback_speed)} ($speedLabel)")
             .build()
@@ -989,7 +992,7 @@ class PlaybackService : MediaLibraryService() {
                 // I7: no settings write here.  This fires for per-podcast speeds and slider previews
                 // too, and used to overwrite the global speed with them.  The speed sheet and
                 // applyUserSpeed() save to the chosen scope themselves.
-                mediaSession?.setCustomLayout(buildMediaButtons(exoPlayer))
+                mediaSession?.setMediaButtonPreferences(buildMediaButtons(exoPlayer))
                 super.onPlaybackParametersChanged(playbackParameters)
             }
 

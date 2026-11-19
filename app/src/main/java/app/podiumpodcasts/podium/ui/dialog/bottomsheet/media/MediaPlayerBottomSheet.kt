@@ -952,7 +952,7 @@ fun MediaPlayerBottomSheet(
                                             positionMsState = livePosState,
                                             durationMs = durationMs,
                                             playbackSpeed = vm.speed,
-                                            adjustRemainingForSpeed = adjustRemainingForSpeed,
+                                            remainingTimeDisplay = remainingTimeDisplay,
                                             muteWindows = muteWindows,
                                             adWindows = adWindows,
                                             onSeekToMs = { vm.seek(it) },

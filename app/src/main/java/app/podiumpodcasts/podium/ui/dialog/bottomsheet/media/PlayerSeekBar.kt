@@ -73,7 +73,7 @@ fun PlayerSeekBar(
     positionMsState: androidx.compose.runtime.State<Long>,
     durationMs: Long,
     playbackSpeed: Float,
-    adjustRemainingForSpeed: Boolean,
+    remainingTimeDisplay: app.podiumpodcasts.podium.RemainingTimeDisplayMode = app.podiumpodcasts.podium.RemainingTimeDisplayMode.BOTH,
     muteWindows: List<MuteWindow>,
     adWindows: List<AdWindow>,
     onSeekToMs: (Long) -> Unit,
@@ -150,7 +150,7 @@ fun PlayerSeekBar(
 
     val posText = DateUtils.formatElapsedTime(displayPosMs / 1000L)
     val remainingAudioMs = (durationMs - displayPosMs).coerceAtLeast(0L)
-    val remainingDisplayMs = if (adjustRemainingForSpeed && durationMs > 0L) {
+    val remainingAdjustedMs = if (durationMs > 0L) {
         SkipAwareSeekCalculator.computeWallRemainingMs(
             fromMs = displayPosMs,
             targetEndMs = durationMs,
@@ -158,9 +158,25 @@ fun PlayerSeekBar(
             skipRanges = HushCastEngineBridge.getActiveSkipRanges()
         )
     } else {
-        remainingAudioMs
+        0L
     }
-    val remText = if (durationMs > 0L) "-${DateUtils.formatElapsedTime(remainingDisplayMs / 1000L)}" else "--:--"
+    val remainingDisplayMs = if (remainingTimeDisplay == app.podiumpodcasts.podium.RemainingTimeDisplayMode.RAW) {
+        remainingAudioMs
+    } else {
+        remainingAdjustedMs
+    }
+    val remText = if (durationMs > 0L) {
+        val rawText = "-${DateUtils.formatElapsedTime(remainingAudioMs / 1000L)}"
+        val adjText = "-${DateUtils.formatElapsedTime(remainingAdjustedMs / 1000L)}"
+        when (remainingTimeDisplay) {
+            app.podiumpodcasts.podium.RemainingTimeDisplayMode.RAW -> rawText
+            app.podiumpodcasts.podium.RemainingTimeDisplayMode.ADJUSTED -> adjText
+            app.podiumpodcasts.podium.RemainingTimeDisplayMode.BOTH ->
+                if (rawText != adjText) "$rawText ($adjText)" else rawText
+        }
+    } else {
+        "--:--"
+    }
 
     Column(modifier = modifier.fillMaxWidth()) {
         // Precise scrub floating pill with zoomed-in ±90s mini timeline

@@ -1,3 +1,16 @@
+# HushCast v1.0.38-hushcast
+
+## What's New
+- **Media notification skip buttons restored**:
+  - The Android system media player (lock screen and Quick Settings) now keeps its skip-back and skip-forward buttons alongside the playback speed control instead of dropping them when speed updates.
+- **Player "Both" remaining time display fixed**:
+  - Selecting **Both** for remaining time in Settings now shows both the original remaining time and the speed/skip-adjusted time (e.g. `-24:10 (-16:07)`) on the player seek bar.
+- **Worker transcript repair fixes**:
+  - `repair_hard_cuts` now reconciles multi-word timestamp drift across repair seams and rejects re-decodes that drop words compared to the original span.
+  - Added a text-split fallback in `_make_fw_window_decoder` when a re-decoded segment lacks word-level timestamps.
+
+---
+
 # HushCast v1.0.37-hushcast
 
 ## What's New

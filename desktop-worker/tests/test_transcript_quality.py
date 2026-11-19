@@ -242,6 +242,33 @@ def test_repair_rejects_implausible_redecode_and_survives_errors() -> None:
     flat, n = repair_hard_cuts(windows, broken)
     assert n == 0 and "sophisticated really" in _joined(flat)
 
+    def dropped_words(start, end, prompt):
+        # Re-decode lost several words compared to the original span: must be rejected.
+        words = _seq(28.0, 0.5, ["we", "saw", "sophisticated", "really", "significant"])
+        return [_w(w.start - start, w.end - start, w.text) for w in words]
+
+    flat, n = repair_hard_cuts(windows, dropped_words)
+    assert n == 0
+    assert "so we saw the use of sophisticated really significant chunk of NVIDIA's profit share." in _joined(flat)
+
+
+def test_repair_hard_cuts_multi_word_seam_drift_preserves_all_words() -> None:
+    windows = _cut_fixture()
+
+    def fake_decode(start: float, end: float, prompt: str):
+        # Shift 2 words ("so", "we") earlier than lo=28.0 and 2 words ("NVIDIA's", "profit")
+        # past hi=32.0 relative to the batched timestamps.
+        words = _seq(27.0, 0.3, ["so", "we", "saw", "the", "use", "of", "sophisticated", "models"])
+        words += _seq(29.8, 0.5, ["really", "significant", "chunk", "of", "NVIDIA's", "profit", "share."])
+        return [_w(w.start - start, w.end - start, w.text) for w in words]
+
+    flat, n = repair_hard_cuts(windows, fake_decode)
+    assert n == 1
+    assert _joined(flat) == (
+        "Earlier we talked about chips. so we saw the use of sophisticated models "
+        "really significant chunk of NVIDIA's profit share."
+    )
+
 
 def test_repair_respects_cancel_event() -> None:
     ev = threading.Event()

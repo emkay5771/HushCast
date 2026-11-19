@@ -221,25 +221,44 @@ def repair_hard_cuts(
         insert = decoded[j0:j1]
 
         if insert:
-            left_keep = flat[i0 - 1] if i0 > 0 else None
-            right_keep = flat[i1] if i1 < len(flat) else None
-            # Left edge: drop a doubled word, or pull in one the decoder timed just outside.
-            if _same_word(insert[0], left_keep):
-                insert = insert[1:]
-            elif removed and j0 > 0 and _same_word(decoded[j0 - 1], removed[0]) \
-                    and not _same_word(decoded[j0 - 1], left_keep) \
-                    and not _same_word(insert[0], removed[0]):
-                insert = [decoded[j0 - 1]] + insert
-            # Right edge, mirrored.
-            if insert and _same_word(insert[-1], right_keep):
-                insert = insert[:-1]
-            elif insert and removed and j1 < len(decoded) and _same_word(decoded[j1], removed[-1]) \
-                    and not _same_word(decoded[j1], right_keep) \
-                    and not _same_word(insert[-1], removed[-1]):
-                insert = insert + [decoded[j1]]
+            # Left edge: drop leading words already kept before i0, or pull in up to 4 words
+            # that drifted just before lo in the re-decode.
+            max_seam = 4
+            if i0 > 0:
+                dropped_left = False
+                for k in range(min(max_seam, len(insert), i0), 0, -1):
+                    if all(_same_word(insert[m], flat[i0 - k + m]) for m in range(k)):
+                        insert = insert[k:]
+                        dropped_left = True
+                        break
+                if not dropped_left and removed and j0 > 0 and not _same_word(insert[0], removed[0]):
+                    for k in range(1, min(max_seam, j0) + 1):
+                        cand = decoded[j0 - k]
+                        if _same_word(cand, flat[i0 - 1]):
+                            break
+                        if _same_word(cand, removed[0]):
+                            insert = decoded[j0 - k : j0] + insert
+                            break
 
-        # Plausibility: a re-decode that lost half the words or looped is worse than the original.
-        if insert and (len(insert) * 2 >= len(removed)) and len(insert) <= 2 * len(removed) + 4:
+            # Right edge, mirrored.
+            if insert and i1 < len(flat):
+                dropped_right = False
+                for k in range(min(max_seam, len(insert), len(flat) - i1), 0, -1):
+                    if all(_same_word(insert[-k + m], flat[i1 + m]) for m in range(k)):
+                        insert = insert[:-k]
+                        dropped_right = True
+                        break
+                if not dropped_right and insert and removed and j1 < len(decoded) and not _same_word(insert[-1], removed[-1]):
+                    for k in range(min(max_seam, len(decoded) - j1)):
+                        cand = decoded[j1 + k]
+                        if _same_word(cand, flat[i1]):
+                            break
+                        if _same_word(cand, removed[-1]):
+                            insert = insert + decoded[j1 : j1 + k + 1]
+                            break
+
+        # Plausibility: a re-decode that dropped words or looped is worse than the original.
+        if insert and len(insert) >= len(removed) and len(insert) <= 2 * len(removed) + 4:
             flat[i0:i1] = insert
             n_replaced += 1
 
