@@ -124,6 +124,32 @@ internal fun adForLine(line: TranscriptLineUi, adWindows: List<AdWindow>): AdWin
     }
 }
 
+/** Resolves the seek position in ms for a tapped word, falling back to the line start if unaligned. */
+internal fun resolveWordSeekMs(word: Word?, lineStartMs: Long): Long {
+    val wordMs = word?.let { (it.start * 1000.0).toLong() }
+    return when {
+        wordMs == null -> lineStartMs
+        wordMs > 0L -> wordMs
+        lineStartMs == 0L -> 0L
+        else -> lineStartMs
+    }
+}
+
+private fun wordAtPosition(
+    offset: androidx.compose.ui.geometry.Offset,
+    layout: androidx.compose.ui.text.TextLayoutResult?,
+    wordRanges: List<Pair<IntRange, Word>>
+): Word? {
+    val charIdx = layout?.getOffsetForPosition(offset) ?: return null
+    return wordRanges.firstOrNull { (range, _) -> charIdx in range }?.second
+        ?: wordRanges.minByOrNull { (range, _) ->
+            kotlin.math.min(
+                kotlin.math.abs(charIdx - range.first),
+                kotlin.math.abs(charIdx - range.last)
+            )
+        }?.second
+}
+
 /**
  * T2: once the transcript list can't scroll further, the leftover drag and fling stop here
  * instead of moving (and closing) the bottom sheet around it.
@@ -682,21 +708,14 @@ fun TranscriptOverlay(
                                                     .fillMaxWidth()
                                                     .pointerInput(wordRanges, line.startMs, idx) {
                                                         detectTapGestures(
-                                                            onTap = {
-                                                                if (canPlayFromHere) onSeekToMs(line.startMs)
+                                                            onTap = { offset ->
+                                                                if (canPlayFromHere) {
+                                                                    val hitWord = wordAtPosition(offset, textLayoutResult, wordRanges)
+                                                                    onSeekToMs(resolveWordSeekMs(hitWord, line.startMs))
+                                                                }
                                                             },
                                                             onLongPress = { offset ->
-                                                                val layout = textLayoutResult
-                                                                val charIdx = layout?.getOffsetForPosition(offset)
-                                                                val hitWord = if (charIdx != null) {
-                                                                    wordRanges.firstOrNull { (range, _) -> charIdx in range }?.second
-                                                                        ?: wordRanges.minByOrNull { (range, _) ->
-                                                                            kotlin.math.min(
-                                                                                kotlin.math.abs(charIdx - range.first),
-                                                                                kotlin.math.abs(charIdx - range.last)
-                                                                            )
-                                                                        }?.second
-                                                                } else null
+                                                                val hitWord = wordAtPosition(offset, textLayoutResult, wordRanges)
                                                                 val target = (hitWord ?: firstMutableWord)
                                                                     ?.takeIf { it.text.trim().isNotEmpty() }
                                                                 openMenu(target)
@@ -727,8 +746,10 @@ fun TranscriptOverlay(
                                                 leadingIcon = { Icon(Icons.Rounded.PlayArrow, contentDescription = null) },
                                                 text = { Text("Play from here") },
                                                 onClick = {
+                                                    val targetMs = resolveWordSeekMs(menuWord, line.startMs)
                                                     menuLineIdx = null
-                                                    onSeekToMs(line.startMs)
+                                                    menuWord = null
+                                                    onSeekToMs(targetMs)
                                                 }
                                             )
                                         }

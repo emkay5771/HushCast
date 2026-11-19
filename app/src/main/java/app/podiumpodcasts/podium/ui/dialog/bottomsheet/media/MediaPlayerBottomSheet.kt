@@ -697,18 +697,11 @@ fun MediaPlayerBottomSheet(
                                                         }
                                                     }
 
-                                                    // R7: the skip / undo pill sits on the artwork's bottom edge instead of
+                                                    // R7: the skip pill sits on the artwork's bottom edge instead of
                                                     // holding an empty 48 dp slot above the seek bar.
                                                     PlayerSkipPill(
                                                         adWindows = adWindows,
                                                         positionMsState = livePosState,
-                                                        pendingUndo = pendingUndo,
-                                                        onUndo = { undo ->
-                                                            HushCastEngineBridge.adSkipObserver.bypassAd(undo.adWindow.startMs)
-                                                            vm.seek(undo.adWindow.startMs)
-                                                            HushCastEngineBridge.clearPendingUndo()
-                                                        },
-                                                        onDismissUndo = { HushCastEngineBridge.clearPendingUndo() },
                                                         onSkip = { ad ->
                                                             haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                                             vm.seek(ad.endMs)
@@ -1194,6 +1187,35 @@ fun MediaPlayerBottomSheet(
                     }
                 }
             }
+            }
+
+            var lastUndo by remember { mutableStateOf<app.hushcast.automute.dsp.AdSkipEvent?>(null) }
+            if (pendingUndo != null) lastUndo = pendingUndo
+            AnimatedVisibility(
+                visible = pendingUndo != null,
+                enter = slideInVertically(
+                    animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                ) { it } + fadeIn(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
+                exit = slideOutVertically(
+                    animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                ) { it } + fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .semantics { liveRegion = LiveRegionMode.Polite }
+            ) {
+                val undo = pendingUndo ?: lastUndo
+                if (undo != null) {
+                    OneTapUndoAdSkipBanner(
+                        event = undo,
+                        onUndo = {
+                            HushCastEngineBridge.adSkipObserver.bypassAd(undo.adWindow.startMs)
+                            vm.seek(undo.adWindow.startMs)
+                            HushCastEngineBridge.clearPendingUndo()
+                        },
+                        onDismiss = { HushCastEngineBridge.clearPendingUndo() }
+                    )
+                }
             }
         }
     }
@@ -1815,16 +1837,13 @@ private fun PlayerMoreActionsSheet(
 }
 
 /**
- * The skip-ad / undo pill (R7).  Overlaid on the artwork's bottom edge, so it no longer reserves an
- * empty 48 dp slot above the seek bar.  Reads the position only inside derived state.
+ * The skip-ad pill (R7). Overlaid on the artwork's bottom edge, so it no longer reserves an
+ * empty 48 dp slot above the seek bar. Reads the position only inside derived state.
  */
 @Composable
 private fun PlayerSkipPill(
     adWindows: List<app.hushcast.automute.dsp.AdWindow>,
     positionMsState: androidx.compose.runtime.State<Long>,
-    pendingUndo: app.hushcast.automute.dsp.AdSkipEvent?,
-    onUndo: (app.hushcast.automute.dsp.AdSkipEvent) -> Unit,
-    onDismissUndo: () -> Unit,
     onSkip: (app.hushcast.automute.dsp.AdWindow) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1839,14 +1858,8 @@ private fun PlayerSkipPill(
         contentAlignment = Alignment.Center
     ) {
         val ad = activeAd
-        val undo = pendingUndo
-        when {
-            undo != null -> OneTapUndoAdSkipBanner(
-                event = undo,
-                onUndo = { onUndo(undo) },
-                onDismiss = onDismissUndo
-            )
-            ad != null -> FilledTonalButton(
+        if (ad != null) {
+            FilledTonalButton(
                 onClick = { onSkip(ad) },
                 modifier = Modifier.height(40.dp)
             ) {

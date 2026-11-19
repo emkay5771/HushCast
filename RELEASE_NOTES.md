@@ -1,3 +1,13 @@
+# HushCast v1.0.33-hushcast
+
+## What's New
+- **Player**:
+  - **Bottom-anchored Undo Ad-Skip toast**: Moved the "Skipped Sponsor / Ad … Undo" toast out of the artwork overlay to the bottom of the player sheet so it no longer covers episode artwork and remains accessible across all player tabs.
+- **Transcript**:
+  - **Word-level tap-to-seek**: Tapping any word in a transcript paragraph (or choosing "Play from here" on a long-pressed word) now starts playback from that exact word while keeping paragraph grouping intact.
+
+---
+
 # HushCast v1.0.32-hushcast
 
 ## What's New

@@ -170,6 +170,14 @@ class PlayerHelpersTest {
         assertEquals(ad, adForLine(line(10_000L, 12_000L), listOf(ad)))
     }
 
+    @Test
+    fun `resolveWordSeekMs seeks to tapped word or falls back to line start`() {
+        assertEquals(42_350L, resolveWordSeekMs(Word(42.35, 42.8, "hello"), lineStartMs = 40_000L))
+        assertEquals(40_000L, resolveWordSeekMs(null, lineStartMs = 40_000L))
+        assertEquals(40_000L, resolveWordSeekMs(Word(0.0, 0.0, "unaligned"), lineStartMs = 40_000L))
+        assertEquals(0L, resolveWordSeekMs(Word(0.0, 0.3, "first"), lineStartMs = 0L))
+    }
+
     private fun segment(id: Long, start: Long, end: Long, enabled: Boolean = true) = MuteSegmentEntity(
         id = id,
         fileSha256 = "sha",
