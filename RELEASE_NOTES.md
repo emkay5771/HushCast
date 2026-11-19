@@ -1,3 +1,15 @@
+# HushCast v1.0.34-hushcast
+
+## What's New
+- **Player**:
+  - **Safer downward swipe**: Swiping down over the seek bar to close the player no longer triggers accidental scrubbing; horizontal drags still enter fine-scrubbing mode and taps still seek.
+  - **Grouped More actions sheet**: Items in the `⋯` overflow bottom sheet now use Material 3 Expressive grouped containers matching Settings.
+  - **Cleaner bottom layout**: Removed the redundant `Up Next` bar/hint at the bottom of the player to reclaim vertical space (swipe up or use the top-right Up Next button).
+- **Transcript**:
+  - **Collapsed sponsor blocks**: Sponsor spots are now collapsed by default behind an expandable header, keeping the dialogue flow clean while letting you expand any sponsor transcript on tap.
+
+---
+
 # HushCast v1.0.33-hushcast
 
 ## What's New
