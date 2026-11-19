@@ -279,23 +279,6 @@ fun TranscriptOverlay(
         }
     }
 
-    // T3: Keep active line ~30% from top when autoFollow is enabled and not searching
-    LaunchedEffect(activeLineIndex, autoFollow, searchOpen, viewportHeightPx) {
-        if (autoFollow && !searchOpen && activeLineIndex >= 0 && !listState.isScrollInProgress) {
-            val offset = if (viewportHeightPx > 0) -(viewportHeightPx * 0.30f).toInt() else 0
-            listState.animateScrollToItem(activeLineIndex, scrollOffset = offset)
-        }
-    }
-
-    // Scroll current search match into view
-    LaunchedEffect(currentMatchLineIdx) {
-        if (currentMatchLineIdx != null && currentMatchLineIdx >= 0) {
-            autoFollow = false
-            val offset = if (viewportHeightPx > 0) -(viewportHeightPx * 0.25f).toInt() else 0
-            listState.animateScrollToItem(currentMatchLineIdx, scrollOffset = offset)
-        }
-    }
-
     // Ad blocks the user chose to play this time; their "Play anyway" goes away.
     var playedAnywayStarts by remember { mutableStateOf(emptySet<Long>()) }
     var expandedAdStarts by remember { mutableStateOf(emptySet<Long>()) }
@@ -305,6 +288,44 @@ fun TranscriptOverlay(
         val matchAd = adForLine(matchLine, adWindows)
         if (matchAd != null && matchAd.startMs !in expandedAdStarts) {
             expandedAdStarts = expandedAdStarts + matchAd.startMs
+        }
+    }
+
+    val visibleEntries = remember(lines, adWindows, expandedAdStarts) {
+        buildList(lines.size) {
+            var prevAd: AdWindow? = null
+            lines.forEachIndexed { idx, line ->
+                val lineAd = adForLine(line, adWindows)
+                val adStartsHere = lineAd != null && lineAd != prevAd
+                prevAd = lineAd
+                val isAdExpanded = lineAd == null || lineAd.startMs in expandedAdStarts
+                if (isAdExpanded || adStartsHere) {
+                    add(VisibleTranscriptEntry(idx, line, lineAd, adStartsHere))
+                }
+            }
+        }
+    }
+
+    fun visibleIndexForOrig(origIdx: Int): Int {
+        val exact = visibleEntries.indexOfFirst { it.origIdx == origIdx }
+        if (exact >= 0) return exact
+        return visibleEntries.indexOfLast { it.origIdx <= origIdx }.coerceAtLeast(0)
+    }
+
+    // T3: Keep active line ~30% from top when autoFollow is enabled and not searching
+    LaunchedEffect(activeLineIndex, autoFollow, searchOpen, viewportHeightPx, visibleEntries) {
+        if (autoFollow && !searchOpen && activeLineIndex >= 0 && visibleEntries.isNotEmpty() && !listState.isScrollInProgress) {
+            val offset = if (viewportHeightPx > 0) -(viewportHeightPx * 0.30f).toInt() else 0
+            listState.animateScrollToItem(visibleIndexForOrig(activeLineIndex), scrollOffset = offset)
+        }
+    }
+
+    // Scroll current search match into view
+    LaunchedEffect(currentMatchLineIdx, visibleEntries) {
+        if (currentMatchLineIdx != null && currentMatchLineIdx >= 0 && visibleEntries.isNotEmpty()) {
+            autoFollow = false
+            val offset = if (viewportHeightPx > 0) -(viewportHeightPx * 0.25f).toInt() else 0
+            listState.animateScrollToItem(visibleIndexForOrig(currentMatchLineIdx), scrollOffset = offset)
         }
     }
     // Row actions menu (long-press): which line, and the word pressed, if any (T3).
@@ -555,9 +576,14 @@ fun TranscriptOverlay(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         itemsIndexed(
-                            items = lines,
-                            key = { idx, line -> "${idx}_${line.startMs}" }
-                        ) { idx, line ->
+                            items = visibleEntries,
+                            key = { _, entry -> "${entry.origIdx}_${entry.line.startMs}" }
+                        ) { _, entry ->
+                            val idx = entry.origIdx
+                            val line = entry.line
+                            val lineAd = entry.lineAd
+                            val adStartsHere = entry.adStartsHere
+
                             val isActive = idx == activeLineIndex
                             val isSearchMatch = idx in matchingLineIndices
                             val isCurrentSearchMatch = idx == currentMatchLineIdx
@@ -565,15 +591,7 @@ fun TranscriptOverlay(
                             val prevSpeaker = lines.getOrNull(idx - 1)?.speaker
                             val showSpeaker = !line.speaker.isNullOrBlank() && line.speaker != prevSpeaker
 
-                            val lineAd = remember(line, adWindows) { adForLine(line, adWindows) }
-                            val prevLineAd = remember(idx, lines, adWindows) {
-                                lines.getOrNull(idx - 1)?.let { adForLine(it, adWindows) }
-                            }
-                            val adStartsHere = lineAd != null && lineAd != prevLineAd
                             val isAdExpanded = lineAd == null || lineAd.startMs in expandedAdStarts
-                            if (!isAdExpanded && !adStartsHere) {
-                                return@itemsIndexed
-                            }
 
                             val bgColor = when {
                                 isCurrentSearchMatch -> MaterialTheme.colorScheme.tertiaryContainer
@@ -827,8 +845,10 @@ fun TranscriptOverlay(
                             onClick = {
                                 autoFollow = true
                                 scope.launch {
-                                    val offset = if (viewportHeightPx > 0) -(viewportHeightPx * 0.30f).toInt() else 0
-                                    listState.animateScrollToItem(activeLineIndex, scrollOffset = offset)
+                                    if (activeLineIndex >= 0 && visibleEntries.isNotEmpty()) {
+                                        val offset = if (viewportHeightPx > 0) -(viewportHeightPx * 0.30f).toInt() else 0
+                                        listState.animateScrollToItem(visibleIndexForOrig(activeLineIndex), scrollOffset = offset)
+                                    }
                                 }
                             }
                         ) {
@@ -972,3 +992,10 @@ fun WordMuteDialog(
         )
     }
 }
+
+private data class VisibleTranscriptEntry(
+    val origIdx: Int,
+    val line: TranscriptLineUi,
+    val lineAd: AdWindow?,
+    val adStartsHere: Boolean
+)
