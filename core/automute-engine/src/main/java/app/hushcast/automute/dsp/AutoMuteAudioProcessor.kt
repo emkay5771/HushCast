@@ -25,7 +25,7 @@ import kotlin.math.roundToInt
 class AutoMuteAudioProcessor : BaseAudioProcessor() {
 
     companion object {
-        private const val RAMP_MS_SILENCE = 8.0
+        private const val RAMP_MS_SILENCE = 5.0
         private const val RAMP_MS_DROP = 12.0
         private const val DUCK_FLOOR = 0.10f
         private const val VOLUME_BOOST_GAIN = 1.85f

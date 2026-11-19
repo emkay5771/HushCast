@@ -2,6 +2,7 @@ package app.podiumpodcasts.podium.player
 
 import app.hushcast.automute.dsp.AdWindow
 import app.hushcast.automute.dsp.MuteActionMode
+import app.hushcast.automute.engine.Segment
 import app.hushcast.automute.engine.Word
 import app.hushcast.automute.storage.MuteSegmentEntity
 import app.podiumpodcasts.podium.PlayerToolbarAction
@@ -12,7 +13,9 @@ import app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.TranscriptLineUi
 import app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.adForLine
 import app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.cleanMuteWord
 import app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.currentChapterIndexAt
+import app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.groupIntoParagraphs
 import app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.mutedSegmentIdsForWord
+import app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.splitSegmentsAtAdBoundaries
 import app.podiumpodcasts.podium.ui.hushcast.HushCastLabels
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -124,6 +127,47 @@ class PlayerHelpersTest {
         assertEquals(listOf("b", "c", "d", "a"), PlayerToolbarOrder.move(list, 0, 99))
         assertEquals(list, PlayerToolbarOrder.move(list, 7, 0))
         assertEquals(list, PlayerToolbarOrder.move(list, 1, 1))
+    }
+
+    @Test
+    fun `splitSegmentsAtAdBoundaries and groupIntoParagraphs separate dialogue from ads`() {
+        val segs = listOf(
+            Segment(start = 10.0, end = 12.0, text = "Back to the show. Now a word from our sponsor.", speaker = 0),
+            Segment(start = 12.1, end = 14.0, text = "Use code HUSH.", speaker = 0)
+        )
+        val words = listOf(
+            Word(10.0, 10.3, "Back"),
+            Word(10.3, 10.5, " to"),
+            Word(10.5, 10.7, " the"),
+            Word(10.7, 11.0, " show."),
+            Word(11.1, 11.3, " Now"),
+            Word(11.3, 11.5, " a"),
+            Word(11.5, 11.7, " word"),
+            Word(11.7, 11.85, " from"),
+            Word(11.85, 11.95, " our"),
+            Word(11.95, 12.0, " sponsor."),
+            Word(12.1, 12.5, "Use"),
+            Word(12.5, 13.0, " code"),
+            Word(13.0, 14.0, " HUSH.")
+        )
+        val adRanges = listOf(11.05 to 14.5)
+        val split = splitSegmentsAtAdBoundaries(segs, words, adRanges)
+        assertEquals(3, split.size)
+        assertEquals("Back to the show.", split[0].text)
+        assertEquals("Now a word from our sponsor.", split[1].text)
+
+        val paragraphs = groupIntoParagraphs(split, adRanges)
+        assertEquals(2, paragraphs.size)
+        assertEquals(1, paragraphs[0].size)
+        assertEquals("Back to the show.", paragraphs[0][0].text)
+        assertEquals(2, paragraphs[1].size)
+    }
+
+    @Test
+    fun `adForLine ignores tiny edge overlap and matches midpoint`() {
+        val ad = AdWindow(startMs = 10_000L, endMs = 20_000L, adClass = "sponsor_ad")
+        assertNull(adForLine(line(8_000L, 10_050L), listOf(ad)))
+        assertEquals(ad, adForLine(line(10_000L, 12_000L), listOf(ad)))
     }
 
     private fun segment(id: Long, start: Long, end: Long, enabled: Boolean = true) = MuteSegmentEntity(

@@ -112,10 +112,16 @@ private fun normalizeForSearch(input: String): String {
 fun cleanMuteWord(raw: String): String =
     raw.trim().trim { !it.isLetterOrDigit() && it != '\'' && it != '-' }
 
-/** The ad block a transcript line falls in (overlap of at least part of the line), if any. */
+/** The ad block a transcript line falls in (midpoint inside ad or >=50% overlap), if any. */
 internal fun adForLine(line: TranscriptLineUi, adWindows: List<AdWindow>): AdWindow? {
-    if (adWindows.isEmpty() || line.endMs <= 0L) return null
-    return adWindows.firstOrNull { ad -> line.startMs < ad.endMs && line.endMs > ad.startMs }
+    if (adWindows.isEmpty() || line.endMs <= line.startMs) return null
+    val mid = line.startMs + (line.endMs - line.startMs) / 2L
+    adWindows.firstOrNull { ad -> mid >= ad.startMs && mid < ad.endMs }?.let { return it }
+    val lineDur = (line.endMs - line.startMs).coerceAtLeast(1L)
+    return adWindows.firstOrNull { ad ->
+        val overlap = (minOf(line.endMs, ad.endMs) - maxOf(line.startMs, ad.startMs)).coerceAtLeast(0L)
+        overlap * 2L >= lineDur
+    }
 }
 
 /**

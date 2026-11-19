@@ -210,12 +210,15 @@ object WordMatcher {
             val rawStartMs = (first.start * 1000.0).roundToLong()
             val rawEndMs = (last.end * 1000.0).roundToLong()
 
+            val rawDurMs = (rawEndMs - rawStartMs).coerceAtLeast(0L)
+            val minOverlapFloor = if (rawDurMs < 120L) 35L else 15L
+
             val effectivePre = if (firstIdx > 0) {
                 val prev = words[firstIdx - 1]
                 val prevEndMs = (prev.end * 1000.0).roundToLong()
                 val prevDurMs = ((prev.end - prev.start) * 1000.0).roundToLong().coerceAtLeast(0L)
                 val gapMs = (rawStartMs - prevEndMs).coerceAtLeast(0L)
-                val maxOverlap = maxOf(15L, prevDurMs / 4L)
+                val maxOverlap = maxOf(minOverlapFloor, prevDurMs / 4L)
                 minOf(prePadMs, gapMs + maxOverlap)
             } else {
                 prePadMs
@@ -226,7 +229,7 @@ object WordMatcher {
                 val nextStartMs = (next.start * 1000.0).roundToLong()
                 val nextDurMs = ((next.end - next.start) * 1000.0).roundToLong().coerceAtLeast(0L)
                 val gapMs = (nextStartMs - rawEndMs).coerceAtLeast(0L)
-                val maxOverlap = maxOf(15L, nextDurMs / 4L)
+                val maxOverlap = maxOf(minOverlapFloor, nextDurMs / 4L)
                 minOf(postPadMs, gapMs + maxOverlap)
             } else {
                 postPadMs

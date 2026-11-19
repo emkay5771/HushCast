@@ -215,7 +215,8 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
         analysisStatus,
         wordIndexBlobScoped,
         _publisherTranscript,
-        _feedTranscriptRetry
+        _feedTranscriptRetry,
+        adSegmentsScoped
     ) { arr ->
         val id = arr[0] as String
         val bundleRaw = arr[1] as PodcastEpisodeBundle?
@@ -224,17 +225,19 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
         val blobScoped = arr[3] as EpisodeScoped<WordIndexBlob?>
         @Suppress("UNCHECKED_CAST")
         val pubPair = arr[4] as Pair<String, TranscriptLoadState>?
+        @Suppress("UNCHECKED_CAST")
+        val adScoped = arr[6] as EpisodeScoped<List<AdSegmentEntity>>
 
         if (id.isBlank()) return@combine EpisodeScoped<TranscriptLoadState>(id, TranscriptLoadState.Empty)
         // Right after a re-bind the inner flows can still hold the previous episode's data (item 2).
-        if (blobScoped.episodeId != id || (bundleRaw != null && bundleRaw.episode.id != id)) {
+        if (blobScoped.episodeId != id || adScoped.episodeId != id || (bundleRaw != null && bundleRaw.episode.id != id)) {
             return@combine EpisodeScoped<TranscriptLoadState>(id, TranscriptLoadState.Loading)
         }
         val bundle = bundleRaw
         val status = statusRaw?.takeIf { it.episodeId == id }
         val blob = blobScoped.value
         val state: TranscriptLoadState = if (blob != null && (blob.segments.isNotEmpty() || blob.words.isNotEmpty())) {
-            val lines = buildLinesFromWordIndex(blob)
+            val lines = buildLinesFromWordIndex(blob, adScoped.value)
             if (lines.isEmpty()) TranscriptLoadState.Empty
             else TranscriptLoadState.Ready(
                 lines = lines,
@@ -382,7 +385,10 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
             )
         }
 
-    private fun buildLinesFromWordIndex(blob: WordIndexBlob): List<TranscriptLineUi> {
+    private fun buildLinesFromWordIndex(
+        blob: WordIndexBlob,
+        adSegments: List<AdSegmentEntity> = emptyList()
+    ): List<TranscriptLineUi> {
         val segs = blob.segments
         if (segs.isEmpty()) {
             return listOf(
@@ -396,10 +402,14 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
                 )
             )
         }
+        val adRanges = adSegments
+            .filter { it.endMs > it.startMs }
+            .map { (it.startMs / 1000.0) to (it.endMs / 1000.0) }
+        val splitSegs = splitSegmentsAtAdBoundaries(segs, blob.words, adRanges)
         // R3: group sentences into paragraphs and keep the worker's speaker IDs, as the 1.0.27
-        // transcript card did.  A paragraph ends when the speaker changes, after a long pause, or
-        // at a sentence end once it has grown long enough.
-        val paragraphs = groupIntoParagraphs(segs)
+        // transcript card did.  A paragraph ends when the speaker changes, an ad boundary is
+        // crossed, after a long pause, or at a sentence end once it has grown long enough.
+        val paragraphs = groupIntoParagraphs(splitSegs, adRanges)
         return paragraphs.mapIndexed { idx, group ->
             val start = group.first().start
             val end = group.last().end
@@ -603,20 +613,90 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
     }
 }
 
+private fun adIndexForTime(timeSec: Double, adRanges: List<Pair<Double, Double>>): Int {
+    for (i in adRanges.indices) {
+        val (s, e) = adRanges[i]
+        if (timeSec >= s && timeSec < e) return i
+    }
+    return -1
+}
+
+internal fun splitSegmentsAtAdBoundaries(
+    segments: List<Segment>,
+    words: List<Word>,
+    adRanges: List<Pair<Double, Double>>
+): List<Segment> {
+    if (segments.isEmpty() || words.isEmpty() || adRanges.isEmpty()) return segments
+    val out = ArrayList<Segment>(segments.size)
+    var wordCursor = 0
+    for (seg in segments) {
+        val crossesAdBoundary = adRanges.any { (adStart, adEnd) ->
+            (adStart > seg.start + 0.05 && adStart < seg.end - 0.05) ||
+                (adEnd > seg.start + 0.05 && adEnd < seg.end - 0.05)
+        }
+        if (!crossesAdBoundary) {
+            out.add(seg)
+            continue
+        }
+        while (wordCursor < words.size && words[wordCursor].end < seg.start - 0.05) {
+            wordCursor++
+        }
+        val segWords = ArrayList<Word>()
+        var scan = wordCursor
+        while (scan < words.size && words[scan].start <= seg.end + 0.05) {
+            if (words[scan].end >= seg.start - 0.05) {
+                segWords.add(words[scan])
+            }
+            scan++
+        }
+        if (segWords.size <= 1) {
+            out.add(seg)
+            continue
+        }
+        var run = ArrayList<Word>()
+        var runAdIdx = adIndexForTime((segWords[0].start + segWords[0].end) / 2.0, adRanges)
+        for (w in segWords) {
+            val wAdIdx = adIndexForTime((w.start + w.end) / 2.0, adRanges)
+            if (wAdIdx != runAdIdx && run.isNotEmpty()) {
+                val text = run.joinToString("") { it.text }.trim()
+                if (text.isNotEmpty()) {
+                    out.add(Segment(start = run.first().start, end = run.last().end, text = text, speaker = seg.speaker))
+                }
+                run = ArrayList()
+                runAdIdx = wAdIdx
+            }
+            run.add(w)
+        }
+        if (run.isNotEmpty()) {
+            val text = run.joinToString("") { it.text }.trim()
+            if (text.isNotEmpty()) {
+                out.add(Segment(start = run.first().start, end = run.last().end, text = text, speaker = seg.speaker))
+            }
+        }
+    }
+    return out
+}
+
 /** Sentence segments grouped into transcript paragraphs (R3); mirrors the 1.0.27 card's rules. */
-internal fun groupIntoParagraphs(segments: List<Segment>): List<List<Segment>> {
+internal fun groupIntoParagraphs(
+    segments: List<Segment>,
+    adRanges: List<Pair<Double, Double>> = emptyList()
+): List<List<Segment>> {
     val out = ArrayList<List<Segment>>()
     val cur = ArrayList<Segment>()
     var chars = 0
     for (seg in segments) {
         if (cur.isNotEmpty()) {
             val prev = cur.last()
+            val adChanged = adRanges.isNotEmpty() &&
+                adIndexForTime((seg.start + seg.end) / 2.0, adRanges) !=
+                adIndexForTime((prev.start + prev.end) / 2.0, adRanges)
             val speakerChanged = seg.speaker != prev.speaker
             val longPause = seg.start - prev.end >= 1.5
             val durationSec = prev.end - cur.first().start
             val sentenceEnd = prev.text.trimEnd().let { t -> t.endsWith(".") || t.endsWith("?") || t.endsWith("!") }
             val longEnough = chars >= 260 || cur.size >= 3 || durationSec >= 12.0
-            if (speakerChanged || longPause || (sentenceEnd && longEnough) || chars >= 500) {
+            if (adChanged || speakerChanged || longPause || (sentenceEnd && longEnough) || chars >= 500) {
                 out.add(cur.toList())
                 cur.clear()
                 chars = 0

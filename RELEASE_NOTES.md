@@ -1,3 +1,18 @@
+# HushCast v1.0.32-hushcast
+
+## What's New
+- **Player**:
+  - **Blur off by default & smooth transition**: The player's blurred-artwork background now defaults to off, and animates smoothly (`Modifier.blur` on Android 12+ with an alpha crossfade fallback on older devices) when toggled.
+  - **Swipe up anywhere for Up Next**: Swiping up anywhere on the player outside active buttons or sliders opens Up Next.
+  - **Slide-up overflow menu**: The `⋯` action bar button now opens a slide-up bottom sheet matching HushCast and Speed.
+- **HushCast**:
+  - **Advanced stage reprocessing**: Re-running individual pipeline stages (`Summary & Chapters`, `Ads & Summary`, `Align Words`) is back under **Advanced** in the player's HushCast sheet.
+  - **Per-podcast direct download**: Added **Download direct (skip auto-processing)** in per-podcast settings so selected podcasts download without queuing HushCast processing automatically.
+  - **Sponsor transcript separation**: Transcript paragraphs and segments now split cleanly at ad boundaries so sponsor spots never share a paragraph with regular dialogue.
+  - **Tighter bleep timing**: Short CTC-aligned words receive a 35 ms minimum overlap padding floor and a shorter 5 ms mute ramp to reduce edge bleed.
+
+---
+
 # HushCast v1.0.31-hushcast
 
 ## What's New
