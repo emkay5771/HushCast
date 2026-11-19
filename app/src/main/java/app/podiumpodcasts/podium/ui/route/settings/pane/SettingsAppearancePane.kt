@@ -402,9 +402,9 @@ private fun ThemeModeButtons(
                 Icon(
                     imageVector = option.icon,
                     contentDescription = null,
-                    modifier = Modifier.size(ButtonDefaults.IconSize)
+                    modifier = Modifier.size(androidx.compose.material3.ButtonDefaults.IconSize)
                 )
-                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+                Spacer(Modifier.size(androidx.compose.material3.ButtonDefaults.IconSpacing))
             }
             SegmentedButtonLabel(
                 text = if (useShortLabels) option.shortLabel else option.label,
