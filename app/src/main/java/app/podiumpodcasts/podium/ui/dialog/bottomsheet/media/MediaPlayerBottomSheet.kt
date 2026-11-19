@@ -1512,6 +1512,13 @@ private fun SegmentNavigationLine(
     }
 }
 
+private sealed interface SegmentCenterState {
+    data class Undo(val event: app.hushcast.automute.dsp.AdSkipEvent) : SegmentCenterState
+    data class Sponsor(val ad: app.hushcast.automute.dsp.AdWindow) : SegmentCenterState
+    data class Chapter(val chapter: ResolvedChapter) : SegmentCenterState
+    data object None : SegmentCenterState
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun SegmentNavigationRowContent(
@@ -1642,14 +1649,14 @@ private fun SegmentNavigationRowContent(
         }
 
         // Center slot: Just auto-skipped / In a sponsor / Chapter
-        val centerKey: Any = when {
-            activeUndo != null -> "undo_${activeUndo.adWindow.startMs}"
-            activeAd != null -> "ad_${activeAd.startMs}"
-            currentChapter != null -> currentChapter
-            else -> "none"
+        val centerState: SegmentCenterState = when {
+            activeUndo != null -> SegmentCenterState.Undo(activeUndo)
+            activeAd != null -> SegmentCenterState.Sponsor(activeAd)
+            currentChapter != null -> SegmentCenterState.Chapter(currentChapter)
+            else -> SegmentCenterState.None
         }
         AnimatedContent(
-            targetState = centerKey,
+            targetState = centerState,
             transitionSpec = {
                 fadeIn(animationSpec = effectsSpec) togetherWith fadeOut(animationSpec = effectsSpec)
             },
@@ -1663,13 +1670,14 @@ private fun SegmentNavigationRowContent(
                     }
                 ),
             label = "segmentLineSwitch"
-        ) { _ ->
-            when {
-                activeUndo != null -> {
-                    val savedMs = (activeUndo.jumpedToMs - activeUndo.jumpedFromMs).coerceAtLeast(0L)
+        ) { state ->
+            when (state) {
+                is SegmentCenterState.Undo -> {
+                    val undo = state.event
+                    val savedMs = (undo.jumpedToMs - undo.jumpedFromMs).coerceAtLeast(0L)
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "Skipped ${formatAdDisplayLabel(activeUndo.adWindow)}",
+                            text = "Skipped ${formatAdDisplayLabel(undo.adWindow)}",
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.tertiary,
                             maxLines = 1,
@@ -1683,14 +1691,15 @@ private fun SegmentNavigationRowContent(
                         )
                     }
                 }
-                activeAd != null -> {
-                    val adDurMs = (activeAd.endMs - activeAd.startMs).coerceAtLeast(1L)
-                    val remAdMs by remember(activeAd) {
-                        derivedStateOf { (activeAd.endMs - positionMsState.value).coerceAtLeast(0L) }
+                is SegmentCenterState.Sponsor -> {
+                    val ad = state.ad
+                    val adDurMs = (ad.endMs - ad.startMs).coerceAtLeast(1L)
+                    val remAdMs by remember(ad) {
+                        derivedStateOf { (ad.endMs - positionMsState.value).coerceAtLeast(0L) }
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "Sponsor · ${formatAdDisplayLabel(activeAd)}",
+                            text = "Sponsor · ${formatAdDisplayLabel(ad)}",
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.tertiary,
                             maxLines = 1,
@@ -1705,7 +1714,7 @@ private fun SegmentNavigationRowContent(
                         Spacer(Modifier.height(4.dp))
                         LinearProgressIndicator(
                             progress = {
-                                ((positionMsState.value - activeAd.startMs).toFloat() / adDurMs.toFloat())
+                                ((positionMsState.value - ad.startMs).toFloat() / adDurMs.toFloat())
                                     .coerceIn(0f, 1f)
                             },
                             color = MaterialTheme.colorScheme.tertiary,
@@ -1717,12 +1726,13 @@ private fun SegmentNavigationRowContent(
                         )
                     }
                 }
-                currentChapter != null -> {
-                    val chapterDurMs = (currentChapter.endMs - currentChapter.startMs).coerceAtLeast(1L)
-                    val idx = chapters.indexOf(currentChapter).coerceAtLeast(0)
+                is SegmentCenterState.Chapter -> {
+                    val ch = state.chapter
+                    val chapterDurMs = (ch.endMs - ch.startMs).coerceAtLeast(1L)
+                    val idx = chapters.indexOf(ch).coerceAtLeast(0)
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = currentChapter.title,
+                            text = ch.title,
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                             maxLines = 1,
@@ -1737,7 +1747,7 @@ private fun SegmentNavigationRowContent(
                         Spacer(Modifier.height(4.dp))
                         LinearProgressIndicator(
                             progress = {
-                                val remainingFraction = ((currentChapter.endMs - positionMsState.value).toFloat() /
+                                val remainingFraction = ((ch.endMs - positionMsState.value).toFloat() /
                                     chapterDurMs.toFloat()).coerceIn(0f, 1f)
                                 1f - remainingFraction
                             },
@@ -1748,6 +1758,7 @@ private fun SegmentNavigationRowContent(
                         )
                     }
                 }
+                SegmentCenterState.None -> {}
             }
         }
 
