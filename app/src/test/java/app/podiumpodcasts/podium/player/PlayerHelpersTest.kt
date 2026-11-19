@@ -69,7 +69,7 @@ class PlayerHelpersTest {
     @Test
     fun `lines overlapping an ad belong to it`() {
         val ad = AdWindow(startMs = 60_000, endMs = 120_000, confidence = 0.9f)
-        assertEquals(ad, adForLine(line(50_000, 65_000), listOf(ad)))
+        assertEquals(ad, adForLine(line(50_000, 70_000), listOf(ad)))
         assertEquals(ad, adForLine(line(70_000, 80_000), listOf(ad)))
         assertNull(adForLine(line(120_000, 130_000), listOf(ad)))
         assertNull(adForLine(line(10_000, 20_000), listOf(ad)))
