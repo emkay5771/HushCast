@@ -3,6 +3,7 @@ package app.podiumpodcasts.podium.ui.dialog.bottomsheet.media
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.updateTransition
@@ -20,6 +21,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -41,6 +43,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
 import androidx.compose.material.icons.automirrored.rounded.QueueMusic
+import androidx.compose.material.icons.automirrored.rounded.Undo
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.outlined.Shield
@@ -248,13 +251,6 @@ fun MediaPlayerBottomSheet(
         }
     }
 
-    val activeUndoEvent by remember(pendingUndo, episodeId) {
-        derivedStateOf {
-            val p = pendingUndo
-            if (HushCastEngineBridge.isUndoValid(p, episodeId, livePosState.value)) p?.event else null
-        }
-    }
-
     val playerTabsConfig by settingsRepository.behavior.playerTabsConfig.collectAsStateWithLifecycle(
         initialValue = listOf(
             PlayerTabConfig("PLAYER", true),
@@ -446,6 +442,12 @@ fun MediaPlayerBottomSheet(
     }
 
     val livePosState = vm.rememberLivePositionMsState(if (showTranscriptOverlay) 100L else 500L)
+    val activeUndoEvent by remember(pendingUndo, episodeId) {
+        derivedStateOf {
+            val p = pendingUndo
+            if (HushCastEngineBridge.isUndoValid(p, episodeId, livePosState.value)) p?.event else null
+        }
+    }
     val durationMs = vm.currentDuration.coerceAtLeast(0L)
 
     val currentChapterIndex by remember(resolvedChapters) {
@@ -1583,7 +1585,7 @@ private fun SegmentNavigationRowContent(
             .semantics {
                 liveRegion = LiveRegionMode.Polite
                 if (rowActions.isNotEmpty()) {
-                    customActions = rowActions
+                    this[androidx.compose.ui.semantics.SemanticsActions.CustomActions] = rowActions
                 }
             },
         verticalAlignment = Alignment.CenterVertically,
@@ -1604,7 +1606,7 @@ private fun SegmentNavigationRowContent(
                         1f - (elapsed / 8_000f)
                     }
                 }
-                OutlinedButton(
+                androidx.compose.material3.OutlinedButton(
                     onClick = { onUndoSkip(undo) },
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                     border = androidx.compose.foundation.BorderStroke(

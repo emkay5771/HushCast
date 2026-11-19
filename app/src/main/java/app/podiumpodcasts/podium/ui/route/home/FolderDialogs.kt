@@ -554,6 +554,7 @@ fun MoveToFolderDialog(
     )
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun OrganizeFoldersDialog(
     folders: List<PodcastFolder>,

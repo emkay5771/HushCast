@@ -3,7 +3,7 @@ package app.podiumpodcasts.podium.ui.component.model.episode
 import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.togetherWith
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadForOffline
@@ -13,6 +13,7 @@ import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ToggleButtonDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -107,13 +108,14 @@ fun PodcastEpisodeDownloadButton(
 
     @Composable
     fun inner() {
+        val motionScheme = MaterialTheme.motionScheme
         AnimatedContent(
             targetState = bundle.download?.state,
             transitionSpec = {
                 androidx.compose.animation.fadeIn(
-                    animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
+                    animationSpec = motionScheme.fastEffectsSpec()
                 ) togetherWith androidx.compose.animation.fadeOut(
-                    animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
+                    animationSpec = motionScheme.fastEffectsSpec()
                 )
             }
         ) { state ->

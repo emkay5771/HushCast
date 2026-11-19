@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
@@ -47,6 +48,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -158,7 +161,7 @@ fun MediaPlayerSpeedBottomSheet(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .androidx.compose.foundation.selection.selectableGroup(),
+                        .selectableGroup(),
                     horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)
                 ) {
                     ToggleButton(
@@ -167,7 +170,7 @@ fun MediaPlayerSpeedBottomSheet(
                         shapes = ButtonGroupDefaults.connectedLeadingButtonShapes(),
                         modifier = Modifier
                             .weight(1f)
-                            .semantics { role = androidx.compose.ui.semantics.Role.RadioButton }
+                            .semantics { role = Role.RadioButton }
                     ) {
                         Text("All podcasts")
                     }
@@ -177,7 +180,7 @@ fun MediaPlayerSpeedBottomSheet(
                         shapes = ButtonGroupDefaults.connectedTrailingButtonShapes(),
                         modifier = Modifier
                             .weight(1f)
-                            .semantics { role = androidx.compose.ui.semantics.Role.RadioButton }
+                            .semantics { role = Role.RadioButton }
                     ) {
                         Text("This podcast")
                     }

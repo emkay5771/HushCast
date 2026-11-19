@@ -67,6 +67,7 @@ import kotlin.math.abs
  * draw phase (track and thumb), so a position tick redraws the bar instead of recomposing the
  * page around it.
  */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PlayerSeekBar(
     positionMsState: androidx.compose.runtime.State<Long>,

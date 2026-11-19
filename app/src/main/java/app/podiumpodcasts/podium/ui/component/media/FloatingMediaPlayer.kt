@@ -131,14 +131,16 @@ fun FloatingMediaPlayer(
                 false -> Alignment.BottomEnd
             }
         ) {
+            val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+            val motionScheme = MaterialTheme.motionScheme
             AnimatedVisibility(
                 visible = showMediaPlayer.value && !hide,
-                enter = fadeIn(animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec()) +
-                    scaleIn(initialScale = 0.94f, animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()) +
-                    slideInVertically(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()) { it },
-                exit = fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()) +
-                    scaleOut(targetScale = 0.94f, animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()) +
-                    slideOutVertically(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()) { it }
+                enter = fadeIn(animationSpec = motionScheme.defaultEffectsSpec()) +
+                    scaleIn(initialScale = 0.94f, animationSpec = motionScheme.defaultSpatialSpec()) +
+                    slideInVertically(animationSpec = motionScheme.defaultSpatialSpec()) { it },
+                exit = fadeOut(animationSpec = motionScheme.fastEffectsSpec()) +
+                    scaleOut(targetScale = 0.94f, animationSpec = motionScheme.defaultSpatialSpec()) +
+                    slideOutVertically(animationSpec = motionScheme.defaultSpatialSpec()) { it }
             ) {
                 app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.PlayerArtworkTheme(
                     enable = enableArtworkColors.value,
@@ -165,7 +167,7 @@ fun FloatingMediaPlayer(
                                         totalDrag += dragAmount
                                         if (totalDrag < -thresholdPx) {
                                             triggered = true
-                                            haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.GestureThresholdActivate)
                                             onClick()
                                         }
                                     }
@@ -214,11 +216,11 @@ fun FloatingMediaPlayer(
                                     AnimatedContent(
                                         targetState = vm.mediaMetadata,
                                         transitionSpec = {
-                                            (fadeIn(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()) +
-                                                scaleIn(initialScale = 0.9f, animationSpec = MaterialTheme.motionScheme.fastSpatialSpec()))
+                                            (fadeIn(animationSpec = motionScheme.fastEffectsSpec()) +
+                                                scaleIn(initialScale = 0.9f, animationSpec = motionScheme.fastSpatialSpec()))
                                                 .togetherWith(
-                                                    fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()) +
-                                                        scaleOut(targetScale = 0.9f, animationSpec = MaterialTheme.motionScheme.fastSpatialSpec())
+                                                    fadeOut(animationSpec = motionScheme.fastEffectsSpec()) +
+                                                        scaleOut(targetScale = 0.9f, animationSpec = motionScheme.fastSpatialSpec())
                                                 )
                                         },
                                         label = "artworkMetadata"
@@ -329,11 +331,11 @@ fun FloatingMediaPlayer(
                                         AnimatedContent(
                                             targetState = vm.isPlaying,
                                             transitionSpec = {
-                                                (scaleIn(initialScale = 0.65f, animationSpec = MaterialTheme.motionScheme.fastSpatialSpec()) +
-                                                    fadeIn(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()))
+                                                (scaleIn(initialScale = 0.65f, animationSpec = motionScheme.fastSpatialSpec()) +
+                                                    fadeIn(animationSpec = motionScheme.fastEffectsSpec()))
                                                     .togetherWith(
-                                                        scaleOut(targetScale = 0.65f, animationSpec = MaterialTheme.motionScheme.fastSpatialSpec()) +
-                                                            fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec())
+                                                        scaleOut(targetScale = 0.65f, animationSpec = motionScheme.fastSpatialSpec()) +
+                                                            fadeOut(animationSpec = motionScheme.fastEffectsSpec())
                                                     )
                                             },
                                             label = "playPauseIcon"

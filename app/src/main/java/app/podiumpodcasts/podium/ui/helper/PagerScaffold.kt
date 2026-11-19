@@ -46,14 +46,15 @@ fun PagerScaffold(
         else -> PagerScaffoldState.CONTENT
     }
 
+    val motionScheme = MaterialTheme.motionScheme
     AnimatedContent(
         modifier = Modifier.fillMaxSize(),
         targetState = state,
         transitionSpec = {
             androidx.compose.animation.fadeIn(
-                animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+                animationSpec = motionScheme.defaultEffectsSpec()
             ) togetherWith androidx.compose.animation.fadeOut(
-                animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
+                animationSpec = motionScheme.fastEffectsSpec()
             )
         }
     ) { target ->

@@ -402,9 +402,9 @@ private fun ThemeModeButtons(
                 Icon(
                     imageVector = option.icon,
                     contentDescription = null,
-                    modifier = Modifier.size(ToggleButtonDefaults.IconSize)
+                    modifier = Modifier.size(ButtonDefaults.IconSize)
                 )
-                Spacer(Modifier.size(ToggleButtonDefaults.IconSpacing))
+                Spacer(Modifier.size(ButtonDefaults.IconSpacing))
             }
             SegmentedButtonLabel(
                 text = if (useShortLabels) option.shortLabel else option.label,
@@ -892,6 +892,7 @@ private fun StartupScreenRow(position: SettingsGroupPosition) {
 }
 
 /** "Bottom navigation bar": every tab as a grouped row with a checkbox and move buttons. */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 private fun androidx.compose.foundation.lazy.LazyListScope.bottomNavigationGroup(
     enabledItems: List<NavBarItems>,
     onChange: (List<NavBarItems>) -> Unit

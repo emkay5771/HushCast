@@ -158,6 +158,7 @@ fun SettingsHushCastPane(
     onNavigate: (SettingsPaneKey) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val settingsRepository = LocalSettingsRepository.current
     val autoMuteDb = remember(context) { AutoMuteDatabase.getInstance(context) }

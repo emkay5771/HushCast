@@ -100,6 +100,7 @@ fun PlayerHushCastSheet(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val autoMuteDb = remember(context) { AutoMuteDatabase.getInstance(context) }
 
