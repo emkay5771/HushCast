@@ -227,7 +227,10 @@ fun DiscoverRoute(
 
                 HorizontalPager(
                     modifier = Modifier.fillMaxSize(),
-                    state = pagerState
+                    state = pagerState,
+                    // Standard stretch at the first/last topic, without the second bounce.
+                    flingBehavior = app.podiumpodcasts.podium.ui.component.common
+                        .rememberSingleBouncePagerFlingBehavior(pagerState)
                 ) { index ->
                     Box(
                         Modifier.fillMaxSize()
@@ -240,6 +243,7 @@ fun DiscoverRoute(
                         }
 
                         AnimatedContent(
+                            transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
                             targetState = vm.states[index]
                         ) { state ->
                             when(state) {

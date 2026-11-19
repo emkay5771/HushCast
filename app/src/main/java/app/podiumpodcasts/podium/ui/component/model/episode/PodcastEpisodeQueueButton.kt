@@ -44,8 +44,8 @@ fun PodcastEpisodeQueueButton(
 
     AnimatedVisibility(
         visible = !isCurrentlyPlaying,
-        enter = fadeIn() + expandIn(expandFrom = Alignment.Center),
-        exit = fadeOut() + shrinkOut(shrinkTowards = Alignment.Center)
+        enter = app.podiumpodcasts.podium.ui.theme.AppMotion.expandFrom(Alignment.Center),
+        exit = app.podiumpodcasts.podium.ui.theme.AppMotion.shrinkTowards(Alignment.Center)
     ) {
         Box {
             FilledTonalIconToggleButton(
@@ -59,6 +59,7 @@ fun PodcastEpisodeQueueButton(
                 }
             ) {
                 AnimatedContent(
+                    transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
                     targetState = inQueue
                 ) { isQueued ->
                     when(isQueued) {

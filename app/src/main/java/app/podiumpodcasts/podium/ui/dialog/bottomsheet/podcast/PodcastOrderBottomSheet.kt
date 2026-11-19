@@ -110,8 +110,8 @@ fun PodcastOrderBottomSheet(
 
                         AnimatedVisibility(
                             visible = isChecked,
-                            enter = fadeIn() + scaleIn(),
-                            exit = fadeOut() + scaleOut()
+                            enter = app.podiumpodcasts.podium.ui.theme.AppMotion.popIn(),
+                            exit = app.podiumpodcasts.podium.ui.theme.AppMotion.popOut()
                         ) {
                             IconButton(
                                 onClick = {
@@ -122,6 +122,7 @@ fun PodcastOrderBottomSheet(
                                 }
                             ) {
                                 AnimatedContent(
+                                    transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
                                     targetState = state.order.value
                                 ) { order ->
                                     when(order) {

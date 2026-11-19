@@ -88,6 +88,18 @@ val LocalFloatingMediaPlayerShown = compositionLocalOf { false }
 val LocalFloatingMediaPlayerHeight = compositionLocalOf { 0.dp }
 
 val FloatingMediaPlayerHeight = 72.dp
+
+/**
+ * The space the mini player takes at the bottom of lists, snackbars and FABs, for its show/hide
+ * animation [progress] (0 = hidden, 1 = shown).
+ *
+ * The animation uses the expressive spatial spring, which overshoots: below 0 when the player
+ * hides (e.g. while the full player opens) and above 1 when it shows.  This value ends up in
+ * `Modifier.padding`, which throws on a negative value, so it is clamped here.  1.0.35 crashed
+ * every time the full player opened because it wasn't.
+ */
+fun floatingMediaPlayerInset(progress: Float): Dp =
+    (FloatingMediaPlayerHeight + 8.dp) * progress.coerceIn(0f, 1f)
 val FloatingMediaPlayerMaxWidth = 500.dp
 val FloatingMediaPlayerBreakpoint = FloatingMediaPlayerMaxWidth + 200.dp
 
@@ -412,6 +424,7 @@ fun FloatingMediaPlayer(
                                         ) {
                                             if (vm.queue.isNotEmpty()) {
                                                 AnimatedContent(
+                                                    transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
                                                     targetState = vm.queue.size,
                                                     label = "queueCount"
                                                 ) { count ->

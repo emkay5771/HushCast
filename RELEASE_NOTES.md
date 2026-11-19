@@ -1,3 +1,26 @@
+# HushCast v1.0.36-hushcast
+
+## What's New
+- **Crash fix**:
+  - **Opening the full player no longer crashes the app** (1.0.35, every time). The mini player's show/hide animation moved to M3E's expressive spring, which overshoots below zero when the mini player hides; that value is also the bottom padding of snackbars and lists, and Android rejects negative padding ("Padding must be non-negative"). The value is now clamped, and folder-drag elevation uses the non-bouncy effects spring.
+- **Standard overscroll everywhere**:
+  - Lists, grids and sheets — including the player sheet's Details and Chapters tabs — have Android's stretch overscroll again. The transcript keeps its deliberate guard so scrolling past its end never drags the player closed.
+  - **Swipeable tabs**: the player's tabs and Discover's topics no longer hand leftover fling speed from their page snap to a second stretch.
+  - Known: in Compose, a list that is flung into its top or bottom shows its stretch a frame or two after it stops, where classic Android lists stretch on impact. This is unchanged from 1.0.35.
+- **Sponsor row polish**:
+  - TalkBack announces the sponsor and "Skipped" states once, instead of re-reading the countdown.
+  - Skip disappears as soon as playback reaches the end of the ad.
+  - The row's text stays centred when only one side has a button (episodes without chapters).
+  - With sponsor skipping turned off for a podcast (or globally), the row stays a chapter row; ads are still marked on the seek bar.
+  - The Undo on other tabs sits above the player's bottom bar at its measured height, so a taller toolbar or larger font can't overlap it.
+- **Settings**:
+  - HushCast's sections (Muting, Sponsor skipping, Word list, Processing, Advanced) are now regular settings pages, so Back and the predictive back gesture work like every other settings page.
+  - The Automatic / Light / Dark row measures its labels for the new connected buttons and no longer shrinks "Automatic" more than needed.
+- **Motion**: every remaining show/hide and content-swap animation uses the M3E motion scheme (content swaps on its non-bouncy effects springs, so whole screens never overshoot).
+- **Note on 1.0.35**: its "single-choice selectors migrated to connected button groups" covered 6 of 12. The HushCast settings page (4) and the player's HushCast sheet (2) keep segmented buttons on purpose: their four-option rows don't fit connected buttons at 360 dp with large text, and each screen uses one style throughout.
+
+---
+
 # HushCast v1.0.35-hushcast
 
 ## What's New

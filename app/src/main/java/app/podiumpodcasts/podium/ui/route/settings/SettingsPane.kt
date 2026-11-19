@@ -39,7 +39,11 @@ fun SettingsPane(
     contentKey: SettingsPaneKey,
     backStack: NavBackStack<NavKey>,
 
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    /** Opens another settings pane on top of this one (Back returns here). */
+    onOpenPane: (SettingsPaneKey) -> Unit = {},
+    /** Back to the previous settings pane (the toolbar's back arrow on a sub-pane). */
+    onBack: () -> Unit = onClose
 ) {
     @Composable
     fun NavigationIcon() {
@@ -75,30 +79,21 @@ fun SettingsPane(
         }
 
         is SettingsHushCastKey -> {
-            val activeSection = androidx.compose.runtime.remember(contentKey) {
-                androidx.compose.runtime.mutableStateOf(contentKey.section)
-            }
-            androidx.activity.compose.BackHandler(
-                enabled = activeSection.value != app.podiumpodcasts.podium.ui.route.settings.pane.HushCastSettingsSection.HUB
-            ) {
-                activeSection.value = app.podiumpodcasts.podium.ui.route.settings.pane.HushCastSettingsSection.HUB
-            }
+            // Each section (Muting, Sponsor skipping, …) is its own settings destination, pushed on
+            // the list-detail navigator like any other settings pane.  System Back (including the
+            // predictive back gesture) and the back arrow then return to the hub the standard way,
+            // instead of a local BackHandler swapping the section in place.
+            val isHub = contentKey.section == app.podiumpodcasts.podium.ui.route.settings.pane.HushCastSettingsSection.HUB
             SettingsHushCastPane(
-                section = activeSection.value,
+                section = contentKey.section,
                 navigationIcon = {
-                    if (activeSection.value != app.podiumpodcasts.podium.ui.route.settings.pane.HushCastSettingsSection.HUB) {
-                        BackButton {
-                            activeSection.value = app.podiumpodcasts.podium.ui.route.settings.pane.HushCastSettingsSection.HUB
-                        }
+                    if (!isHub) {
+                        BackButton { onBack() }
                     } else {
                         NavigationIcon()
                     }
                 },
-                onNavigate = { key ->
-                    (key as? SettingsHushCastKey)?.section?.let {
-                        activeSection.value = it
-                    }
-                }
+                onNavigate = { key -> onOpenPane(key) }
             )
         }
 

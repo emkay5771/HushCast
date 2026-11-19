@@ -105,6 +105,7 @@ fun PodcastPreviewView(
             Modifier.fillMaxSize()
         ) {
             AnimatedContent(
+                transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
                 targetState = vm.state
             ) { state ->
                 when(state) {

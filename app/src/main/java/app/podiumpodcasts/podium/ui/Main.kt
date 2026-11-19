@@ -54,7 +54,6 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.rememberNavBackStack
 import app.podiumpodcasts.podium.ui.component.common.SwitchableDynamicMaterialExpressiveTheme
 import app.podiumpodcasts.podium.ui.component.media.FloatingMediaPlayer
-import app.podiumpodcasts.podium.ui.component.media.FloatingMediaPlayerHeight
 import app.podiumpodcasts.podium.ui.component.media.LocalFloatingMediaPlayerHeight
 import app.podiumpodcasts.podium.ui.component.media.LocalFloatingMediaPlayerShown
 import app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.MediaPlayerBottomSheet
@@ -265,8 +264,8 @@ fun Main(
                 .background(androidx.compose.material3.MaterialTheme.colorScheme.background)
         ) {
             CompositionLocalProvider(
-                LocalFloatingMediaPlayerHeight provides (FloatingMediaPlayerHeight + 8.dp)
-                        * floatingMediaPlayerHeightAnimation.value,
+                LocalFloatingMediaPlayerHeight provides app.podiumpodcasts.podium.ui.component.media
+                    .floatingMediaPlayerInset(floatingMediaPlayerHeightAnimation.value),
                 LocalFloatingMediaPlayerShown provides floatingMediaPlayerShown.value
             ) {
                 // B6: Back on a root tab that isn't the startup destination goes to the startup
@@ -502,6 +501,19 @@ private fun ThreePaneScaffoldPaneScope.DetailPane(
                         onClose = {
                             scope.launch {
                                 scaffoldNavigator.navigateBack(BackNavigationBehavior.PopUntilScaffoldValueChange)
+                            }
+                        },
+                        onOpenPane = { pane ->
+                            scope.launch {
+                                scaffoldNavigator.navigateTo(
+                                    ThreePaneScaffoldRole.Primary,
+                                    DetailPaneKey.SettingsKey(pane)
+                                )
+                            }
+                        },
+                        onBack = {
+                            scope.launch {
+                                scaffoldNavigator.navigateBack(BackNavigationBehavior.PopLatest)
                             }
                         }
                     )

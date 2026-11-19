@@ -95,6 +95,7 @@ fun AddPodcastView(
     }
 
     AnimatedContent(
+        transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
         targetState = vm.state
     ) { state ->
         when(state) {

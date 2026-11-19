@@ -214,6 +214,7 @@ private fun BoxScope.SearchContent(
         }
 
         AnimatedContent(
+            transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
             targetState = vm.state.value,
             modifier = Modifier.weight(1f)
         ) { state ->

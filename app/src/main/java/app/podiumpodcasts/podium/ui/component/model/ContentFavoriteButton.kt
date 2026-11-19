@@ -62,6 +62,7 @@ fun ContentFavoriteButton(
         colors = colors
     ) {
         AnimatedContent(
+            transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
             targetState = isFavorite.value
         ) { isFavorite ->
             when(isFavorite) {

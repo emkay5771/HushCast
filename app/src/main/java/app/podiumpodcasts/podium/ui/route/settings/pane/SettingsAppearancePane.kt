@@ -363,10 +363,27 @@ private val ThemeModeOptions = listOf(
 )
 
 /**
- * Automatic / Light / Dark.  On narrow screens or with large fonts the labels would be clipped
- * (a segmented button keeps room for its icon next to the label), so this measures them first:
- * full labels with icons when they fit, then "Auto" with icons, then "Auto" without icons.
+ * Which theme-mode labels fit one connected toggle button: (useShortLabels, showIcons).
+ * The button's content is its horizontal padding (10 dp each side), then the icon (18 dp) and its
+ * spacing (8 dp) when shown, then the label.
  */
+internal fun themeModeLabelChoice(segmentWidth: Dp, fullLabelWidth: Dp, shortLabelWidth: Dp): Pair<Boolean, Boolean> {
+    val padding = 20.dp
+    val iconRoom = 26.dp
+    return when {
+        fullLabelWidth + iconRoom + padding <= segmentWidth -> false to true
+        shortLabelWidth + iconRoom + padding <= segmentWidth -> true to true
+        else -> true to false
+    }
+}
+
+/**
+ * Automatic / Light / Dark.  On narrow screens or with large fonts the labels would be clipped,
+ * so this measures them first: full labels with icons when they fit, then "Auto" with icons, then
+ * "Auto" without icons.  Measured for the connected toggle buttons this row uses (their padding,
+ * the icon and its spacing, and the gaps between buttons); see [themeModeLabelChoice].
+ */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun ThemeModeButtons(
     selected: AppThemeMode,
@@ -377,21 +394,17 @@ private fun ThemeModeButtons(
         val measurer = rememberTextMeasurer()
         val labelStyle = MaterialTheme.typography.labelLarge
         val density = LocalDensity.current
-        val segmentWidth = maxWidth / ThemeModeOptions.size
+        val gaps = androidx.compose.material3.ButtonGroupDefaults.ConnectedSpaceBetween * (ThemeModeOptions.size - 1)
+        val segmentWidth = (maxWidth - gaps) / ThemeModeOptions.size
         val (useShortLabels, showIcons) = remember(segmentWidth, labelStyle, density) {
             fun widest(labels: List<String>): Dp = with(density) {
                 labels.maxOf { measurer.measure(it, labelStyle, maxLines = 1).size.width }.toDp()
             }
-            // Icon (18 dp) + spacing (8 dp), and at least 8 dp of padding on each side.
-            val iconRoom = 26.dp
-            val padding = 16.dp
-            val full = widest(ThemeModeOptions.map { it.label })
-            val short = widest(ThemeModeOptions.map { it.shortLabel })
-            when {
-                full + iconRoom + padding <= segmentWidth -> false to true
-                short + iconRoom + padding <= segmentWidth -> true to true
-                else -> true to false
-            }
+            themeModeLabelChoice(
+                segmentWidth = segmentWidth,
+                fullLabelWidth = widest(ThemeModeOptions.map { it.label }),
+                shortLabelWidth = widest(ThemeModeOptions.map { it.shortLabel })
+            )
         }
         app.podiumpodcasts.podium.ui.component.common.ConnectedSingleChoiceGroup(
             options = ThemeModeOptions,
@@ -406,9 +419,11 @@ private fun ThemeModeButtons(
                 )
                 Spacer(Modifier.size(androidx.compose.material3.ButtonDefaults.IconSpacing))
             }
+            // The icon is laid out beside the label here (not reserved inside it, as a segmented
+            // button does), so the label must not reserve icon room a second time.
             SegmentedButtonLabel(
                 text = if (useShortLabels) option.shortLabel else option.label,
-                hasIcon = showIcons
+                hasIcon = false
             )
         }
     }

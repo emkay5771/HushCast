@@ -124,7 +124,9 @@ fun SettingsSynchronizationPane(
                         )
 
                         AnimatedVisibility(
-                            visible = timestampSubscriptions.value != 0L
+                            visible = timestampSubscriptions.value != 0L,
+                            enter = app.podiumpodcasts.podium.ui.theme.AppMotion.expandVerticallyIn(),
+                            exit = app.podiumpodcasts.podium.ui.theme.AppMotion.shrinkVerticallyOut()
                         ) {
                             Text(
                                 text = stringResource(
@@ -545,6 +547,7 @@ fun SettingsSynchronizationPane(
                                 }
                             ) {
                                 AnimatedContent(
+                                    transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
                                     targetState = syncVm.loginState.value
                                 ) { state ->
                                     when(state) {

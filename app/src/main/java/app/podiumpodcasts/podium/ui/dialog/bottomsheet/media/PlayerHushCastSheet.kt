@@ -261,7 +261,11 @@ fun PlayerHushCastSheet(
                             contentDescription = null
                         )
                     }
-                    AnimatedVisibility(visible = showAdvancedReprocess) {
+                    AnimatedVisibility(
+                        visible = showAdvancedReprocess,
+                        enter = app.podiumpodcasts.podium.ui.theme.AppMotion.expandVerticallyIn(),
+                        exit = app.podiumpodcasts.podium.ui.theme.AppMotion.shrinkVerticallyOut()
+                    ) {
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -463,7 +467,11 @@ fun PlayerHushCastSheet(
                 )
             }
 
-            AnimatedVisibility(visible = showMoreOptions) {
+            AnimatedVisibility(
+                visible = showMoreOptions,
+                enter = app.podiumpodcasts.podium.ui.theme.AppMotion.expandVerticallyIn(),
+                exit = app.podiumpodcasts.podium.ui.theme.AppMotion.shrinkVerticallyOut()
+            ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = "Mute style",

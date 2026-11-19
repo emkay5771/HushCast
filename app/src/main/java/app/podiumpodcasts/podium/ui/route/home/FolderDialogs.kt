@@ -254,7 +254,7 @@ fun FolderBottomSheet(
                         ReorderableItem(reorderState, key = bundle.podcast.origin) { isDragging ->
                             val elevation by animateDpAsState(
                         targetValue = if (isDragging) 6.dp else 0.dp,
-                        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+                        animationSpec = MaterialTheme.motionScheme.fastEffectsSpec(),
                         label = "folderPodcastDrag"
                     )
                             androidx.compose.material3.Surface(
@@ -606,7 +606,7 @@ fun OrganizeFoldersDialog(
                             ReorderableItem(reorderState, key = folder.id) { isDragging ->
                                 val elevation by animateDpAsState(
                             targetValue = if (isDragging) 6.dp else 0.dp,
-                            animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+                            animationSpec = MaterialTheme.motionScheme.fastEffectsSpec(),
                             label = "folderDrag"
                         )
                                 androidx.compose.material3.Surface(

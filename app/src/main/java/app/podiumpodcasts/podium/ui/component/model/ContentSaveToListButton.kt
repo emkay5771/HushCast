@@ -49,6 +49,7 @@ fun ContentSaveToListButton(
             }
         ) {
             AnimatedContent(
+                transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
                 targetState = isSaved.value
             ) { isSaved ->
                 ButtonLabelWithIconInset(

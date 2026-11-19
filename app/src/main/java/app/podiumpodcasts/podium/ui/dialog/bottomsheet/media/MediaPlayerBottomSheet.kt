@@ -230,6 +230,19 @@ fun MediaPlayerBottomSheet(
 
     val muteWindows = remember(muteEntities) { muteEntities.map { it.toDomain() } }
     val adWindows = remember(adEntities) { adEntities.map { it.toDomain() } }
+    val podcastAdPolicyEntity by remember(vm.metadataOrigin) {
+        val origin = vm.metadataOrigin
+        if (origin.isNullOrBlank()) kotlinx.coroutines.flow.flowOf(null)
+        else AutoMuteDatabase.getInstance(context).dao().observePodcastAdPolicy(origin)
+    }.collectAsStateWithLifecycle(initialValue = null)
+    val effectiveAdPolicy = remember(podcastAdPolicyEntity?.policyMode, adPolicyGlobal) {
+        podcastAdPolicyEntity?.policyMode?.let { runCatching { AdPolicyMode.valueOf(it) }.getOrNull() }
+            ?: adPolicyGlobal
+    }
+    // The segment row offers Skip only when sponsor skipping isn't off for this podcast.
+    val sponsorRowAdWindows = remember(adWindows, effectiveAdPolicy) {
+        sponsorRowAds(adWindows, effectiveAdPolicy)
+    }
 
     val shieldBadge = remember(analysisStatus?.badge) {
         runCatching { analysisStatus?.badge?.let { ReadinessBadge.valueOf(it) } }.getOrNull()
@@ -442,6 +455,8 @@ fun MediaPlayerBottomSheet(
     }
 
     val livePosState = vm.rememberLivePositionMsState(if (showTranscriptOverlay) 100L else 500L)
+    // The bottom slot's tallest height (toolbar or mini strip); the off-tab Undo sits above it.
+    var slotMinHeightPx by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     val activeUndoEvent by remember(pendingUndo, episodeId) {
         derivedStateOf {
             val p = pendingUndo
@@ -469,9 +484,6 @@ fun MediaPlayerBottomSheet(
             sheetMaxWidth = androidx.compose.ui.unit.Dp.Infinity,
             onDismissRequest = onDismiss
         ) {
-            androidx.compose.runtime.CompositionLocalProvider(
-                androidx.compose.foundation.LocalOverscrollFactory provides null
-            ) {
             val spatialSpec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
             val fastEffects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
             val transcriptTransition = updateTransition(targetState = showTranscriptOverlay, label = "transcriptOverlay")
@@ -591,6 +603,9 @@ fun MediaPlayerBottomSheet(
                 ) {
                     HorizontalPager(
                         state = pagerState,
+                        // Standard stretch at the first/last tab, without the second bounce.
+                        flingBehavior = app.podiumpodcasts.podium.ui.component.common
+                            .rememberSingleBouncePagerFlingBehavior(pagerState),
                         userScrollEnabled = !showTranscriptOverlay,
                         beyondViewportPageCount = 1,
                         modifier = Modifier.fillMaxSize()
@@ -633,7 +648,11 @@ fun MediaPlayerBottomSheet(
                                                 horizontalAlignment = Alignment.CenterHorizontally,
                                                 verticalArrangement = Arrangement.Center
                                             ) {
-                                                AnimatedVisibility(visible = isCastingExternal) {
+                                                AnimatedVisibility(
+                                                    visible = isCastingExternal,
+                                                    enter = app.podiumpodcasts.podium.ui.theme.AppMotion.expandVerticallyIn(),
+                                                    exit = app.podiumpodcasts.podium.ui.theme.AppMotion.shrinkVerticallyOut()
+                                                ) {
                                                     CastingBypassNoticeBanner(modifier = Modifier.padding(bottom = 8.dp))
                                                 }
 
@@ -661,6 +680,7 @@ fun MediaPlayerBottomSheet(
                                                         contentAlignment = Alignment.Center
                                                     ) {
                                                         AnimatedContent(
+                                                            transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
                                                             targetState = artUri,
                                                             label = "playerArtwork"
                                                         ) { uri ->
@@ -827,7 +847,7 @@ fun MediaPlayerBottomSheet(
                                                     currentChapter = currentChapter,
                                                     currentIndex = currentChapterIndex,
                                                     skippedStarts = skippedChapterStarts,
-                                                    adWindows = adWindows,
+                                                    adWindows = sponsorRowAdWindows,
                                                     activeUndo = activeUndoEvent,
                                                     positionMsState = livePosState,
                                                     speed = vm.speed,
@@ -1075,7 +1095,6 @@ fun MediaPlayerBottomSheet(
                 ) {
                     val bottomSlotFadeSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
                     val density = androidx.compose.ui.platform.LocalDensity.current
-                    var slotMinHeightPx by remember { androidx.compose.runtime.mutableIntStateOf(0) }
                     val targetIsPlaying = (visibleTabs.getOrNull(pagerState.targetPage) ?: MediaPlayerTab.PLAYER) ==
                         MediaPlayerTab.PLAYER
                     AnimatedContent(
@@ -1194,7 +1213,13 @@ fun MediaPlayerBottomSheet(
                     .padding(
                         start = 16.dp,
                         end = 16.dp,
-                        bottom = if (showTranscriptOverlay) 12.dp else 76.dp
+                        // Above the bottom slot (measured, so a taller toolbar or larger font
+                        // doesn't overlap it); over the transcript, which hides that slot.
+                        bottom = if (showTranscriptOverlay) {
+                            12.dp
+                        } else {
+                            with(androidx.compose.ui.platform.LocalDensity.current) { slotMinHeightPx.toDp() } + 12.dp
+                        }
                     )
             ) {
                 var lastUndo by remember { mutableStateOf<app.hushcast.automute.dsp.AdSkipEvent?>(null) }
@@ -1223,7 +1248,6 @@ fun MediaPlayerBottomSheet(
                         )
                     }
                 }
-            }
             }
             }
         }
@@ -1456,10 +1480,7 @@ private fun SegmentNavigationLine(
     onOpenChaptersTab: () -> Unit
 ) {
     val activeAd by remember(adWindows) {
-        derivedStateOf {
-            val pos = positionMsState.value
-            adWindows.firstOrNull { pos in it.startMs..it.endMs }
-        }
+        derivedStateOf { activeAdAt(adWindows, positionMsState.value) }
     }
 
     val hasChapters = chapters.isNotEmpty() && currentChapter != null
@@ -1586,222 +1607,228 @@ private fun SegmentNavigationRowContent(
         }
     }
 
-    Row(
+    // The live region is on the state titles below, not on this row: the row also holds the
+    // ticking "0:42 left" / "Nm left" texts, which TalkBack must not re-read on every tick.
+    SymmetricSlotsRow(
         modifier = Modifier
             .fillMaxWidth()
             .semantics {
-                liveRegion = LiveRegionMode.Polite
                 if (rowActions.isNotEmpty()) {
                     this[androidx.compose.ui.semantics.SemanticsActions.CustomActions] = rowActions
                 }
             },
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center
-    ) {
-        // Left slot: Undo pill (when just auto-skipped) OR ‹ previous chapter
-        Box(
-            modifier = Modifier
-                .animateContentSize(animationSpec = spatialSpec)
-                .heightIn(min = 48.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            val undo = activeUndo
-            if (undo != null) {
-                val undoFrac by remember(undo) {
-                    derivedStateOf {
-                        val elapsed = (positionMsState.value - undo.jumpedToMs).coerceIn(0L, 8_000L)
-                        1f - (elapsed / 8_000f)
+        start = {
+            // Left slot: Undo pill (when just auto-skipped) OR ‹ previous chapter
+            Box(
+                modifier = Modifier
+                    .animateContentSize(animationSpec = spatialSpec)
+                    .heightIn(min = 48.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                val undo = activeUndo
+                if (undo != null) {
+                    val undoFrac by remember(undo) {
+                        derivedStateOf {
+                            val elapsed = (positionMsState.value - undo.jumpedToMs).coerceIn(0L, 8_000L)
+                            1f - (elapsed / 8_000f)
+                        }
+                    }
+                    androidx.compose.material3.OutlinedButton(
+                        onClick = { onUndoSkip(undo) },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        border = androidx.compose.foundation.BorderStroke(
+                            width = 1.5.dp,
+                            color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.35f + 0.65f * undoFrac)
+                        ),
+                        modifier = Modifier.height(38.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.Undo,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Undo", style = MaterialTheme.typography.labelLarge)
+                    }
+                } else if (chapters.isNotEmpty()) {
+                    Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                        FilledTonalIconButton(
+                            enabled = prevChapter != null,
+                            onClick = {
+                                if (prevChapter != null) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                    onSeekToMs(prevChapter.startMs)
+                                }
+                            },
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "Previous chapter")
+                        }
                     }
                 }
-                androidx.compose.material3.OutlinedButton(
-                    onClick = { onUndoSkip(undo) },
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    border = androidx.compose.foundation.BorderStroke(
-                        width = 1.5.dp,
-                        color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.35f + 0.65f * undoFrac)
+        }
+
+        },
+        center = {
+            // Center slot: Just auto-skipped / In a sponsor / Chapter
+            val centerState: SegmentCenterState = when {
+                activeUndo != null -> SegmentCenterState.Undo(activeUndo)
+                activeAd != null -> SegmentCenterState.Sponsor(activeAd)
+                currentChapter != null -> SegmentCenterState.Chapter(currentChapter)
+                else -> SegmentCenterState.None
+        }
+            AnimatedContent(
+                targetState = centerState,
+                transitionSpec = {
+                    fadeIn(animationSpec = effectsSpec) togetherWith fadeOut(animationSpec = effectsSpec)
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (activeUndo == null && activeAd == null && chapters.isNotEmpty()) {
+                            Modifier.clickable(onClick = onOpenChaptersTab)
+                        } else {
+                            Modifier
+                        }
                     ),
-                    modifier = Modifier.height(38.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.Undo,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text("Undo", style = MaterialTheme.typography.labelLarge)
-                }
-            } else if (chapters.isNotEmpty()) {
-                Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                    FilledTonalIconButton(
-                        enabled = prevChapter != null,
-                        onClick = {
-                            if (prevChapter != null) {
-                                haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                                onSeekToMs(prevChapter.startMs)
-                            }
-                        },
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "Previous chapter")
+                label = "segmentLineSwitch"
+            ) { state ->
+                when (state) {
+                    is SegmentCenterState.Undo -> {
+                        val undo = state.event
+                        val savedMs = (undo.jumpedToMs - undo.jumpedFromMs).coerceAtLeast(0L)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Skipped ${formatAdDisplayLabel(undo.adWindow)}",
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.tertiary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${formatSegmentMmSs(savedMs)} saved",
+                                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
                     }
+                    is SegmentCenterState.Sponsor -> {
+                        val ad = state.ad
+                        val adDurMs = (ad.endMs - ad.startMs).coerceAtLeast(1L)
+                        val remAdMs by remember(ad) {
+                            derivedStateOf { (ad.endMs - positionMsState.value).coerceAtLeast(0L) }
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "Sponsor · ${formatAdDisplayLabel(ad)}",
+                                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.tertiary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${formatSegmentMmSs(remAdMs)} left",
+                                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            LinearProgressIndicator(
+                                progress = {
+                                    ((positionMsState.value - ad.startMs).toFloat() / adDurMs.toFloat())
+                                        .coerceIn(0f, 1f)
+                                },
+                                color = MaterialTheme.colorScheme.tertiary,
+                                trackColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                modifier = Modifier
+                                    .width(96.dp)
+                                    .height(3.dp),
+                                drawStopIndicator = {}
+                            )
+                        }
+                    }
+                    is SegmentCenterState.Chapter -> {
+                        val ch = state.chapter
+                        val chapterDurMs = (ch.endMs - ch.startMs).coerceAtLeast(1L)
+                        val idx = chapters.indexOf(ch).coerceAtLeast(0)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = ch.title,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "${idx + 1} of ${chapters.size} · ${remMins}m left",
+                                style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            LinearProgressIndicator(
+                                progress = {
+                                    val remainingFraction = ((ch.endMs - positionMsState.value).toFloat() /
+                                        chapterDurMs.toFloat()).coerceIn(0f, 1f)
+                                    1f - remainingFraction
+                                },
+                                modifier = Modifier
+                                    .width(96.dp)
+                                    .height(3.dp),
+                                drawStopIndicator = {}
+                            )
+                        }
+                    }
+                    SegmentCenterState.None -> {}
                 }
-            }
         }
 
-        // Center slot: Just auto-skipped / In a sponsor / Chapter
-        val centerState: SegmentCenterState = when {
-            activeUndo != null -> SegmentCenterState.Undo(activeUndo)
-            activeAd != null -> SegmentCenterState.Sponsor(activeAd)
-            currentChapter != null -> SegmentCenterState.Chapter(currentChapter)
-            else -> SegmentCenterState.None
-        }
-        AnimatedContent(
-            targetState = centerState,
-            transitionSpec = {
-                fadeIn(animationSpec = effectsSpec) togetherWith fadeOut(animationSpec = effectsSpec)
-            },
-            modifier = Modifier
-                .weight(1f)
-                .then(
-                    if (activeUndo == null && activeAd == null && chapters.isNotEmpty()) {
-                        Modifier.clickable(onClick = onOpenChaptersTab)
-                    } else {
-                        Modifier
-                    }
-                ),
-            label = "segmentLineSwitch"
-        ) { state ->
-            when (state) {
-                is SegmentCenterState.Undo -> {
-                    val undo = state.event
-                    val savedMs = (undo.jumpedToMs - undo.jumpedFromMs).coerceAtLeast(0L)
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "Skipped ${formatAdDisplayLabel(undo.adWindow)}",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.tertiary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "${formatSegmentMmSs(savedMs)} saved",
-                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1
-                        )
-                    }
-                }
-                is SegmentCenterState.Sponsor -> {
-                    val ad = state.ad
-                    val adDurMs = (ad.endMs - ad.startMs).coerceAtLeast(1L)
-                    val remAdMs by remember(ad) {
-                        derivedStateOf { (ad.endMs - positionMsState.value).coerceAtLeast(0L) }
-                    }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "Sponsor · ${formatAdDisplayLabel(ad)}",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.tertiary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "${formatSegmentMmSs(remAdMs)} left",
-                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        LinearProgressIndicator(
-                            progress = {
-                                ((positionMsState.value - ad.startMs).toFloat() / adDurMs.toFloat())
-                                    .coerceIn(0f, 1f)
-                            },
-                            color = MaterialTheme.colorScheme.tertiary,
-                            trackColor = MaterialTheme.colorScheme.tertiaryContainer,
-                            modifier = Modifier
-                                .width(96.dp)
-                                .height(3.dp),
-                            drawStopIndicator = {}
-                        )
-                    }
-                }
-                is SegmentCenterState.Chapter -> {
-                    val ch = state.chapter
-                    val chapterDurMs = (ch.endMs - ch.startMs).coerceAtLeast(1L)
-                    val idx = chapters.indexOf(ch).coerceAtLeast(0)
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = ch.title,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "${idx + 1} of ${chapters.size} · ${remMins}m left",
-                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        LinearProgressIndicator(
-                            progress = {
-                                val remainingFraction = ((ch.endMs - positionMsState.value).toFloat() /
-                                    chapterDurMs.toFloat()).coerceIn(0f, 1f)
-                                1f - remainingFraction
-                            },
-                            modifier = Modifier
-                                .width(96.dp)
-                                .height(3.dp),
-                            drawStopIndicator = {}
-                        )
-                    }
-                }
-                SegmentCenterState.None -> {}
-            }
-        }
-
-        // Right slot: Skip pill (when in a sponsor) OR › next chapter
-        Box(
-            modifier = Modifier
-                .animateContentSize(animationSpec = spatialSpec)
-                .heightIn(min = 48.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            val ad = activeAd
-            if (ad != null && activeUndo == null) {
-                FilledTonalButton(
-                    onClick = { onSkipAd(ad) },
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.height(38.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.SkipNext,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text("Skip", style = MaterialTheme.typography.labelLarge)
-                }
-            } else if (chapters.isNotEmpty()) {
-                Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-                    FilledTonalIconButton(
-                        enabled = nextChapter != null,
-                        onClick = {
-                            if (nextChapter != null) {
-                                haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                                onSeekToMs(nextChapter.startMs)
-                            }
-                        },
-                        modifier = Modifier.size(40.dp)
+        },
+        end = {
+            // Right slot: Skip pill (when in a sponsor) OR › next chapter
+            Box(
+                modifier = Modifier
+                    .animateContentSize(animationSpec = spatialSpec)
+                    .heightIn(min = 48.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                val ad = activeAd
+                if (ad != null && activeUndo == null) {
+                    FilledTonalButton(
+                        onClick = { onSkipAd(ad) },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier.height(38.dp)
                     ) {
-                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Next chapter")
+                        Icon(
+                            imageVector = Icons.Rounded.SkipNext,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Skip", style = MaterialTheme.typography.labelLarge)
+                    }
+                } else if (chapters.isNotEmpty()) {
+                    Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                        FilledTonalIconButton(
+                            enabled = nextChapter != null,
+                            onClick = {
+                                if (nextChapter != null) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                    onSeekToMs(nextChapter.startMs)
+                                }
+                            },
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Next chapter")
+                        }
                     }
                 }
-            }
         }
-    }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)

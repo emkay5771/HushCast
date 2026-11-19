@@ -136,14 +136,15 @@ fun PodcastFilterBottomSheet(
                     trailingContent = {
                         AnimatedVisibility(
                             visible = isNegative,
-                            enter = fadeIn() + scaleIn(),
-                            exit = fadeOut() + scaleOut()
+                            enter = app.podiumpodcasts.podium.ui.theme.AppMotion.popIn(),
+                            exit = app.podiumpodcasts.podium.ui.theme.AppMotion.popOut()
                         ) {
                             Icon(Icons.Rounded.Remove, stringResource(R.string.common_negative))
                         }
                     }
                 ) {
                     AnimatedContent(
+                        transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
                         targetState = isNegative
                     ) { isNegative ->
                         Text(

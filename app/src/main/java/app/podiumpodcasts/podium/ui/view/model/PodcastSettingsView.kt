@@ -193,8 +193,8 @@ fun PodcastSettingsView(
 
                                         AnimatedVisibility(
                                             visible = !isSame,
-                                            enter = fadeIn() + expandIn(expandFrom = Alignment.CenterEnd),
-                                            exit = fadeOut() + shrinkOut(shrinkTowards = Alignment.CenterEnd)
+                                            enter = app.podiumpodcasts.podium.ui.theme.AppMotion.expandFrom(Alignment.CenterEnd),
+                                            exit = app.podiumpodcasts.podium.ui.theme.AppMotion.shrinkTowards(Alignment.CenterEnd)
                                         ) {
                                             IconButton(
                                                 onClick = {

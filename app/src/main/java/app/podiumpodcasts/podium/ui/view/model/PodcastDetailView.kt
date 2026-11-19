@@ -528,8 +528,8 @@ fun PodcastDetailView(
                 floatingActionButton = {
                     AnimatedVisibility(
                         visible = showScrollUpButton,
-                        enter = fadeIn() + scaleIn(),
-                        exit = fadeOut() + scaleOut()
+                        enter = app.podiumpodcasts.podium.ui.theme.AppMotion.popIn(),
+                        exit = app.podiumpodcasts.podium.ui.theme.AppMotion.popOut()
                     ) {
                         FloatingActionButton(
                             modifier = Modifier.padding(
@@ -698,7 +698,7 @@ fun PodcastDetailView(
                                             containerColor = MaterialTheme.colorScheme.surface
                                         )
                                     ) {
-                                        AnimatedContent(isSubscribed) { subscribed ->
+                                        AnimatedContent(isSubscribed, transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap()) { subscribed ->
                                             ButtonLabelWithIconInset(
                                                 icon = when(subscribed) {
                                                     true -> Icons.Rounded.Done

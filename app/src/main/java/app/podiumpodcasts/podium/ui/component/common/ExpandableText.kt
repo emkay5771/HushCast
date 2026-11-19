@@ -46,6 +46,7 @@ fun ExpandableText(
     val hasVisualOverflow = remember { mutableStateOf(false) }
 
     AnimatedContent(
+        transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
         targetState = expandedState.value && hasVisualOverflow.value
     ) { expanded ->
         Text(

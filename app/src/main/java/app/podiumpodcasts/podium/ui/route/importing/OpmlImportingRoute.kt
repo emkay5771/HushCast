@@ -125,8 +125,8 @@ fun OpmlImportingRoute(
         bottomBar = {
             AnimatedVisibility(
                 visible = vm.state.value is State.SelectOutlines && vm.selectedOrigins.isNotEmpty(),
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut()
+                enter = app.podiumpodcasts.podium.ui.theme.AppMotion.slideUpIn(),
+                exit = app.podiumpodcasts.podium.ui.theme.AppMotion.slideDownOut()
             ) {
                 BottomAppBar(
                     actions = { },
@@ -151,6 +151,7 @@ fun OpmlImportingRoute(
                 .fillMaxSize()
         ) {
             AnimatedContent(
+                transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
                 targetState = vm.state.value
             ) { state ->
                 when(state) {

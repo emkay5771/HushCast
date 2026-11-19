@@ -85,6 +85,7 @@ fun ListEditBottomSheet(
             Modifier.padding(24.dp)
         ) {
             AnimatedContent(
+                transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
                 targetState = vm.state.value
             ) { _state ->
                 when(_state) {

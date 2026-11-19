@@ -412,7 +412,11 @@ fun TranscriptOverlay(
             }
         }
 
-        AnimatedVisibility(visible = searchOpen) {
+        AnimatedVisibility(
+            visible = searchOpen,
+            enter = app.podiumpodcasts.podium.ui.theme.AppMotion.expandVerticallyIn(),
+            exit = app.podiumpodcasts.podium.ui.theme.AppMotion.shrinkVerticallyOut()
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -837,6 +841,8 @@ fun TranscriptOverlay(
                     // Follow playback floating pill when user scrolled manually
                     androidx.compose.animation.AnimatedVisibility(
                         visible = !autoFollow && !searchOpen && activeLineIndex >= 0,
+                        enter = app.podiumpodcasts.podium.ui.theme.AppMotion.popIn(),
+                        exit = app.podiumpodcasts.podium.ui.theme.AppMotion.popOut(),
                         modifier = Modifier
                             .align(Alignment.BottomCenter)
                             .padding(bottom = bottomControlsPadding + 8.dp)

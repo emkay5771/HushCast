@@ -87,7 +87,7 @@ fun PodcastEpisodePlayButton(
         contentPadding = contentPadding,
         interactionSource = interactionSource
     ) {
-        AnimatedContent(buttonState) { state ->
+        AnimatedContent(buttonState, transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap()) { state ->
             ButtonLabelWithIconInset(
                 icon = when(state) {
                     ButtonState.PLAYING -> Icons.Rounded.Pause

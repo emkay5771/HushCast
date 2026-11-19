@@ -280,6 +280,7 @@ private fun SearchContent(
         }
 
         AnimatedContent(
+            transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
             targetState = vm.state.value,
             modifier = Modifier.weight(1f)
         ) { state ->
@@ -304,6 +305,7 @@ private fun SearchContent(
                         && (podcastsPager.loadState.isIdle && episodesPager.loadState.isIdle)
 
                 AnimatedContent(
+                    transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
                     targetState = isEmpty
                 ) { isEmpty ->
                     when(isEmpty) {

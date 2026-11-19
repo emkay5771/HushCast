@@ -48,6 +48,7 @@ fun CommonSearchInputField(
         },
         leadingIcon = {
             AnimatedContent(
+                transitionSpec = app.podiumpodcasts.podium.ui.theme.AppMotion.contentSwap(),
                 targetState = searchBarState.currentValue
             ) {
                 when(it) {
