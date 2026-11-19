@@ -23,8 +23,13 @@ object HushCastEngineBridge {
     val adSkipEvents: SharedFlow<AdSkipEvent>
         get() = adSkipObserver.skipEvents
 
-    private val _pendingUndoEvent = MutableStateFlow<AdSkipEvent?>(null)
-    val pendingUndoEvent: StateFlow<AdSkipEvent?> = _pendingUndoEvent.asStateFlow()
+    data class PendingUndoAdSkip(
+        val episodeId: String?,
+        val event: AdSkipEvent
+    )
+
+    private val _pendingUndoEvent = MutableStateFlow<PendingUndoAdSkip?>(null)
+    val pendingUndoEvent: StateFlow<PendingUndoAdSkip?> = _pendingUndoEvent.asStateFlow()
 
     private val _isCastingExternal = MutableStateFlow(false)
     val isCastingExternal: StateFlow<Boolean> = _isCastingExternal.asStateFlow()
@@ -152,8 +157,21 @@ object HushCastEngineBridge {
         return adSkipObserver.getActiveAutoSkipRanges() + skippedChapterRanges
     }
 
-    fun notifyAdSkipped(event: AdSkipEvent) {
-        _pendingUndoEvent.value = event
+    fun notifyAdSkipped(episodeId: String?, event: AdSkipEvent) {
+        _pendingUndoEvent.value = PendingUndoAdSkip(episodeId = episodeId, event = event)
+    }
+
+    fun isUndoValid(
+        pending: PendingUndoAdSkip?,
+        currentEpisodeId: String?,
+        positionMs: Long
+    ): Boolean {
+        if (pending == null) return false
+        if (pending.episodeId == null || currentEpisodeId == null || pending.episodeId != currentEpisodeId) {
+            return false
+        }
+        val jumpedTo = pending.event.jumpedToMs
+        return positionMs in (jumpedTo - 1_000L)..(jumpedTo + 8_000L)
     }
 
     fun clearPendingUndo() {

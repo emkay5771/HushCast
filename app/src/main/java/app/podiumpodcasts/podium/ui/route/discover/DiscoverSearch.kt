@@ -248,7 +248,7 @@ private fun BoxScope.SearchContent(
                 is DiscoverSearchState.Done -> {
                     androidx.compose.foundation.layout.Column(modifier = Modifier.fillMaxSize()) {
                         if (state.isSearching) {
-                            androidx.compose.material3.LinearProgressIndicator(
+                            androidx.compose.material3.LinearWavyProgressIndicator(
                                 modifier = Modifier.fillMaxWidth()
                             )
                         }

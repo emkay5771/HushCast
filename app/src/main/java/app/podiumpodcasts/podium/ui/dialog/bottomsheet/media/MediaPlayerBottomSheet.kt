@@ -248,10 +248,10 @@ fun MediaPlayerBottomSheet(
         }
     }
 
-    LaunchedEffect(pendingUndo) {
-        if (pendingUndo != null) {
-            delay(6000L)
-            HushCastEngineBridge.clearPendingUndo()
+    val activeUndoEvent by remember(pendingUndo, episodeId) {
+        derivedStateOf {
+            val p = pendingUndo
+            if (HushCastEngineBridge.isUndoValid(p, episodeId, livePosState.value)) p?.event else null
         }
     }
 
@@ -467,6 +467,9 @@ fun MediaPlayerBottomSheet(
             sheetMaxWidth = androidx.compose.ui.unit.Dp.Infinity,
             onDismissRequest = onDismiss
         ) {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.foundation.LocalOverscrollFactory provides null
+            ) {
             val spatialSpec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
             val fastEffects = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
             val transcriptTransition = updateTransition(targetState = showTranscriptOverlay, label = "transcriptOverlay")
@@ -696,20 +699,6 @@ fun MediaPlayerBottomSheet(
                                                             )
                                                         }
                                                     }
-
-                                                    // R7: the skip pill sits on the artwork's bottom edge instead of
-                                                    // holding an empty 48 dp slot above the seek bar.
-                                                    PlayerSkipPill(
-                                                        adWindows = adWindows,
-                                                        positionMsState = livePosState,
-                                                        onSkip = { ad ->
-                                                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                                                            vm.seek(ad.endMs)
-                                                        },
-                                                        modifier = Modifier
-                                                            .align(Alignment.BottomCenter)
-                                                            .padding(bottom = 12.dp)
-                                                    )
                                                 }
 
                                                 vm.playerError?.let { errMsg ->
@@ -830,26 +819,35 @@ fun MediaPlayerBottomSheet(
                                                     }
                                                 }
 
-                                                // C2: Chapter line ‹ Chapter title · 3 of 12 › + 28dp progress ring + time left
-                                                if (currentChapter != null && resolvedChapters.isNotEmpty()) {
-                                                    Spacer(Modifier.height(8.dp))
-                                                    ChapterNavigationLine(
-                                                        chapters = resolvedChapters,
-                                                        currentChapter = currentChapter,
-                                                        currentIndex = currentChapterIndex,
-                                                        skippedStarts = skippedChapterStarts,
-                                                        positionMsState = livePosState,
-                                                        speed = vm.speed,
-                                                        adjustForSpeed = adjustRemainingForSpeed,
-                                                        onSeekToMs = { vm.seek(it) },
-                                                        onOpenChaptersTab = {
-                                                            if (MediaPlayerTab.CHAPTERS in visibleTabs) {
-                                                                chaptersScrollTargetIndex = currentChapterIndex.takeIf { it >= 0 }
-                                                                selectedTab = MediaPlayerTab.CHAPTERS
-                                                            }
+                                                // C2 / Segment row: chapters + inline sponsor skip / undo
+                                                SegmentNavigationLine(
+                                                    chapters = resolvedChapters,
+                                                    currentChapter = currentChapter,
+                                                    currentIndex = currentChapterIndex,
+                                                    skippedStarts = skippedChapterStarts,
+                                                    adWindows = adWindows,
+                                                    activeUndo = activeUndoEvent,
+                                                    positionMsState = livePosState,
+                                                    speed = vm.speed,
+                                                    adjustForSpeed = adjustRemainingForSpeed,
+                                                    onSeekToMs = { vm.seek(it) },
+                                                    onSkipAd = { ad ->
+                                                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                                        vm.seek(ad.endMs)
+                                                    },
+                                                    onUndoSkip = { undo ->
+                                                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                                        HushCastEngineBridge.adSkipObserver.bypassAd(undo.adWindow.startMs)
+                                                        vm.seek(undo.adWindow.startMs)
+                                                        HushCastEngineBridge.clearPendingUndo()
+                                                    },
+                                                    onOpenChaptersTab = {
+                                                        if (MediaPlayerTab.CHAPTERS in visibleTabs) {
+                                                            chaptersScrollTargetIndex = currentChapterIndex.takeIf { it >= 0 }
+                                                            selectedTab = MediaPlayerTab.CHAPTERS
                                                         }
-                                                    )
-                                                }
+                                                    }
+                                                )
                                             }
 
                                             }
@@ -1187,15 +1185,20 @@ fun MediaPlayerBottomSheet(
                 }
             }
 
+            val showOffTabUndo = activeUndoEvent != null && (selectedTab != MediaPlayerTab.PLAYER || showTranscriptOverlay)
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .padding(
+                        start = 16.dp,
+                        end = 16.dp,
+                        bottom = if (showTranscriptOverlay) 12.dp else 76.dp
+                    )
             ) {
                 var lastUndo by remember { mutableStateOf<app.hushcast.automute.dsp.AdSkipEvent?>(null) }
-                if (pendingUndo != null) lastUndo = pendingUndo
+                if (activeUndoEvent != null) lastUndo = activeUndoEvent
                 androidx.compose.animation.AnimatedVisibility(
-                    visible = pendingUndo != null,
+                    visible = showOffTabUndo,
                     enter = slideInVertically(
                         animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
                     ) { it } + fadeIn(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
@@ -1204,11 +1207,12 @@ fun MediaPlayerBottomSheet(
                     ) { it } + fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
                     modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
                 ) {
-                    val undo = pendingUndo ?: lastUndo
+                    val undo = activeUndoEvent ?: lastUndo
                     if (undo != null) {
                         OneTapUndoAdSkipBanner(
                             event = undo,
                             onUndo = {
+                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                 HushCastEngineBridge.adSkipObserver.bypassAd(undo.adWindow.startMs)
                                 vm.seek(undo.adWindow.startMs)
                                 HushCastEngineBridge.clearPendingUndo()
@@ -1217,6 +1221,7 @@ fun MediaPlayerBottomSheet(
                         )
                     }
                 }
+            }
             }
             }
         }
@@ -1425,31 +1430,116 @@ fun MediaPlayerBottomSheet(
     }
 }
 
+private fun formatSegmentMmSs(ms: Long): String {
+    val totalSec = (ms / 1000L).coerceAtLeast(0L)
+    return "${totalSec / 60L}:${(totalSec % 60L).toString().padStart(2, '0')}"
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-private fun ChapterNavigationLine(
+private fun SegmentNavigationLine(
     chapters: List<ResolvedChapter>,
-    currentChapter: ResolvedChapter,
+    currentChapter: ResolvedChapter?,
     currentIndex: Int,
     skippedStarts: Set<Long>,
-    /** S4: read only in derived state (minutes left) and in the progress bar's draw lambda. */
+    adWindows: List<app.hushcast.automute.dsp.AdWindow>,
+    activeUndo: app.hushcast.automute.dsp.AdSkipEvent?,
+    /** S4: read only in derived state and in the progress bar's draw lambda. */
     positionMsState: androidx.compose.runtime.State<Long>,
     speed: Float,
     adjustForSpeed: Boolean,
     onSeekToMs: (Long) -> Unit,
+    onSkipAd: (app.hushcast.automute.dsp.AdWindow) -> Unit,
+    onUndoSkip: (app.hushcast.automute.dsp.AdSkipEvent) -> Unit,
+    onOpenChaptersTab: () -> Unit
+) {
+    val activeAd by remember(adWindows) {
+        derivedStateOf {
+            val pos = positionMsState.value
+            adWindows.firstOrNull { pos in it.startMs..it.endMs }
+        }
+    }
+
+    val hasChapters = chapters.isNotEmpty() && currentChapter != null
+    val showSponsorOrUndo = activeUndo != null || activeAd != null
+
+    if (hasChapters) {
+        Spacer(Modifier.height(8.dp))
+        SegmentNavigationRowContent(
+            chapters = chapters,
+            currentChapter = currentChapter,
+            currentIndex = currentIndex,
+            skippedStarts = skippedStarts,
+            activeAd = activeAd,
+            activeUndo = activeUndo,
+            positionMsState = positionMsState,
+            speed = speed,
+            adjustForSpeed = adjustForSpeed,
+            onSeekToMs = onSeekToMs,
+            onSkipAd = onSkipAd,
+            onUndoSkip = onUndoSkip,
+            onOpenChaptersTab = onOpenChaptersTab
+        )
+    } else {
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showSponsorOrUndo,
+            enter = expandVertically(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()) +
+                fadeIn(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
+            exit = shrinkVertically(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()) +
+                fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec())
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Spacer(Modifier.height(8.dp))
+                SegmentNavigationRowContent(
+                    chapters = chapters,
+                    currentChapter = currentChapter,
+                    currentIndex = currentIndex,
+                    skippedStarts = skippedStarts,
+                    activeAd = activeAd,
+                    activeUndo = activeUndo,
+                    positionMsState = positionMsState,
+                    speed = speed,
+                    adjustForSpeed = adjustForSpeed,
+                    onSeekToMs = onSeekToMs,
+                    onSkipAd = onSkipAd,
+                    onUndoSkip = onUndoSkip,
+                    onOpenChaptersTab = onOpenChaptersTab
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+private fun SegmentNavigationRowContent(
+    chapters: List<ResolvedChapter>,
+    currentChapter: ResolvedChapter?,
+    currentIndex: Int,
+    skippedStarts: Set<Long>,
+    activeAd: app.hushcast.automute.dsp.AdWindow?,
+    activeUndo: app.hushcast.automute.dsp.AdSkipEvent?,
+    positionMsState: androidx.compose.runtime.State<Long>,
+    speed: Float,
+    adjustForSpeed: Boolean,
+    onSeekToMs: (Long) -> Unit,
+    onSkipAd: (app.hushcast.automute.dsp.AdWindow) -> Unit,
+    onUndoSkip: (app.hushcast.automute.dsp.AdSkipEvent) -> Unit,
     onOpenChaptersTab: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
     val prevChapter = remember(chapters, currentIndex, skippedStarts) {
-        chapters.take(currentIndex).lastOrNull { it.publishedStartMs !in skippedStarts }
+        if (currentIndex <= 0) null
+        else chapters.take(currentIndex).lastOrNull { it.publishedStartMs !in skippedStarts }
     }
     val nextChapter = remember(chapters, currentIndex, skippedStarts) {
-        chapters.drop(currentIndex + 1).firstOrNull { it.publishedStartMs !in skippedStarts }
+        if (currentIndex < 0) null
+        else chapters.drop(currentIndex + 1).firstOrNull { it.publishedStartMs !in skippedStarts }
     }
 
-    val chapterDurMs = (currentChapter.endMs - currentChapter.startMs).coerceAtLeast(1L)
     val remMins by remember(currentChapter, speed, adjustForSpeed, positionMsState) {
         derivedStateOf {
+            if (currentChapter == null) return@derivedStateOf 0L
             val positionMs = positionMsState.value
             val remainingWallMs = if (adjustForSpeed) {
                 SkipAwareSeekCalculator.computeWallRemainingMs(
@@ -1465,84 +1555,237 @@ private fun ChapterNavigationLine(
         }
     }
 
+    val spatialSpec = MaterialTheme.motionScheme.defaultSpatialSpec<androidx.compose.ui.unit.IntSize>()
+    val effectsSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+
+    val rowActions = buildList {
+        if (activeAd != null) {
+            add(
+                androidx.compose.ui.semantics.CustomAccessibilityAction("Skip sponsor") {
+                    onSkipAd(activeAd)
+                    true
+                }
+            )
+        }
+        if (activeUndo != null) {
+            add(
+                androidx.compose.ui.semantics.CustomAccessibilityAction("Undo skip") {
+                    onUndoSkip(activeUndo)
+                    true
+                }
+            )
+        }
+    }
+
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics {
+                liveRegion = LiveRegionMode.Polite
+                if (rowActions.isNotEmpty()) {
+                    customActions = rowActions
+                }
+            },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {
-        // R7: both arrows in the same 40 dp tonal container (previously a bare arrow vs a ringed one).
-        Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
-            FilledTonalIconButton(
-                enabled = prevChapter != null,
-                onClick = {
-                    if (prevChapter != null) {
-                        haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                        onSeekToMs(prevChapter.startMs)
+        // Left slot: Undo pill (when just auto-skipped) OR ‹ previous chapter
+        Box(
+            modifier = Modifier
+                .animateContentSize(animationSpec = spatialSpec)
+                .heightIn(min = 48.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            val undo = activeUndo
+            if (undo != null) {
+                val undoFrac by remember(undo) {
+                    derivedStateOf {
+                        val elapsed = (positionMsState.value - undo.jumpedToMs).coerceIn(0L, 8_000L)
+                        1f - (elapsed / 8_000f)
                     }
-                },
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "Previous chapter")
+                }
+                OutlinedButton(
+                    onClick = { onUndoSkip(undo) },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    border = androidx.compose.foundation.BorderStroke(
+                        width = 1.5.dp,
+                        color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.35f + 0.65f * undoFrac)
+                    ),
+                    modifier = Modifier.height(38.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.Undo,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Undo", style = MaterialTheme.typography.labelLarge)
+                }
+            } else if (chapters.isNotEmpty()) {
+                Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    FilledTonalIconButton(
+                        enabled = prevChapter != null,
+                        onClick = {
+                            if (prevChapter != null) {
+                                haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                onSeekToMs(prevChapter.startMs)
+                            }
+                        },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "Previous chapter")
+                    }
+                }
             }
         }
 
-        val spatial = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+        // Center slot: Just auto-skipped / In a sponsor / Chapter
+        val centerKey: Any = when {
+            activeUndo != null -> "undo_${activeUndo.adWindow.startMs}"
+            activeAd != null -> "ad_${activeAd.startMs}"
+            currentChapter != null -> currentChapter
+            else -> "none"
+        }
         AnimatedContent(
-            targetState = currentChapter,
+            targetState = centerKey,
             transitionSpec = {
-                fadeIn(animationSpec = spatial) togetherWith fadeOut(animationSpec = spatial)
+                fadeIn(animationSpec = effectsSpec) togetherWith fadeOut(animationSpec = effectsSpec)
             },
             modifier = Modifier
                 .weight(1f)
-                .clickable(onClick = onOpenChaptersTab),
-            label = "chapterTitleSwitch"
-        ) { ch ->
-            val idx = chapters.indexOf(ch).coerceAtLeast(0)
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = ch.title,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = "${idx + 1} of ${chapters.size} · ${remMins}m left",
-                    style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1
-                )
-                Spacer(Modifier.height(4.dp))
-                LinearProgressIndicator(
-                    progress = {
-                        // Evaluated when drawing, so position ticks don't recompose the row.
-                        val remainingFraction = ((currentChapter.endMs - positionMsState.value).toFloat() /
-                            chapterDurMs.toFloat()).coerceIn(0f, 1f)
-                        1f - remainingFraction
-                    },
-                    modifier = Modifier
-                        .width(96.dp)
-                        .height(3.dp),
-                    drawStopIndicator = {}
-                )
+                .then(
+                    if (activeUndo == null && activeAd == null && chapters.isNotEmpty()) {
+                        Modifier.clickable(onClick = onOpenChaptersTab)
+                    } else {
+                        Modifier
+                    }
+                ),
+            label = "segmentLineSwitch"
+        ) { _ ->
+            when {
+                activeUndo != null -> {
+                    val savedMs = (activeUndo.jumpedToMs - activeUndo.jumpedFromMs).coerceAtLeast(0L)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Skipped ${formatAdDisplayLabel(activeUndo.adWindow)}",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.tertiary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${formatSegmentMmSs(savedMs)} saved",
+                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                }
+                activeAd != null -> {
+                    val adDurMs = (activeAd.endMs - activeAd.startMs).coerceAtLeast(1L)
+                    val remAdMs by remember(activeAd) {
+                        derivedStateOf { (activeAd.endMs - positionMsState.value).coerceAtLeast(0L) }
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Sponsor · ${formatAdDisplayLabel(activeAd)}",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.tertiary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${formatSegmentMmSs(remAdMs)} left",
+                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = {
+                                ((positionMsState.value - activeAd.startMs).toFloat() / adDurMs.toFloat())
+                                    .coerceIn(0f, 1f)
+                            },
+                            color = MaterialTheme.colorScheme.tertiary,
+                            trackColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            modifier = Modifier
+                                .width(96.dp)
+                                .height(3.dp),
+                            drawStopIndicator = {}
+                        )
+                    }
+                }
+                currentChapter != null -> {
+                    val chapterDurMs = (currentChapter.endMs - currentChapter.startMs).coerceAtLeast(1L)
+                    val idx = chapters.indexOf(currentChapter).coerceAtLeast(0)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = currentChapter.title,
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "${idx + 1} of ${chapters.size} · ${remMins}m left",
+                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = {
+                                val remainingFraction = ((currentChapter.endMs - positionMsState.value).toFloat() /
+                                    chapterDurMs.toFloat()).coerceIn(0f, 1f)
+                                1f - remainingFraction
+                            },
+                            modifier = Modifier
+                                .width(96.dp)
+                                .height(3.dp),
+                            drawStopIndicator = {}
+                        )
+                    }
+                }
             }
         }
 
+        // Right slot: Skip pill (when in a sponsor) OR › next chapter
         Box(
-            modifier = Modifier.size(48.dp),
+            modifier = Modifier
+                .animateContentSize(animationSpec = spatialSpec)
+                .heightIn(min = 48.dp),
             contentAlignment = Alignment.Center
         ) {
-            FilledTonalIconButton(
-                enabled = nextChapter != null,
-                onClick = {
-                    if (nextChapter != null) {
-                        haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                        onSeekToMs(nextChapter.startMs)
+            val ad = activeAd
+            if (ad != null && activeUndo == null) {
+                FilledTonalButton(
+                    onClick = { onSkipAd(ad) },
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                    modifier = Modifier.height(38.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.SkipNext,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text("Skip", style = MaterialTheme.typography.labelLarge)
+                }
+            } else if (chapters.isNotEmpty()) {
+                Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                    FilledTonalIconButton(
+                        enabled = nextChapter != null,
+                        onClick = {
+                            if (nextChapter != null) {
+                                haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                                onSeekToMs(nextChapter.startMs)
+                            }
+                        },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Next chapter")
                     }
-                },
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Next chapter")
+                }
             }
         }
     }
@@ -1844,41 +2087,6 @@ private fun PlayerMoreActionsSheet(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
             )
-        }
-    }
-}
-
-/**
- * The skip-ad pill (R7). Overlaid on the artwork's bottom edge, so it no longer reserves an
- * empty 48 dp slot above the seek bar. Reads the position only inside derived state.
- */
-@Composable
-private fun PlayerSkipPill(
-    adWindows: List<app.hushcast.automute.dsp.AdWindow>,
-    positionMsState: androidx.compose.runtime.State<Long>,
-    onSkip: (app.hushcast.automute.dsp.AdWindow) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val activeAd by remember(adWindows) {
-        derivedStateOf {
-            val pos = positionMsState.value
-            adWindows.firstOrNull { pos in it.startMs..it.endMs }
-        }
-    }
-    Box(
-        modifier = modifier.semantics { liveRegion = LiveRegionMode.Polite },
-        contentAlignment = Alignment.Center
-    ) {
-        val ad = activeAd
-        if (ad != null) {
-            FilledTonalButton(
-                onClick = { onSkip(ad) },
-                modifier = Modifier.height(40.dp)
-            ) {
-                Icon(Icons.Rounded.SkipNext, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Skip ${formatAdDisplayLabel(ad)}")
-            }
         }
     }
 }

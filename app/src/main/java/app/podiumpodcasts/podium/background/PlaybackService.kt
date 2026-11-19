@@ -411,7 +411,8 @@ class PlaybackService : MediaLibraryService() {
 
         scope.launch {
             HushCastEngineBridge.adSkipEvents.collect { event ->
-                HushCastEngineBridge.notifyAdSkipped(event)
+                val epId = mediaSession?.player?.currentMediaItem?.getEpisodeId()
+                HushCastEngineBridge.notifyAdSkipped(epId, event)
                 HushCastEngineBridge.playSponsorSkipIndicator(this@PlaybackService)
             }
         }
@@ -863,6 +864,7 @@ class PlaybackService : MediaLibraryService() {
     private fun registerPlayStateListener() {
         mediaSession?.player?.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                HushCastEngineBridge.clearPendingUndo()
                 speedItemKey.value = SpeedItemKey(mediaItem?.getOrigin(), mediaItem?.getEpisodeId())
                 updatePlayState()
                 onEpisodeStarted(mediaItem)

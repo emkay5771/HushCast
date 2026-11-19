@@ -273,6 +273,7 @@ fun PlayerCustomizeSheet(
                                 value = tab.visible,
                                 role = Role.Switch,
                                 onValueChange = { checked ->
+                                    haptic.performHapticFeedback(if (checked) HapticFeedbackType.ToggleOn else HapticFeedbackType.ToggleOff)
                                     saveTabs(localTabs.map { if (it.id == tab.id) it.copy(visible = checked) else it })
                                 }
                             ),
@@ -311,16 +312,15 @@ fun PlayerCustomizeSheet(
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.weight(1f)
                 )
-                SingleChoiceSegmentedButtonRow {
-                    listOf(3, 4, 5).forEachIndexed { i, n ->
-                        SegmentedButton(
-                            selected = visibleCount == n,
-                            onClick = {
-                                scope.launch { settingsRepository.behavior.setPlayerToolbarVisibleCount(n) }
-                            },
-                            shape = SegmentedButtonDefaults.itemShape(index = i, count = 3)
-                        ) { Text("$n") }
-                    }
+                app.podiumpodcasts.podium.ui.component.common.ConnectedSingleChoiceGroup(
+                    options = listOf(3, 4, 5),
+                    selected = visibleCount,
+                    onSelect = { n ->
+                        scope.launch { settingsRepository.behavior.setPlayerToolbarVisibleCount(n) }
+                    },
+                    modifier = Modifier.width(156.dp)
+                ) { n ->
+                    Text("$n")
                 }
             }
             Text(

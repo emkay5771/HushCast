@@ -266,22 +266,16 @@ fun PodcastSettingsView(
                                 AutoAddUpNextMode.PLAY_NEXT to "Play next",
                                 AutoAddUpNextMode.PLAY_LAST to "Play last"
                             )
-                            SingleChoiceSegmentedButtonRow(
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                modes.forEachIndexed { idx, (mode, title) ->
-                                    SegmentedButton(
-                                        selected = autoAddMode == mode,
-                                        onClick = {
-                                            scope.launch {
-                                                settingsRepository.behavior.setPodcastAutoAddToUpNext(podcast.origin, mode)
-                                            }
-                                        },
-                                        shape = SegmentedButtonDefaults.itemShape(idx, modes.size)
-                                    ) {
-                                        SegmentedButtonLabel(title, hasIcon = true)
+                            app.podiumpodcasts.podium.ui.component.common.ConnectedSingleChoiceGroup(
+                                options = modes,
+                                selected = modes.first { it.first == autoAddMode },
+                                onSelect = { (mode, _) ->
+                                    scope.launch {
+                                        settingsRepository.behavior.setPodcastAutoAddToUpNext(podcast.origin, mode)
                                     }
                                 }
+                            ) { (_, title) ->
+                                SegmentedButtonLabel(title, hasIcon = false)
                             }
                         }
                     }

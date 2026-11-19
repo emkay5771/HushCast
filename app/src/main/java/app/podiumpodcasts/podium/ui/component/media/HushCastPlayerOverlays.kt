@@ -130,8 +130,10 @@ fun OneTapUndoAdSkipBanner(
             ) {
                 Icon(Icons.Rounded.SkipNext, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
+                val savedSec = ((event.jumpedToMs - event.jumpedFromMs) / 1000L).coerceAtLeast(0L)
+                val savedText = "${savedSec / 60L}:${(savedSec % 60L).toString().padStart(2, '0')}"
                 Text(
-                    text = "Skipped ${event.adWindow.label} (${((event.jumpedToMs - event.jumpedFromMs) / 1000L)}s)",
+                    text = "Skipped ${event.adWindow.label} ($savedText)",
                     style = MaterialTheme.typography.bodyMedium
                 )
             }

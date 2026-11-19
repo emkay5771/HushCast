@@ -252,7 +252,11 @@ fun DownloadsRoute(
                     val episode = bundle.episode ?: return@items
 
                     PodcastEpisodeListItem(
-                        modifier = Modifier.animateItem(),
+                        modifier = Modifier.animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
                         inQueue = episode.id in queueEpisodeIds,
                         playerVm = playerVm,
 

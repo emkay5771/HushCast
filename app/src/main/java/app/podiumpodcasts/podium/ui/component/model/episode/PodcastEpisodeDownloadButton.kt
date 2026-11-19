@@ -72,6 +72,7 @@ fun PodcastEpisodeDownloadButton(
     val animateState = remember { Animatable(0f) }
     val firstAnim = remember { mutableStateOf(true) }
 
+    val downloadAnimSpec = MaterialTheme.motionScheme.defaultEffectsSpec<Float>()
     LaunchedEffect(bundle.download?.state, liveProgress) {
         val targetValue = when(bundle.download?.state) {
             null, PodcastEpisodeDownloadState.FAILED.value -> 0f
@@ -89,7 +90,7 @@ fun PodcastEpisodeDownloadButton(
         } else {
             animateState.animateTo(
                 targetValue = targetValue,
-                animationSpec = tween(250)
+                animationSpec = downloadAnimSpec
             )
         }
     }
@@ -106,7 +107,16 @@ fun PodcastEpisodeDownloadButton(
 
     @Composable
     fun inner() {
-        AnimatedContent(bundle.download?.state) { state ->
+        AnimatedContent(
+            targetState = bundle.download?.state,
+            transitionSpec = {
+                androidx.compose.animation.fadeIn(
+                    animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
+                ) togetherWith androidx.compose.animation.fadeOut(
+                    animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
+                )
+            }
+        ) { state ->
             val values = stateMap[state ?: -1] ?: stateMap[-1]!!
 
             if(icon) {

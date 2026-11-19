@@ -146,7 +146,11 @@ fun ContinuePlayingRoute(
 
                     SwipeableItem(
                         scope = scope,
-                        modifier = Modifier.animateItem(),
+                        modifier = Modifier.animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
                         snackbarHostState = snackbarHostState,
                         shape = app.podiumpodcasts.podium.ui.component.model.episode.episodeRowShape(it, continuePlaying.itemCount),
                         startAction = SwipeableItemActions.CheckAction(

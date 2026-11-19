@@ -196,7 +196,7 @@ fun PlayerHushCastSheet(
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Spacer(Modifier.height(8.dp))
-                    LinearProgressIndicator(
+                    androidx.compose.material3.LinearWavyProgressIndicator(
                         progress = { pct / 100f },
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -339,6 +339,10 @@ fun PlayerHushCastSheet(
                         value = wordMutingActive,
                         role = Role.Switch,
                         onValueChange = { enabled ->
+                            haptic.performHapticFeedback(
+                                if (enabled) androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOn
+                                else androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOff
+                            )
                             scope.launch {
                                 settingsRepository.hushCast.setPodcastWordMuting(origin, enabled)
                                 if (HushCastEngineBridge.currentEpisodeId == episodeId) {
@@ -371,6 +375,10 @@ fun PlayerHushCastSheet(
                         value = sponsorSkippingActive,
                         role = Role.Switch,
                         onValueChange = { enabled ->
+                            haptic.performHapticFeedback(
+                                if (enabled) androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOn
+                                else androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOff
+                            )
                             val nextPolicy = if (enabled) AdPolicyMode.AUTO_SKIP else AdPolicyMode.MARK_ONLY
                             scope.launch(Dispatchers.IO) {
                                 autoMuteDb.dao().upsertPodcastAdPolicy(

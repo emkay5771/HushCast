@@ -1,13 +1,14 @@
 package app.podiumpodcasts.podium.ui.helper
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,6 +26,7 @@ private enum class PagerScaffoldState {
     CONTENT
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PagerScaffold(
     vararg pager: LazyPagingItems<*>,
@@ -46,7 +48,14 @@ fun PagerScaffold(
 
     AnimatedContent(
         modifier = Modifier.fillMaxSize(),
-        targetState = state
+        targetState = state,
+        transitionSpec = {
+            androidx.compose.animation.fadeIn(
+                animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+            ) togetherWith androidx.compose.animation.fadeOut(
+                animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
+            )
+        }
     ) { target ->
         when (target) {
             PagerScaffoldState.LOADING -> {
@@ -54,7 +63,7 @@ fun PagerScaffold(
                     isLoading()
                 } else {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                        androidx.compose.material3.LoadingIndicator()
                     }
                 }
             }

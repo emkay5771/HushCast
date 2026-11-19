@@ -1,3 +1,18 @@
+# HushCast v1.0.35-hushcast
+
+## What's New
+- **Material 3 Expressive & Native Feel**:
+  - **Restored stretch overscroll**: Scoped overscroll suppression to the player sheet only, bringing back native Android stretch overscroll across all lists and grids.
+  - **Blur behind sheets fix**: Fixed `BlurBehindSheetWindow` so turning "Blur behind sheets" off (or enabling Battery Saver) cleanly clears the window blur flag; removed dead pre-API-31 bitmap blur fallback.
+  - **Mini player M3E polish**: Swipe-up now triggers once per gesture with a `GestureThresholdActivate` haptic, and playback buttons use M3E `IconButtonDefaults.shapes()` / `toggleableShapes()` morphs.
+  - **Tactile haptics everywhere**: Added `ToggleOn`/`ToggleOff` haptics to all Settings and player sheet switches, `GestureThresholdActivate` to queue & rule swipe-to-dismiss (plus dynamic left/right trash icon alignment in Up Next), and 15-minute mark `SegmentTick` haptics on the custom sleep timer slider.
+  - **M3E motion, indicators & components**: Upgraded 27 `animateItem()` list/grid animations and key controls to `MaterialTheme.motionScheme`, upgraded loading spinners to `LoadingIndicator` / `PullToRefreshDefaults.LoadingIndicator` and full-width processing/download bars to `LinearWavyProgressIndicator`, migrated single-choice selectors to connected `ToggleButton` `ButtonGroup`s (with TalkBack radio semantics), and converted Sleep Timer options to `SegmentedListItem` containers.
+- **Player Sponsor Row Consolidation**:
+  - **Inline Skip & Undo**: Replaced the artwork-covering `PlayerSkipPill` and toolbar-covering bottom Undo banner on the Playing tab with an inline sponsor/undo state in the segment navigation row (animating in on chapterless episodes only during ads/Undo, with a compact Undo above the bottom bar on Notes/Chapters/Transcript).
+  - **Position-based Undo expiry**: Undo now expires after 8s of playback past the skip, on manual seek, or on episode change (`HushCastEngineBridge`), preventing stale Undo prompts when reopening the player.
+
+---
+
 # HushCast v1.0.34-hushcast
 
 ## What's New

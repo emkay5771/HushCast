@@ -857,7 +857,11 @@ fun HomeRoute(
                                         shadowElevation = 12f
                                     }
                                 } else {
-                                    Modifier.animateItem()
+                                    Modifier.animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+)
                                 }
 
                                 when (entryValue) {

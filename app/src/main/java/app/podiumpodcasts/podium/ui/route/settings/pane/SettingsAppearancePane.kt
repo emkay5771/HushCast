@@ -393,28 +393,23 @@ private fun ThemeModeButtons(
                 else -> true to false
             }
         }
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            ThemeModeOptions.forEachIndexed { idx, option ->
-                SegmentedButton(
-                    selected = selected == option.mode,
-                    onClick = { onSelect(option.mode) },
-                    shape = SegmentedButtonDefaults.itemShape(index = idx, count = ThemeModeOptions.size),
-                    icon = {
-                        if (showIcons) {
-                            Icon(
-                                imageVector = option.icon,
-                                contentDescription = null,
-                                modifier = Modifier.size(SegmentedButtonDefaults.IconSize)
-                            )
-                        }
-                    }
-                ) {
-                    SegmentedButtonLabel(
-                        text = if (useShortLabels) option.shortLabel else option.label,
-                        hasIcon = showIcons
-                    )
-                }
+        app.podiumpodcasts.podium.ui.component.common.ConnectedSingleChoiceGroup(
+            options = ThemeModeOptions,
+            selected = ThemeModeOptions.first { it.mode == selected },
+            onSelect = { onSelect(it.mode) }
+        ) { option ->
+            if (showIcons) {
+                Icon(
+                    imageVector = option.icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(ToggleButtonDefaults.IconSize)
+                )
+                Spacer(Modifier.size(ToggleButtonDefaults.IconSpacing))
             }
+            SegmentedButtonLabel(
+                text = if (useShortLabels) option.shortLabel else option.label,
+                hasIcon = showIcons
+            )
         }
     }
 }
@@ -915,7 +910,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.bottomNavigationGroup
                 val canToggle = if (isEnabled) enabledItems.size > 2 else enabledItems.size < 5
 
                 SettingsListItem(
-                    modifier = Modifier.animateItem(),
+                    modifier = Modifier.animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
                     checked = isEnabled,
                     leadingContent = {
                         Row(verticalAlignment = Alignment.CenterVertically) {

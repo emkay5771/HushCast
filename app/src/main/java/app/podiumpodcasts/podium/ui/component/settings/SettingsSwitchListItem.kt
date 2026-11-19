@@ -29,6 +29,7 @@ fun SettingsSwitchListItem(
 
     modifier: Modifier = Modifier
 ) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     SettingsListItem(
         // Outermost semantics win, so this replaces the list item's own checkbox role.
         modifier = modifier.semantics { role = Role.Switch },
@@ -51,6 +52,13 @@ fun SettingsSwitchListItem(
 
         index = index,
         count = count,
-        onClick = { onCheckedChange(!checked) }
+        onClick = {
+            val next = !checked
+            haptic.performHapticFeedback(
+                if (next) androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOn
+                else androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOff
+            )
+            onCheckedChange(next)
+        }
     )
 }

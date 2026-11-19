@@ -290,9 +290,18 @@ fun PodcastDetailView(
         derivedStateOf { vm.lazyListState.firstVisibleItemIndex > 7 && vm.selectedDestination == Destinations.EPISODES }
     }
 
+    val pullState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
     PullToRefreshBox(
         isRefreshing = vm.isRefreshing,
-        onRefresh = { vm.updatePodcast(activity, podcast) }
+        state = pullState,
+        onRefresh = { vm.updatePodcast(activity, podcast) },
+        indicator = {
+            androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.LoadingIndicator(
+                state = pullState,
+                isRefreshing = vm.isRefreshing,
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
+        }
     ) {
         BoxWithConstraints {
             Scaffold(
@@ -885,7 +894,11 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
             modifier = Modifier
                 .background(MaterialTheme.colorScheme.surfaceContainer)
                 .fillMaxWidth()
-                .animateItem()
+                .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+)
         ) {
             PodcastSearchFilterOrderBar(
                 Modifier
@@ -966,7 +979,11 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
         if(episodePager.itemCount == 0 && episodePager.loadState.isIdle) InfoLayout(
             modifier = Modifier
                 .heightIn(min = 200.dp)
-                .animateItem(),
+                .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
             icon = when(isSearchFilterOrderBarStateDefault) {
                 true -> Icons.Rounded.Inbox
                 false -> Icons.Rounded.SearchOff
@@ -996,7 +1013,11 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .animateItem(),
+                .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
             color = MaterialTheme.colorScheme.surfaceContainer
         ) {
             episodePager[it]?.let { episodeBundle ->
@@ -1124,7 +1145,11 @@ fun LazyListScope.podcastDetailViewInfoDestination(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .animateItem(),
+                .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
             color = MaterialTheme.colorScheme.surfaceContainer
         ) {
             Column(

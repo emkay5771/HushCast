@@ -47,9 +47,8 @@ import kotlinx.coroutines.withContext
 /**
  * Renders the player's blurred-artwork background (R19).
  *
- * On Android 12+ (API 31+), animates a GPU [Modifier.blur] radius via [animateDpAsState] alongside
- * an alpha crossfade. On older Android versions, falls back to a pre-blurred 40 px bitmap with an
- * [animateFloatAsState] alpha crossfade.
+ * Animates a GPU [Modifier.blur] radius via [animateDpAsState] alongside an alpha crossfade
+ * using M3E `defaultEffectsSpec()`.
  */
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -59,80 +58,41 @@ fun PlayerBackdropLayer(
     scrimColor: Color,
     modifier: Modifier = Modifier
 ) {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        val context = LocalContext.current
-        var artwork by remember { mutableStateOf<ImageBitmap?>(null) }
-        LaunchedEffect(artworkUri, enabled) {
-            if (artworkUri.isNullOrBlank()) {
-                artwork = null
-            } else if (enabled) {
-                artwork = loadArtworkBitmap(context, artworkUri, targetPx = 240)
-            }
+    val context = LocalContext.current
+    var artwork by remember { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(artworkUri, enabled) {
+        if (artworkUri.isNullOrBlank()) {
+            artwork = null
+        } else if (enabled) {
+            artwork = loadArtworkBitmap(context, artworkUri, targetPx = 240)
         }
-        val blurRadius by animateDpAsState(
-            targetValue = if (enabled && artwork != null) 48.dp else 0.dp,
-            animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
-            label = "playerBackdropBlur"
-        )
-        val alpha by animateFloatAsState(
-            targetValue = if (enabled && artwork != null) 1f else 0f,
-            animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
-            label = "playerBackdropAlpha"
-        )
-        val bmp = artwork
-        if (bmp != null && alpha > 0f) {
-            Box(modifier = modifier.fillMaxSize()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .blur(radius = blurRadius, edgeTreatment = BlurredEdgeTreatment.Rectangle)
-                        .playerBackdropImage(bmp, alpha)
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .playerBackdropScrim(scrimColor, alpha)
-                )
-            }
-        }
-    } else {
-        val blurredArtwork = rememberBlurredArtwork(artworkUri = artworkUri, enabled = enabled)
-        val alpha by animateFloatAsState(
-            targetValue = if (enabled && blurredArtwork != null) 1f else 0f,
-            animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
-            label = "playerBackdropAlphaFallback"
-        )
-        if (blurredArtwork != null && alpha > 0f) {
+    }
+    val blurRadius by animateDpAsState(
+        targetValue = if (enabled && artwork != null) 48.dp else 0.dp,
+        animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+        label = "playerBackdropBlur"
+    )
+    val alpha by animateFloatAsState(
+        targetValue = if (enabled && artwork != null) 1f else 0f,
+        animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+        label = "playerBackdropAlpha"
+    )
+    val bmp = artwork
+    if (bmp != null && alpha > 0f) {
+        Box(modifier = modifier.fillMaxSize()) {
             Box(
-                modifier = modifier
+                modifier = Modifier
                     .fillMaxSize()
-                    .playerBackdrop(
-                        image = blurredArtwork,
-                        scrimColor = scrimColor,
-                        alpha = alpha
-                    )
+                    .blur(radius = blurRadius, edgeTreatment = BlurredEdgeTreatment.Rectangle)
+                    .playerBackdropImage(bmp, alpha)
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .playerBackdropScrim(scrimColor, alpha)
             )
         }
     }
-}
-
-/**
- * The player's blurred-artwork background (R19).  The artwork is loaded at 40 px, box-blurred
- * once, and drawn stretched behind the page, which costs about one frame per episode instead of a
- * live blur on every frame.  Returns null while loading or when [artworkUri] is null.
- */
-@Composable
-fun rememberBlurredArtwork(artworkUri: String?, enabled: Boolean): ImageBitmap? {
-    val context = LocalContext.current
-    var image by remember { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(artworkUri, enabled) {
-        if (artworkUri.isNullOrBlank()) {
-            image = null
-        } else if (enabled) {
-            image = loadBlurred(context, artworkUri)
-        }
-    }
-    return image
 }
 
 private fun Modifier.playerBackdropImage(image: ImageBitmap, alpha: Float): Modifier {
@@ -169,16 +129,6 @@ private fun Modifier.playerBackdropScrim(scrimColor: Color, alpha: Float): Modif
     }
 }
 
-/**
- * Draws [image] stretched behind the content, under a scrim in [scrimColor] that is solid at the
- * top (so it meets the sheet's drag-handle band without a seam) and lighter lower down.
- */
-fun Modifier.playerBackdrop(image: ImageBitmap?, scrimColor: Color, alpha: Float = 1f): Modifier {
-    val clamped = alpha.coerceIn(0f, 1f)
-    if (image == null || clamped <= 0f) return this
-    return playerBackdropImage(image, clamped).playerBackdropScrim(scrimColor, clamped)
-}
-
 private suspend fun loadArtworkBitmap(context: Context, uri: String, targetPx: Int): ImageBitmap? =
     withContext(Dispatchers.IO) {
         runCatching {
@@ -192,70 +142,46 @@ private suspend fun loadArtworkBitmap(context: Context, uri: String, targetPx: I
         }.getOrNull()
     }
 
-private suspend fun loadBlurred(context: Context, uri: String): ImageBitmap? = withContext(Dispatchers.IO) {
-    runCatching {
-        val request = ImageRequest.Builder(context)
-            .data(uri)
-            .size(Size(40, 40))
-            .allowHardware(false)
-            .build()
-        val result = ImageLoader(context).execute(request) as? SuccessResult ?: return@runCatching null
-        val small = Bitmap.createScaledBitmap(result.image.toBitmap(), 40, 40, true)
-        boxBlur(small, radius = 4, passes = 3).asImageBitmap()
-    }.getOrNull()
-}
-
-/** A few passes of a separable box blur; at 40 px this is effectively free. */
-private fun boxBlur(src: Bitmap, radius: Int, passes: Int): Bitmap {
-    val w = src.width
-    val h = src.height
-    var px = IntArray(w * h)
-    src.getPixels(px, 0, w, 0, 0, w, h)
-    var tmp = IntArray(w * h)
-    repeat(passes) {
-        blurLine(px, tmp, w, h, radius, horizontal = true)
-        blurLine(tmp, px, w, h, radius, horizontal = false)
-    }
-    val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-    out.setPixels(px, 0, w, 0, 0, w, h)
-    return out
-}
-
-private fun blurLine(src: IntArray, dst: IntArray, w: Int, h: Int, r: Int, horizontal: Boolean) {
-    val lines = if (horizontal) h else w
-    val len = if (horizontal) w else h
-    for (line in 0 until lines) {
-        for (i in 0 until len) {
-            var a = 0; var rr = 0; var g = 0; var b = 0; var n = 0
-            for (k in -r..r) {
-                val j = (i + k).coerceIn(0, len - 1)
-                val c = if (horizontal) src[line * w + j] else src[j * w + line]
-                a += (c ushr 24) and 0xFF; rr += (c shr 16) and 0xFF; g += (c shr 8) and 0xFF; b += c and 0xFF; n++
-            }
-            val v = ((a / n) shl 24) or ((rr / n) shl 16) or ((g / n) shl 8) or (b / n)
-            if (horizontal) dst[line * w + i] = v else dst[i * w + line] = v
-        }
-    }
-}
-
 /**
  * Blurs whatever is behind this sheet's window (R19, "Blur behind sheets"), where the device has
- * cross-window blur on.  Call it at the top of a player sub-sheet's content.  When the device or
- * battery saver turns blur off, the normal dim scrim shows instead.
+ * cross-window blur on.  Clears the flag when disabled, on dispose, or when cross-window blur is
+ * turned off (e.g. Battery Saver).
  */
 @Composable
 fun BlurBehindSheetWindow(enabled: Boolean, radiusPx: Int = 48) {
     val view = LocalView.current
-    DisposableEffect(view, enabled) {
+    val wm = remember(view) { view.context.getSystemService(WindowManager::class.java) }
+    var crossWindowBlurEnabled by remember(wm) {
+        mutableStateOf(wm?.isCrossWindowBlurEnabled == true)
+    }
+
+    DisposableEffect(wm) {
+        if (wm == null) return@DisposableEffect onDispose { }
+        val listener = java.util.function.Consumer<Boolean> { active ->
+            crossWindowBlurEnabled = active
+        }
+        wm.addCrossWindowBlurEnabledListener(listener)
+        onDispose {
+            wm.removeCrossWindowBlurEnabledListener(listener)
+        }
+    }
+
+    DisposableEffect(view, enabled, crossWindowBlurEnabled, radiusPx) {
         val window = (view.parent as? DialogWindowProvider)?.window
-        if (window != null && enabled) {
-            val wm = view.context.getSystemService(WindowManager::class.java)
-            if (wm?.isCrossWindowBlurEnabled == true) {
+        fun applyBlur(active: Boolean) {
+            if (window == null) return
+            if (active) {
                 window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
                 window.attributes = window.attributes.apply { blurBehindRadius = radiusPx }
+            } else {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+                window.attributes = window.attributes.apply { blurBehindRadius = 0 }
             }
         }
-        onDispose { }
+        applyBlur(enabled && crossWindowBlurEnabled)
+        onDispose {
+            applyBlur(false)
+        }
     }
 }
 
@@ -263,8 +189,9 @@ fun BlurBehindSheetWindow(enabled: Boolean, radiusPx: Int = 48) {
 @Composable
 fun PlayerSheetBlur() {
     val repo = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
-    val enabled by repo.appearance.playerBlurSheets.collectAsState(initial = true)
-    BlurBehindSheetWindow(enabled = enabled)
+    val enabled by repo.appearance.playerBlurSheets.collectAsState(initial = null)
+    val flag = enabled ?: return
+    BlurBehindSheetWindow(enabled = flag)
 }
 
 /**

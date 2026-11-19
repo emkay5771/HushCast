@@ -966,12 +966,21 @@ fun SettingsHushCastPane(
                                     runCatching { HushCastLabels.modeLabel(MuteActionMode.valueOf(rule.actionMode)) }
                                         .getOrElse { rule.actionMode.lowercase().replace('_', ' ') }
                                 }
+                                LaunchedEffect(dismissState.targetValue) {
+                                    if (dismissState.targetValue != SwipeToDismissBoxValue.Settled) {
+                                        haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.GestureThresholdActivate)
+                                    }
+                                }
                                 SwipeToDismissBox(
                                     state = dismissState,
                                     // Clip to the row's group shape, so the delete background
                                     // keeps the row's corners while it's dragged.
                                     modifier = Modifier
-                                        .animateItem()
+                                        .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+)
                                         .clip(settingsGroupShape(pos)),
                                     backgroundContent = {
                                         val direction = dismissState.dismissDirection
@@ -1022,8 +1031,13 @@ fun SettingsHushCastPane(
                                         index = pos.index,
                                         count = pos.count,
                                         onClick = {
+                                            val next = !rule.enabled
+                                            haptic.performHapticFeedback(
+                                                if (next) androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOn
+                                                else androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOff
+                                            )
                                             scope.launch {
-                                                autoMuteDb.dao().setRuleEnabled(rule.id, !rule.enabled)
+                                                autoMuteDb.dao().setRuleEnabled(rule.id, next)
                                                 RuleReevaluationWorker.enqueue(context = context, defaultActionMode = selectedActionMode)
                                             }
                                         }
@@ -1284,7 +1298,10 @@ fun SettingsHushCastPane(
                                             Spacer(Modifier.height(8.dp))
                                             Text("${p.modelName}: ${p.bytesDownloaded / (1024 * 1024)} MB", style = MaterialTheme.typography.labelSmall)
                                             val frac = if (p.totalBytes > 0) p.bytesDownloaded.toFloat() / p.totalBytes.toFloat() else 0f
-                                            LinearProgressIndicator(progress = { frac.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                                            androidx.compose.material3.LinearWavyProgressIndicator(
+                                                progress = { frac.coerceIn(0f, 1f) },
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
                                         }
                                         downloadError?.let { err ->
                                             Spacer(Modifier.height(6.dp))

@@ -62,57 +62,52 @@ fun PodcastGridOptionsSheet(
 
             Text("Layout", style = Typography.labelLarge, modifier = Modifier.semantics { heading() })
             Spacer(Modifier.height(8.dp))
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                val options = listOf(
-                    SubscriptionsLayout.LARGE_GRID to "Large grid",
-                    SubscriptionsLayout.SMALL_GRID to "Small grid",
-                    SubscriptionsLayout.LIST to "List"
-                )
-                options.forEachIndexed { idx, (value, label) ->
-                    SegmentedButton(
-                        selected = layout == value,
-                        onClick = { onLayoutChange(value) },
-                        shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
-                    ) { Text(label) }
-                }
+            val layoutOptions = listOf(
+                SubscriptionsLayout.LARGE_GRID to "Large grid",
+                SubscriptionsLayout.SMALL_GRID to "Small grid",
+                SubscriptionsLayout.LIST to "List"
+            )
+            app.podiumpodcasts.podium.ui.component.common.ConnectedSingleChoiceGroup(
+                options = layoutOptions,
+                selected = layoutOptions.first { it.first == layout },
+                onSelect = { onLayoutChange(it.first) }
+            ) { (_, label) ->
+                Text(label, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
 
             Spacer(Modifier.height(16.dp))
             Text("Sort by", style = Typography.labelLarge, modifier = Modifier.semantics { heading() })
             Spacer(Modifier.height(8.dp))
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                val options = listOf(
-                    SubscriptionsSort.RECENTLY_ADDED to "New episodes",
-                    SubscriptionsSort.A_Z to "A–Z",
-                    SubscriptionsSort.CUSTOM to "Custom"
-                )
-                options.forEachIndexed { idx, (value, label) ->
-                    SegmentedButton(
-                        selected = sort == value,
-                        onClick = { onSortChange(value) },
-                        shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
-                    ) { Text(label) }
-                }
+            val sortOptions = listOf(
+                SubscriptionsSort.RECENTLY_ADDED to "New episodes",
+                SubscriptionsSort.A_Z to "A–Z",
+                SubscriptionsSort.CUSTOM to "Custom"
+            )
+            app.podiumpodcasts.podium.ui.component.common.ConnectedSingleChoiceGroup(
+                options = sortOptions,
+                selected = sortOptions.first { it.first == sort },
+                onSelect = { onSortChange(it.first) }
+            ) { (_, label) ->
+                Text(label, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
 
             Spacer(Modifier.height(16.dp))
             Text("Badges", style = Typography.labelLarge, modifier = Modifier.semantics { heading() })
             Spacer(Modifier.height(8.dp))
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                val options = listOf(
-                    SubscriptionsBadgeMode.UNPLAYED_COUNT to "Count",
-                    SubscriptionsBadgeMode.LATEST_ONLY to "Dot",
-                    SubscriptionsBadgeMode.OFF to "Off"
-                )
-                options.forEachIndexed { idx, (value, label) ->
-                    SegmentedButton(
-                        selected = badgeMode == value,
-                        onClick = { onBadgeModeChange(value) },
-                        shape = SegmentedButtonDefaults.itemShape(index = idx, count = options.size)
-                    ) { Text(label) }
-                }
+            val badgeOptions = listOf(
+                SubscriptionsBadgeMode.UNPLAYED_COUNT to "Count",
+                SubscriptionsBadgeMode.LATEST_ONLY to "Dot",
+                SubscriptionsBadgeMode.OFF to "Off"
+            )
+            app.podiumpodcasts.podium.ui.component.common.ConnectedSingleChoiceGroup(
+                options = badgeOptions,
+                selected = badgeOptions.first { it.first == badgeMode },
+                onSelect = { onBadgeModeChange(it.first) }
+            ) { (_, label) ->
+                Text(label, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
 
+            val gridHaptic = androidx.compose.ui.platform.LocalHapticFeedback.current
             if (layout != SubscriptionsLayout.LIST) {
                 Spacer(Modifier.height(16.dp))
                 Row(
@@ -123,7 +118,13 @@ fun PodcastGridOptionsSheet(
                     Text("Reorder by dragging", style = Typography.bodyLarge)
                     Switch(
                         checked = reorderMode,
-                        onCheckedChange = onToggleReorderMode
+                        onCheckedChange = { checked ->
+                            gridHaptic.performHapticFeedback(
+                                if (checked) androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOn
+                                else androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOff
+                            )
+                            onToggleReorderMode(checked)
+                        }
                     )
                 }
             }
@@ -138,7 +139,13 @@ fun PodcastGridOptionsSheet(
                     Text("Show titles in grid", style = Typography.bodyLarge)
                     Switch(
                         checked = showGridTitles,
-                        onCheckedChange = onShowGridTitlesChange
+                        onCheckedChange = { checked ->
+                            gridHaptic.performHapticFeedback(
+                                if (checked) androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOn
+                                else androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOff
+                            )
+                            onShowGridTitlesChange(checked)
+                        }
                     )
                 }
             }

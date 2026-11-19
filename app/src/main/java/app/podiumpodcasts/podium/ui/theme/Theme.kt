@@ -192,8 +192,7 @@ fun PodiumTheme(
 
     CompositionLocalProvider(
         LocalDarkTheme provides darkTheme,
-        LocalDarkThemeStyle provides darkThemeStyle,
-        androidx.compose.foundation.LocalOverscrollFactory provides null
+        LocalDarkThemeStyle provides darkThemeStyle
     ) {
         MaterialExpressiveTheme(
             colorScheme = colorScheme,

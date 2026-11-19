@@ -179,6 +179,27 @@ class PlayerHelpersTest {
         assertEquals(0L, resolveWordSeekMs(Word(0.0, 0.3, "first"), lineStartMs = 0L))
     }
 
+    @Test
+    fun `isUndoValid expires after 8s playback, manual seek, or episode change`() {
+        val pending = app.podiumpodcasts.podium.background.HushCastEngineBridge.PendingUndoAdSkip(
+            episodeId = "ep1",
+            event = app.hushcast.automute.dsp.AdSkipEvent(
+                adWindow = AdWindow(startMs = 60_000L, endMs = 120_000L, confidence = 0.9f),
+                jumpedFromMs = 60_000L,
+                jumpedToMs = 120_000L
+            )
+        )
+        // Inside window (e.g. just skipped or paused at 120s / 125s)
+        org.junit.Assert.assertTrue(app.podiumpodcasts.podium.background.HushCastEngineBridge.isUndoValid(pending, "ep1", 120_000L))
+        org.junit.Assert.assertTrue(app.podiumpodcasts.podium.background.HushCastEngineBridge.isUndoValid(pending, "ep1", 128_000L))
+        // Past 8s
+        org.junit.Assert.assertFalse(app.podiumpodcasts.podium.background.HushCastEngineBridge.isUndoValid(pending, "ep1", 128_001L))
+        // Sought back before jump
+        org.junit.Assert.assertFalse(app.podiumpodcasts.podium.background.HushCastEngineBridge.isUndoValid(pending, "ep1", 118_999L))
+        // Different episode at same position
+        org.junit.Assert.assertFalse(app.podiumpodcasts.podium.background.HushCastEngineBridge.isUndoValid(pending, "ep2", 120_000L))
+    }
+
     private fun segment(id: Long, start: Long, end: Long, enabled: Boolean = true) = MuteSegmentEntity(
         id = id,
         fileSha256 = "sha",

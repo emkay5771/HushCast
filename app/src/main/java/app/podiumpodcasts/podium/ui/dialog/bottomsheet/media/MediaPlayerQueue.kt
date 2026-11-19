@@ -337,16 +337,27 @@ fun MediaPlayerQueueBottomSheet(
                                 }
                             )
 
+                            LaunchedEffect(dismissState.targetValue) {
+                                if (dismissState.targetValue != SwipeToDismissBoxValue.Settled) {
+                                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.GestureThresholdActivate)
+                                }
+                            }
+
                             SwipeToDismissBox(
                                 state = dismissState,
                                 backgroundContent = {
+                                    val direction = dismissState.dismissDirection
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
                                             .clip(RoundedCornerShape(16.dp))
                                             .background(MaterialTheme.colorScheme.errorContainer)
                                             .padding(horizontal = 20.dp),
-                                        contentAlignment = Alignment.CenterEnd
+                                        contentAlignment = if (direction == SwipeToDismissBoxValue.StartToEnd) {
+                                            Alignment.CenterStart
+                                        } else {
+                                            Alignment.CenterEnd
+                                        }
                                     ) {
                                         Icon(
                                             imageVector = Icons.Rounded.Delete,
@@ -358,7 +369,11 @@ fun MediaPlayerQueueBottomSheet(
                             ) {
                                 MediaItemListItem(
                                     modifier = Modifier
-                                        .animateItem()
+                                        .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+)
                                         .longPressDraggableHandle(
                                             onDragStarted = {
                                                 haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.GestureThresholdActivate)

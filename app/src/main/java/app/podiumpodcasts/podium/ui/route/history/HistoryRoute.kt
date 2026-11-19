@@ -205,7 +205,11 @@ fun LazyListScope.pagerSection(
                 Modifier
                     .padding(12.dp)
                     .padding(top = 16.dp)
-                    .animateItem()
+                    .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+)
             ) {
                 Text(
                     text = stringResource(label),
@@ -225,7 +229,11 @@ fun LazyListScope.pagerSection(
 
             SwipeableItem(
                 scope = scope,
-                modifier = Modifier.animateItem(),
+                modifier = Modifier.animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
                 snackbarHostState = vm.snackbarHostState,
                 shape = app.podiumpodcasts.podium.ui.component.model.episode.episodeRowShape(it, pager.itemCount),
                 endAction = SwipeableItemActions.DeleteAction(label = "Remove from history") {

@@ -203,100 +203,136 @@ fun MediaPlayerSleepTimerBottomSheet(
                 }
             }
 
-            Spacer(Modifier.height(8.dp))
-            HorizontalDivider()
+            Spacer(Modifier.height(12.dp))
 
-            listOf(
-                15 to "15 minutes",
-                30 to "30 minutes",
-                60 to "1 hour"
-            ).forEach { (mins, label) ->
-                val key = "${mins}m"
-                val isSelected = isSleepTimerEnabled && vm.sleepTimerPresetKey == key
-                ListItem(
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    headlineContent = { Text(label) },
-                    trailingContent = if (isSelected) {
-                        {
-                            Icon(
-                                androidx.compose.material.icons.Icons.Rounded.Check,
-                                contentDescription = "Active",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    } else null,
-                    modifier = Modifier.clickable {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        vm.setSleepTimer(System.currentTimeMillis() + mins * 60_000L, presetKey = key)
-                        close()
-                    }
-                )
-            }
-
-            if (currentOrNextChapterEndMs != null && endOfChapterWallMs != null) {
-                val isSelected = isSleepTimerEnabled && vm.sleepTimerPresetKey == "END_OF_CHAPTER"
-                ListItem(
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    headlineContent = {
-                        Text("End of chapter · ${formatTimerDuration(endOfChapterWallMs)}")
-                    },
-                    trailingContent = if (isSelected) {
-                        {
-                            Icon(
-                                androidx.compose.material.icons.Icons.Rounded.Check,
-                                contentDescription = "Active",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    } else null,
-                    modifier = Modifier.clickable {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        vm.setSleepTimerEndOfChapter(currentOrNextChapterEndMs, endOfChapterWallMs)
-                        close()
-                    }
-                )
-            }
-
-            if (endOfEpisodeWallMs != null) {
-                val isSelected = isSleepTimerEnabled && vm.sleepTimerPresetKey == "END_OF_EPISODE"
-                ListItem(
-                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                    headlineContent = {
-                        Text("End of episode · ${formatTimerDuration(endOfEpisodeWallMs)}")
-                    },
-                    trailingContent = if (isSelected) {
-                        {
-                            Icon(
-                                androidx.compose.material.icons.Icons.Rounded.Check,
-                                contentDescription = "Active",
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    } else null,
-                    modifier = Modifier.clickable {
-                        haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                        vm.setSleepTimerEndOfEpisode(endOfEpisodeWallMs)
-                        close()
-                    }
-                )
-            }
-
-            ListItem(
-                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                headlineContent = { Text("Custom") },
-                trailingContent = {
-                    if (showCustom) {
-                        Text(
-                            text = "${customMinutes.roundToInt()} min",
-                            color = MaterialTheme.colorScheme.primary,
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    }
-                },
-                modifier = Modifier.clickable { showCustom = !showCustom }
+            val hasEndOfChapter = currentOrNextChapterEndMs != null && endOfChapterWallMs != null
+            val hasEndOfEpisode = endOfEpisodeWallMs != null
+            val totalRows = 3 + (if (hasEndOfChapter) 1 else 0) + (if (hasEndOfEpisode) 1 else 0) + 1
+            val itemColors = ListItemDefaults.segmentedColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
             )
+            var rowIdx = 0
 
-            AnimatedVisibility(visible = showCustom) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
+            ) {
+                listOf(
+                    15 to "15 minutes",
+                    30 to "30 minutes",
+                    60 to "1 hour"
+                ).forEach { (mins, label) ->
+                    val idx = rowIdx++
+                    val key = "${mins}m"
+                    val isSelected = isSleepTimerEnabled && vm.sleepTimerPresetKey == key
+                    androidx.compose.material3.SegmentedListItem(
+                        selected = isSelected,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            vm.setSleepTimer(System.currentTimeMillis() + mins * 60_000L, presetKey = key)
+                            close()
+                        },
+                        shapes = ListItemDefaults.segmentedShapes(index = idx, count = totalRows),
+                        colors = itemColors,
+                        trailingContent = if (isSelected) {
+                            {
+                                Icon(
+                                    androidx.compose.material.icons.Icons.Rounded.Check,
+                                    contentDescription = "Active",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        } else null,
+                        content = { Text(label) }
+                    )
+                }
+
+                if (hasEndOfChapter) {
+                    val idx = rowIdx++
+                    val isSelected = isSleepTimerEnabled && vm.sleepTimerPresetKey == "END_OF_CHAPTER"
+                    androidx.compose.material3.SegmentedListItem(
+                        selected = isSelected,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            vm.setSleepTimerEndOfChapter(currentOrNextChapterEndMs!!, endOfChapterWallMs!!)
+                            close()
+                        },
+                        shapes = ListItemDefaults.segmentedShapes(index = idx, count = totalRows),
+                        colors = itemColors,
+                        trailingContent = if (isSelected) {
+                            {
+                                Icon(
+                                    androidx.compose.material.icons.Icons.Rounded.Check,
+                                    contentDescription = "Active",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        } else null,
+                        content = {
+                            Text("End of chapter · ${formatTimerDuration(endOfChapterWallMs!!)}")
+                        }
+                    )
+                }
+
+                if (hasEndOfEpisode) {
+                    val idx = rowIdx++
+                    val isSelected = isSleepTimerEnabled && vm.sleepTimerPresetKey == "END_OF_EPISODE"
+                    androidx.compose.material3.SegmentedListItem(
+                        selected = isSelected,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                            vm.setSleepTimerEndOfEpisode(endOfEpisodeWallMs!!)
+                            close()
+                        },
+                        shapes = ListItemDefaults.segmentedShapes(index = idx, count = totalRows),
+                        colors = itemColors,
+                        trailingContent = if (isSelected) {
+                            {
+                                Icon(
+                                    androidx.compose.material.icons.Icons.Rounded.Check,
+                                    contentDescription = "Active",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        } else null,
+                        content = {
+                            Text("End of episode · ${formatTimerDuration(endOfEpisodeWallMs!!)}")
+                        }
+                    )
+                }
+
+                val customIdx = rowIdx++
+                androidx.compose.material3.SegmentedListItem(
+                    selected = showCustom,
+                    onClick = { showCustom = !showCustom },
+                    shapes = ListItemDefaults.segmentedShapes(index = customIdx, count = totalRows),
+                    colors = itemColors,
+                    trailingContent = {
+                        if (showCustom) {
+                            Text(
+                                text = "${customMinutes.roundToInt()} min",
+                                color = MaterialTheme.colorScheme.primary,
+                                style = MaterialTheme.typography.labelLarge
+                            )
+                        }
+                    },
+                    content = { Text("Custom") }
+                )
+            }
+
+            AnimatedVisibility(
+                visible = showCustom,
+                enter = androidx.compose.animation.expandVertically(
+                    animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                ) + androidx.compose.animation.fadeIn(
+                    animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
+                ),
+                exit = androidx.compose.animation.shrinkVertically(
+                    animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()
+                ) + androidx.compose.animation.fadeOut(
+                    animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
+                )
+            ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -304,7 +340,13 @@ fun MediaPlayerSleepTimerBottomSheet(
                 ) {
                     Slider(
                         value = customMinutes,
-                        onValueChange = { customMinutes = it.roundToInt().toFloat() },
+                        onValueChange = { raw ->
+                            val nextMin = raw.roundToInt()
+                            if (nextMin != customMinutes.roundToInt() && nextMin % 15 == 0) {
+                                haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                            }
+                            customMinutes = nextMin.toFloat()
+                        },
                         valueRange = 5f..120f,
                         steps = 22
                     )

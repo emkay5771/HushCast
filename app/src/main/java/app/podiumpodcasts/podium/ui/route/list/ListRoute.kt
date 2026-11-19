@@ -279,7 +279,11 @@ fun ListRoute(
                             snackbarHostState = snackbarHostState,
 
                             modifier = Modifier
-                                .animateItem()
+                                .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+)
                                 .longPressDraggableHandle(),
                             shape = episodeRowShape(index, items.itemCount),
                             endAction = SwipeableItemActions.DeleteAction(label = "Remove from list") {

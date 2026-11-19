@@ -156,14 +156,18 @@ fun MediaPlayerSpeedBottomSheet(
 
             if (!origin.isNullOrBlank()) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .androidx.compose.foundation.selection.selectableGroup(),
                     horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)
                 ) {
                     ToggleButton(
                         checked = !perPodcastScope,
                         onCheckedChange = { if (it) chooseScope(podcast = false) },
                         shapes = ButtonGroupDefaults.connectedLeadingButtonShapes(),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .semantics { role = androidx.compose.ui.semantics.Role.RadioButton }
                     ) {
                         Text("All podcasts")
                     }
@@ -171,7 +175,9 @@ fun MediaPlayerSpeedBottomSheet(
                         checked = perPodcastScope,
                         onCheckedChange = { if (it) chooseScope(podcast = true) },
                         shapes = ButtonGroupDefaults.connectedTrailingButtonShapes(),
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .semantics { role = androidx.compose.ui.semantics.Role.RadioButton }
                     ) {
                         Text("This podcast")
                     }
@@ -277,6 +283,7 @@ fun MediaPlayerSpeedBottomSheet(
                         value = trimSilence,
                         role = Role.Switch,
                         onValueChange = { enabled ->
+                            haptic.performHapticFeedback(if (enabled) HapticFeedbackType.ToggleOn else HapticFeedbackType.ToggleOff)
                             scope.launch { settingsRepository.behavior.setTrimSilence(enabled) }
                         }
                     )
@@ -319,6 +326,7 @@ fun MediaPlayerSpeedBottomSheet(
                         value = volumeBoost,
                         role = Role.Switch,
                         onValueChange = { enabled ->
+                            haptic.performHapticFeedback(if (enabled) HapticFeedbackType.ToggleOn else HapticFeedbackType.ToggleOff)
                             scope.launch { settingsRepository.behavior.setVolumeBoost(enabled) }
                         }
                     )

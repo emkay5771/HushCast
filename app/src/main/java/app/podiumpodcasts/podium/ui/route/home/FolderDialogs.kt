@@ -252,7 +252,11 @@ fun FolderBottomSheet(
                         val bundle = ordered[idx]
                         val title = bundle.podcast.fetchTitle()
                         ReorderableItem(reorderState, key = bundle.podcast.origin) { isDragging ->
-                            val elevation by animateDpAsState(if (isDragging) 6.dp else 0.dp, label = "folderPodcastDrag")
+                            val elevation by animateDpAsState(
+                        targetValue = if (isDragging) 6.dp else 0.dp,
+                        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+                        label = "folderPodcastDrag"
+                    )
                             androidx.compose.material3.Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -599,7 +603,11 @@ fun OrganizeFoldersDialog(
                         items(ordered.size, key = { ordered[it].id }) { idx ->
                             val folder = ordered[idx]
                             ReorderableItem(reorderState, key = folder.id) { isDragging ->
-                                val elevation by animateDpAsState(if (isDragging) 6.dp else 0.dp, label = "folderDrag")
+                                val elevation by animateDpAsState(
+                            targetValue = if (isDragging) 6.dp else 0.dp,
+                            animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+                            label = "folderDrag"
+                        )
                                 androidx.compose.material3.Surface(
                                     shape = RoundedCornerShape(12.dp),
                                     color = if (isDragging) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent,

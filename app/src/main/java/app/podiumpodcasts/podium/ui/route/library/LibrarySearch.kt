@@ -330,7 +330,11 @@ private fun SearchContent(
                                         key = "PODCASTS"
                                     ) {
                                         LazyRow(
-                                            Modifier.animateItem(),
+                                            Modifier.animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
                                             contentPadding = PaddingValues(
                                                 start = 16.dp,
                                                 end = 16.dp
@@ -363,7 +367,11 @@ private fun SearchContent(
                                         PodcastEpisodeListItem(
                                             modifier = Modifier
                                                 .padding(start = 16.dp, end = 16.dp)
-                                                .animateItem(),
+                                                .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
 
                                             bundle = bundle,
 

@@ -186,7 +186,11 @@ fun SettingsSynchronizationPane(
                     settingsGroup(key = "sync", spaceAbove = 32.dp) {
                         row { pos ->
                             SettingsListItem(
-                                modifier = Modifier.animateItem(),
+                                modifier = Modifier.animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
 
                                 label = stringResource(R.string.route_settings_synchronization_synchronize_now),
 
@@ -202,7 +206,11 @@ fun SettingsSynchronizationPane(
                         }
                         row { pos ->
                             SettingsListItem(
-                                modifier = Modifier.animateItem(),
+                                modifier = Modifier.animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
 
                                 label = stringResource(R.string.route_settings_synchronization_full_synchronize),
 
@@ -229,7 +237,11 @@ fun SettingsSynchronizationPane(
                             }
 
                             SettingsListItem(
-                                modifier = Modifier.animateItem(),
+                                modifier = Modifier.animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
                                 label = "Sync interval",
                                 description = intervalLabel,
                                 index = pos.index,
@@ -297,13 +309,21 @@ fun SettingsSynchronizationPane(
                         Spacer(
                             Modifier
                                 .height(32.dp)
-                                .animateItem()
+                                .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+)
                         )
                     }
 
                     item {
                         PrimaryTabRow(
-                            modifier = Modifier.animateItem(),
+                            modifier = Modifier.animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
                             selectedTabIndex = when(displayType.value) {
                                 "gpodder" -> 0
                                 "nextcloud" -> 1
@@ -344,7 +364,11 @@ fun SettingsSynchronizationPane(
                         Spacer(
                             Modifier
                                 .height(16.dp)
-                                .animateItem()
+                                .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+)
                         )
                     }
 
@@ -385,7 +409,11 @@ fun SettingsSynchronizationPane(
                             OutlinedTextField(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .animateItem(),
+                                    .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
 
                                 leadingIcon = {
                                     Icon(
@@ -423,7 +451,11 @@ fun SettingsSynchronizationPane(
                             Spacer(
                                 Modifier
                                     .height(16.dp)
-                                    .animateItem()
+                                    .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+)
                             )
                         }
 
@@ -432,7 +464,11 @@ fun SettingsSynchronizationPane(
                                 OutlinedTextField(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .animateItem(),
+                                        .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
 
                                     leadingIcon = {
                                         Icon(
@@ -461,7 +497,11 @@ fun SettingsSynchronizationPane(
                                 OutlinedTextField(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .animateItem(),
+                                        .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
 
                                     leadingIcon = {
                                         Icon(

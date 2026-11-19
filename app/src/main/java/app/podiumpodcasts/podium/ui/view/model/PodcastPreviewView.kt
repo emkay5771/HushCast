@@ -253,7 +253,11 @@ fun PodcastPreviewView(
                                         Surface(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .animateItem(),
+                                                .animateItem(
+    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+),
                                             color = MaterialTheme.colorScheme.surfaceContainer
                                         ) {
                                             Column(

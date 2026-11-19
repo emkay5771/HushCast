@@ -136,7 +136,7 @@ fun PlayerSeekBar(
 
     val trackHeight by animateDpAsState(
         targetValue = if (isDragging) 16.dp else if (compact) 6.dp else 12.dp,
-        animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
         label = "seekTrackHeight"
     )
 
@@ -165,8 +165,8 @@ fun PlayerSeekBar(
         // Precise scrub floating pill with zoomed-in ±90s mini timeline
         AnimatedVisibility(
             visible = isDragging && durationMs > 0L,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            enter = fadeIn(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
+            exit = fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
             // R8: the card floats above the bar with no layout height, so the page above doesn't
             // jump and the chapter row isn't clipped while scrubbing.
             modifier = Modifier.layout { measurable, constraints ->

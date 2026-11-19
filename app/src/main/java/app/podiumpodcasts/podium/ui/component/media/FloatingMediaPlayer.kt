@@ -133,8 +133,12 @@ fun FloatingMediaPlayer(
         ) {
             AnimatedVisibility(
                 visible = showMediaPlayer.value && !hide,
-                enter = fadeIn() + scaleIn(initialScale = 0.94f) + slideInVertically { it },
-                exit = fadeOut() + scaleOut(targetScale = 0.94f) + slideOutVertically { it }
+                enter = fadeIn(animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec()) +
+                    scaleIn(initialScale = 0.94f, animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()) +
+                    slideInVertically(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()) { it },
+                exit = fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()) +
+                    scaleOut(targetScale = 0.94f, animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()) +
+                    slideOutVertically(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()) { it }
             ) {
                 app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.PlayerArtworkTheme(
                     enable = enableArtworkColors.value,
@@ -150,12 +154,18 @@ fun FloatingMediaPlayer(
                             .pointerInput(Unit) {
                                 val thresholdPx = 40.dp.toPx()
                                 var totalDrag = 0f
+                                var triggered = false
                                 detectVerticalDragGestures(
-                                    onDragStart = { totalDrag = 0f },
+                                    onDragStart = {
+                                        totalDrag = 0f
+                                        triggered = false
+                                    },
                                     onVerticalDrag = { _, dragAmount ->
+                                        if (triggered) return@detectVerticalDragGestures
                                         totalDrag += dragAmount
-                                        if(totalDrag < -thresholdPx) {
-                                            totalDrag = 0f
+                                        if (totalDrag < -thresholdPx) {
+                                            triggered = true
+                                            haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
                                             onClick()
                                         }
                                     }
@@ -178,15 +188,12 @@ fun FloatingMediaPlayer(
                             ) {
                                 val artworkScale by animateFloatAsState(
                                     targetValue = if (vm.isPlaying) 1f else 0.93f,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessMediumLow
-                                    ),
+                                    animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
                                     label = "artworkScale"
                                 )
                                 val artworkCorner by animateDpAsState(
                                     targetValue = if (vm.isPlaying) 12.dp else 9.dp,
-                                    animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                    animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
                                     label = "artworkCorner"
                                 )
                                 val isActivelyBuffering =
@@ -207,8 +214,12 @@ fun FloatingMediaPlayer(
                                     AnimatedContent(
                                         targetState = vm.mediaMetadata,
                                         transitionSpec = {
-                                            (fadeIn() + scaleIn(initialScale = 0.9f))
-                                                .togetherWith(fadeOut() + scaleOut(targetScale = 0.9f))
+                                            (fadeIn(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()) +
+                                                scaleIn(initialScale = 0.9f, animationSpec = MaterialTheme.motionScheme.fastSpatialSpec()))
+                                                .togetherWith(
+                                                    fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()) +
+                                                        scaleOut(targetScale = 0.9f, animationSpec = MaterialTheme.motionScheme.fastSpatialSpec())
+                                                )
                                         },
                                         label = "artworkMetadata"
                                     ) { mediaMetadata ->
@@ -265,33 +276,14 @@ fun FloatingMediaPlayer(
                                     horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    // Skip Back — M3E tonal squircle button with press bounce & rotational kick
-                                    val backInteraction = remember { MutableInteractionSource() }
-                                    val backPressed by backInteraction.collectIsPressedAsState()
-                                    val backScale by animateFloatAsState(
-                                        targetValue = if (backPressed) 0.88f else 1f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMedium
-                                        ),
-                                        label = "backScale"
-                                    )
-                                    val backCorner by animateDpAsState(
-                                        targetValue = if (backPressed) 11.dp else 20.dp,
-                                        animationSpec = spring(stiffness = Spring.StiffnessMedium),
-                                        label = "backCorner"
-                                    )
+                                    val spinSpec = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
+                                    // Skip Back — M3E tonal icon button with built-in shape morph & rotational kick
                                     val backSpin = remember { Animatable(0f) }
                                     FilledTonalIconButton(
                                         modifier = Modifier
                                             .size(40.dp)
-                                            .graphicsLayer {
-                                                scaleX = backScale
-                                                scaleY = backScale
-                                                rotationZ = backSpin.value
-                                            },
-                                        shape = RoundedCornerShape(backCorner),
-                                        interactionSource = backInteraction,
+                                            .graphicsLayer { rotationZ = backSpin.value },
+                                        shapes = IconButtonDefaults.shapes(),
                                         colors = IconButtonDefaults.filledTonalIconButtonColors(
                                             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
                                         ),
@@ -299,13 +291,7 @@ fun FloatingMediaPlayer(
                                             vm.seekBack()
                                             scope.launch {
                                                 backSpin.snapTo(-24f)
-                                                backSpin.animateTo(
-                                                    0f,
-                                                    animationSpec = spring(
-                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                        stiffness = Spring.StiffnessMedium
-                                                    )
-                                                )
+                                                backSpin.animateTo(0f, animationSpec = spinSpec)
                                             }
                                         }
                                     ) {
@@ -321,44 +307,16 @@ fun FloatingMediaPlayer(
                                         )
                                     }
 
-                                    // Play/Pause — M3E shape-morphing FilledIconToggleButton (pill -> squircle)
-                                    val playInteraction = remember { MutableInteractionSource() }
-                                    val playPressed by playInteraction.collectIsPressedAsState()
-                                    val playScale by animateFloatAsState(
-                                        targetValue = if (playPressed) 0.88f else 1f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMedium
-                                        ),
-                                        label = "playScale"
-                                    )
-                                    val playCorner by animateDpAsState(
-                                        targetValue = when {
-                                            playPressed -> 11.dp
-                                            vm.isPlaying -> 14.dp
-                                            else -> 24.dp
-                                        },
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMediumLow
-                                        ),
-                                        label = "playCorner"
-                                    )
+                                    // Play/Pause — M3E shape-morphing FilledIconToggleButton
                                     FilledIconToggleButton(
-                                        modifier = Modifier
-                                            .size(width = 52.dp, height = 46.dp)
-                                            .graphicsLayer {
-                                                scaleX = playScale
-                                                scaleY = playScale
-                                            },
-                                        shape = RoundedCornerShape(playCorner),
+                                        modifier = Modifier.size(width = 52.dp, height = 46.dp),
+                                        shapes = IconButtonDefaults.toggleableShapes(),
                                         colors = IconButtonDefaults.filledIconToggleButtonColors(
                                             containerColor = MaterialTheme.colorScheme.primary,
                                             contentColor = MaterialTheme.colorScheme.onPrimary,
                                             checkedContainerColor = MaterialTheme.colorScheme.primary,
                                             checkedContentColor = MaterialTheme.colorScheme.onPrimary
                                         ),
-                                        interactionSource = playInteraction,
                                         checked = vm.isPlaying,
                                         onCheckedChange = {
                                             if(vm.isPlaying) {
@@ -371,8 +329,12 @@ fun FloatingMediaPlayer(
                                         AnimatedContent(
                                             targetState = vm.isPlaying,
                                             transitionSpec = {
-                                                (scaleIn(initialScale = 0.65f) + fadeIn())
-                                                    .togetherWith(scaleOut(targetScale = 0.65f) + fadeOut())
+                                                (scaleIn(initialScale = 0.65f, animationSpec = MaterialTheme.motionScheme.fastSpatialSpec()) +
+                                                    fadeIn(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()))
+                                                    .togetherWith(
+                                                        scaleOut(targetScale = 0.65f, animationSpec = MaterialTheme.motionScheme.fastSpatialSpec()) +
+                                                            fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec())
+                                                    )
                                             },
                                             label = "playPauseIcon"
                                         ) { playing ->
@@ -387,33 +349,13 @@ fun FloatingMediaPlayer(
                                         }
                                     }
 
-                                    // Skip Forward — M3E tonal squircle button with press bounce & rotational kick
-                                    val fwdInteraction = remember { MutableInteractionSource() }
-                                    val fwdPressed by fwdInteraction.collectIsPressedAsState()
-                                    val fwdScale by animateFloatAsState(
-                                        targetValue = if (fwdPressed) 0.88f else 1f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMedium
-                                        ),
-                                        label = "fwdScale"
-                                    )
-                                    val fwdCorner by animateDpAsState(
-                                        targetValue = if (fwdPressed) 11.dp else 20.dp,
-                                        animationSpec = spring(stiffness = Spring.StiffnessMedium),
-                                        label = "fwdCorner"
-                                    )
+                                    // Skip Forward — M3E tonal icon button with built-in shape morph & rotational kick
                                     val fwdSpin = remember { Animatable(0f) }
                                     FilledTonalIconButton(
                                         modifier = Modifier
                                             .size(40.dp)
-                                            .graphicsLayer {
-                                                scaleX = fwdScale
-                                                scaleY = fwdScale
-                                                rotationZ = fwdSpin.value
-                                            },
-                                        shape = RoundedCornerShape(fwdCorner),
-                                        interactionSource = fwdInteraction,
+                                            .graphicsLayer { rotationZ = fwdSpin.value },
+                                        shapes = IconButtonDefaults.shapes(),
                                         colors = IconButtonDefaults.filledTonalIconButtonColors(
                                             containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
                                         ),
@@ -421,13 +363,7 @@ fun FloatingMediaPlayer(
                                             vm.seekForward()
                                             scope.launch {
                                                 fwdSpin.snapTo(24f)
-                                                fwdSpin.animateTo(
-                                                    0f,
-                                                    animationSpec = spring(
-                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                        stiffness = Spring.StiffnessMedium
-                                                    )
-                                                )
+                                                fwdSpin.animateTo(0f, animationSpec = spinSpec)
                                             }
                                         }
                                     ) {
@@ -450,10 +386,7 @@ fun FloatingMediaPlayer(
                                     val queuePressed by queueInteraction.collectIsPressedAsState()
                                     val queueScale by animateFloatAsState(
                                         targetValue = if (queuePressed) 0.90f else 1f,
-                                        animationSpec = spring(
-                                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                                            stiffness = Spring.StiffnessMedium
-                                        ),
+                                        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
                                         label = "queueScale"
                                     )
                                     androidx.compose.material3.Surface(

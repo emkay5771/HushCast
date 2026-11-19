@@ -389,6 +389,7 @@ fun Main(
                     .then(if (isNavHidden) Modifier.navigationBarsPadding() else Modifier)
                     .padding(bottom = 8.dp, end = 16.dp)
             ) {
+                val miniHeightSpec = MaterialTheme.motionScheme.defaultSpatialSpec<Float>()
                 FloatingMediaPlayer(
                     hide = vm.hideFloatingMediaPlayer.value,
                     showMediaPlayerBottomSheet = vm.showMediaPlayerBottomSheet.value,
@@ -397,7 +398,8 @@ fun Main(
 
                         scope.launch {
                             floatingMediaPlayerHeightAnimation.animateTo(
-                                if (it) 1f else 0f
+                                targetValue = if (it) 1f else 0f,
+                                animationSpec = miniHeightSpec
                             )
                         }
                     },
