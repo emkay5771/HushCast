@@ -95,6 +95,7 @@ fun PlayerHushCastSheet(
     settingsRepository: SettingsRepository,
     devMode: Boolean,
     onProcessNow: () -> Unit,
+    onProcessStage: (String) -> Unit = {},
     onCancelProcessing: () -> Unit,
     onDismiss: () -> Unit
 ) {

@@ -1108,7 +1108,12 @@ fun MediaPlayerBottomSheet(
                           }
                       ) {
                         if (isPlayingTab) {
-                          Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                          Column(
+                              horizontalAlignment = Alignment.CenterHorizontally,
+                              modifier = Modifier.swipeUpForUpNext(enabled = !showTranscriptOverlay) {
+                                  showQueueBottomSheet = true
+                              }
+                          ) {
                             PlayerActionToolbar(
                                 analysisPercent = if (shieldBadge == ReadinessBadge.ANALYZING) {
                                     (analysisStatus?.progressPercent ?: 0).coerceIn(0, 100)
@@ -1116,7 +1121,6 @@ fun MediaPlayerBottomSheet(
                                     null
                                 },
                                 shortcutActions = shortcutActions,
-                                overflowActions = overflowActions,
                                 isProcessed = isProcessed,
                                 protectionActive = protectionActive,
                                 speed = vm.speed,
@@ -1124,13 +1128,8 @@ fun MediaPlayerBottomSheet(
                                 isFavorite = isFavorite,
                                 isDownloaded = isDownloaded,
                                 transcriptState = transcriptState,
-                                showMoreMenu = showMoreMenu,
                                 onToggleMoreMenu = { showMoreMenu = it },
-                                onPerformAction = ::performToolbarAction,
-                                onOpenCustomize = {
-                                    showMoreMenu = false
-                                    showCustomizeSheet = true
-                                }
+                                onPerformAction = ::performToolbarAction
                             )
                             UpNextGrip(onClick = { showQueueBottomSheet = true })
                           }
@@ -1204,6 +1203,18 @@ fun MediaPlayerBottomSheet(
     }
 
     // Bottom sheets & dialogs
+    if (showMoreMenu) {
+        PlayerMoreActionsSheet(
+            overflowActions = overflowActions,
+            isProcessed = isProcessed,
+            protectionActive = protectionActive,
+            isFavorite = isFavorite,
+            isDownloaded = isDownloaded,
+            onPerformAction = ::performToolbarAction,
+            onOpenCustomize = { showCustomizeSheet = true },
+            onDismiss = { showMoreMenu = false }
+        )
+    }
     if (showSleepTimerBottomSheet) {
         MediaPlayerSleepTimerBottomSheet { showSleepTimerBottomSheet = false }
     }
@@ -1246,6 +1257,18 @@ fun MediaPlayerBottomSheet(
             onProcessNow = {
                 showHushCastSheet = false
                 triggerAnalyzeNow()
+            },
+            onProcessStage = { stage ->
+                showHushCastSheet = false
+                scope.launch {
+                    app.podiumpodcasts.podium.ui.hushcast.HushCastAnalyze.start(
+                        context = context,
+                        db = appDb,
+                        episodeId = episodeId,
+                        actionMode = HushCastEngineBridge.defaultActionMode,
+                        reprocessStage = stage
+                    )
+                }
             },
             onCancelProcessing = {
                 scope.launch { app.podiumpodcasts.podium.ui.hushcast.HushCastAnalyze.cancel(context, episodeId) }
