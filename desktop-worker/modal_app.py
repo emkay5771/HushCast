@@ -231,7 +231,7 @@ _gpu_base_image = (
     # libcuda.so.1 at runtime, since the build host has only the driver stub.
     .apt_install("ninja-build")
     .run_commands(
-        'CMAKE_ARGS="$CMAKE_ARGS -DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF '
+        'CC=gcc CXX=g++ CMAKE_ARGS="$CMAKE_ARGS -DGGML_NATIVE=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF '
         '-DCMAKE_EXE_LINKER_FLAGS=-Wl,--allow-shlib-undefined" '
         f"pip install --no-cache-dir --no-binary llama-cpp-python llama-cpp-python=={LLAMA_CPP_PYTHON_VERSION}",
     )
