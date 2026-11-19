@@ -28,7 +28,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.CreateNewFolder
+import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.Folder
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Podcasts
@@ -54,7 +57,11 @@ import androidx.compose.material3.SegmentedListItem
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -108,6 +115,9 @@ fun HomeRoute(
 
     onClickDiscover: () -> Unit,
 
+    /** I14: opens the library search. */
+    onClickSearch: () -> Unit = { },
+
     onClickPodcast: (origin: String) -> Unit,
     onClickEpisode: (episode: PodcastEpisodeModel) -> Unit
 ) {
@@ -119,7 +129,7 @@ fun HomeRoute(
     val subscriptionsVm = viewModel(
         viewModelStoreOwner = activity,
         key = "HOME_SUBSCRIPTIONS"
-    ) { SubscriptionsViewModel(db) }
+    ) { SubscriptionsViewModel(db, settingsRepository) }
     val playerVm = viewModel<MediaPlayerViewModel>(viewModelStoreOwner = activity)
 
     val rawSubscriptions by subscriptionsVm.subscriptionsState.collectAsStateWithLifecycle()
@@ -133,10 +143,12 @@ fun HomeRoute(
         }
     }
 
-    val layout by settingsRepository.appearance.subscriptionsLayout.collectAsStateWithLifecycle(SubscriptionsLayout.LARGE_GRID)
-    val sort by settingsRepository.appearance.subscriptionsSort.collectAsStateWithLifecycle(SubscriptionsSort.RECENTLY_ADDED)
-    val badgeMode by settingsRepository.appearance.subscriptionsBadgeMode.collectAsStateWithLifecycle(SubscriptionsBadgeMode.UNPLAYED_COUNT)
-    val showGridTitles by settingsRepository.appearance.showGridTitles.collectAsStateWithLifecycle(true)
+    // R9: read from the view model, which keeps them while you're on other screens.
+    val gridSettings by subscriptionsVm.gridSettings.collectAsStateWithLifecycle()
+    val layout = gridSettings?.layout ?: SubscriptionsLayout.LARGE_GRID
+    val sort = gridSettings?.sort ?: SubscriptionsSort.RECENTLY_ADDED
+    val badgeMode = gridSettings?.badgeMode ?: SubscriptionsBadgeMode.UNPLAYED_COUNT
+    val showGridTitles = gridSettings?.showTitles ?: true
     val gridOrgState by app.podiumpodcasts.podium.PodcastGridOrganization.state.collectAsStateWithLifecycle()
 
     var showOptionsSheet by remember { mutableStateOf(false) }
@@ -149,9 +161,13 @@ fun HomeRoute(
     var openFolderId by remember { mutableStateOf<String?>(null) }
     var moveToFolderTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
     var contextMenuTarget by remember { mutableStateOf<app.podiumpodcasts.podium.api.db.model.PodcastSubscriptionBundle?>(null) }
+    var markAllPlayedTarget by remember { mutableStateOf<app.podiumpodcasts.podium.api.db.model.PodcastSubscriptionBundle?>(null) }
+    var unsubscribeTarget by remember { mutableStateOf<app.podiumpodcasts.podium.api.db.model.PodcastSubscriptionBundle?>(null) }
+    var settingsTarget by remember { mutableStateOf<app.podiumpodcasts.podium.api.db.model.PodcastModel?>(null) }
     var expandedFolderIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var isRefreshing by remember { mutableStateOf(false) }
     val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
+    // Item 1: spins only while the update runs; offline and failed refreshes say so.
+    val refreshState = app.podiumpodcasts.podium.ui.component.common.rememberPodcastRefreshState(snackbarHostState)
 
     val sortedSubscriptions = remember(allSubscriptions, sort) {
         when (sort) {
@@ -205,6 +221,18 @@ fun HomeRoute(
     val gridState = subscriptionsVm.lazyGridState
     val listState = subscriptionsVm.lazyListState
 
+    if (showOrganizeFoldersDialog) {
+        // R10: the menu item set this flag, but the dialog was never shown.
+        OrganizeFoldersDialog(
+            folders = gridOrgState.folders,
+            onDismiss = { showOrganizeFoldersDialog = false },
+            onCreateNewFolder = {
+                showOrganizeFoldersDialog = false
+                showCreateFolderDialog = true
+            }
+        )
+    }
+
     if (showCreateFolderDialog) {
         CreateFolderDialog(
             allSubscriptions = allSubscriptions,
@@ -243,17 +271,24 @@ fun HomeRoute(
                     ) {
                         Text("Open podcast", modifier = Modifier.fillMaxWidth())
                     }
+                    // I15: the podcast's own settings, the same sheet as on its page.
                     androidx.compose.material3.TextButton(
                         onClick = {
                             contextMenuTarget = null
-                            scope.launch {
-                                db.podcastEpisodePlayStates().markAllPlayedForOrigin(target.podcast.origin)
-                                snackbarHostState.showSnackbar("Marked all episodes as listened")
-                            }
+                            settingsTarget = target.podcast
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Mark all as listened", modifier = Modifier.fillMaxWidth())
+                        Text("Settings", modifier = Modifier.fillMaxWidth())
+                    }
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            contextMenuTarget = null
+                            markAllPlayedTarget = target
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Mark all as played", modifier = Modifier.fillMaxWidth())
                     }
                     androidx.compose.material3.TextButton(
                         onClick = {
@@ -267,11 +302,7 @@ fun HomeRoute(
                     androidx.compose.material3.TextButton(
                         onClick = {
                             contextMenuTarget = null
-                            scope.launch {
-                                app.podiumpodcasts.podium.manager.SubscriptionManager(db)
-                                    .unsubscribe(target.podcast.origin)
-                                snackbarHostState.showSnackbar("Unsubscribed from ${target.podcast.fetchTitle()}")
-                            }
+                            unsubscribeTarget = target
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -288,6 +319,55 @@ fun HomeRoute(
                     Text("Close")
                 }
             }
+        )
+    }
+
+    // I12/I15: these used to act in one tap.  Both now ask first, with a count.
+    markAllPlayedTarget?.let { target ->
+        val title = target.podcast.fetchTitle()
+        val count = unplayedCounts[target.podcast.origin] ?: target.subscription.newEpisodes
+        HomeConfirmDialog(
+            title = "Mark all as played?",
+            text = markAllPlayedConfirmText(title, count),
+            confirmLabel = "Mark as played",
+            onDismiss = { markAllPlayedTarget = null },
+            onConfirm = {
+                markAllPlayedTarget = null
+                scope.launch {
+                    db.podcastEpisodePlayStates().markAllPlayedForOrigin(target.podcast.origin)
+                    snackbarHostState.showSnackbar(
+                        if (count > 0) "Marked $count ${pluralEpisodes(count)} as played"
+                        else "Marked all episodes as played"
+                    )
+                }
+            }
+        )
+    }
+
+    unsubscribeTarget?.let { target ->
+        val title = target.podcast.fetchTitle()
+        val count = unplayedCounts[target.podcast.origin] ?: target.subscription.newEpisodes
+        HomeConfirmDialog(
+            title = "Unsubscribe from $title?",
+            text = unsubscribeConfirmText(count),
+            confirmLabel = stringResource(R.string.common_action_unsubscribe),
+            destructive = true,
+            onDismiss = { unsubscribeTarget = null },
+            onConfirm = {
+                unsubscribeTarget = null
+                scope.launch {
+                    app.podiumpodcasts.podium.manager.SubscriptionManager(db)
+                        .unsubscribe(target.podcast.origin)
+                    snackbarHostState.showSnackbar("Unsubscribed from $title")
+                }
+            }
+        )
+    }
+
+    settingsTarget?.let { podcast ->
+        app.podiumpodcasts.podium.ui.dialog.bottomsheet.PodcastSettingsBottomSheet(
+            onDismiss = { settingsTarget = null },
+            podcast = podcast
         )
     }
 
@@ -345,14 +425,24 @@ fun HomeRoute(
         contentWindowInsets = WindowInsets.statusBars,
         snackbarHost = { app.podiumpodcasts.podium.ui.component.PodiumSnackbarHost(snackbarHostState) },
         topBar = {
-            CenterAlignedTopAppBar(
+            // I14: M3 Expressive's flexible top bar, centred like before; Search replaces the old
+            // folder button (folders live in the options sheet).
+            TopAppBar(
                 scrollBehavior = scrollBehavior,
+                titleHorizontalAlignment = Alignment.CenterHorizontally,
                 title = {
-                    Text(stringResource(R.string.app_name))
+                    Text(
+                        text = stringResource(R.string.app_name),
+                        modifier = Modifier.semantics { heading() }
+                    )
                 },
+                subtitle = { },
                 actions = {
+                    IconButton(onClick = onClickSearch) {
+                        Icon(Icons.Rounded.Search, contentDescription = "Search")
+                    }
                     IconButton(onClick = { showOptionsSheet = true }) {
-                        Icon(Icons.Rounded.Tune, contentDescription = "Podcasts options")
+                        Icon(Icons.Rounded.Tune, contentDescription = "Podcast options")
                     }
                     FilledIconButton(
                         shapes = IconButtonDefaults.shapes(),
@@ -388,7 +478,7 @@ fun HomeRoute(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "Drag & drop to reorder podcasts",
+                            "Drag to reorder podcasts",
                             style = Typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
@@ -442,29 +532,16 @@ fun HomeRoute(
                         }
                     }
                 )
-            } else if (allSubscriptions.isNotEmpty()) {
+            } else if (allSubscriptions.isNotEmpty() && gridSettings != null) {
                 val pullState = androidx.compose.material3.pulltorefresh.rememberPullToRefreshState()
-                val refreshWorkInfos by androidx.work.WorkManager.getInstance(context)
-                    .getWorkInfosForUniqueWorkFlow(
-                        app.podiumpodcasts.podium.background.worker.PeriodicPodcastUpdateWorker.INSTANT_UNIQUE_NAME
-                    )
-                    .collectAsState(initial = emptyList())
-                val isWorkRefreshing = refreshWorkInfos.any {
-                    it.state == androidx.work.WorkInfo.State.ENQUEUED ||
-                        it.state == androidx.work.WorkInfo.State.RUNNING
-                }
                 androidx.compose.material3.pulltorefresh.PullToRefreshBox(
-                    isRefreshing = isWorkRefreshing || isRefreshing,
+                    isRefreshing = refreshState.isRefreshing,
                     state = pullState,
-                    onRefresh = {
-                        if (!isWorkRefreshing && !isRefreshing) {
-                            app.podiumpodcasts.podium.background.worker.PeriodicPodcastUpdateWorker.enqueueNow(context)
-                        }
-                    },
+                    onRefresh = { refreshState.refresh() },
                     indicator = {
                         androidx.compose.material3.pulltorefresh.PullToRefreshDefaults.LoadingIndicator(
                             state = pullState,
-                            isRefreshing = isWorkRefreshing || isRefreshing,
+                            isRefreshing = refreshState.isRefreshing,
                             modifier = Modifier.align(Alignment.TopCenter)
                         )
                     },
@@ -492,7 +569,10 @@ fun HomeRoute(
                                             expandedFolderIds = if (isExpanded) expandedFolderIds - folder.id else expandedFolderIds + folder.id
                                         },
                                         shape = RoundedCornerShape(14.dp),
-                                        color = MaterialTheme.colorScheme.surfaceContainerHigh
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        modifier = Modifier.semantics {
+                                            stateDescription = if (isExpanded) "Expanded" else "Collapsed"
+                                        }
                                     ) {
                                         Row(
                                             modifier = Modifier
@@ -501,8 +581,9 @@ fun HomeRoute(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                                         ) {
+                                            // D7: a plain folder icon (it was "create folder").
                                             Icon(
-                                                imageVector = androidx.compose.material.icons.Icons.Rounded.CreateNewFolder,
+                                                imageVector = if (isExpanded) Icons.Rounded.FolderOpen else Icons.Rounded.Folder,
                                                 contentDescription = null,
                                                 tint = MaterialTheme.colorScheme.primary
                                             )
@@ -526,10 +607,18 @@ fun HomeRoute(
                                                     }
                                                 }
                                             }
-                                            Text(
-                                                text = if (isExpanded) "▾" else "▸",
-                                                style = Typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            // D7: the standard expand icon instead of "▸" text,
+                                            // turning as the folder opens.
+                                            val chevronRotation by androidx.compose.animation.core.animateFloatAsState(
+                                                targetValue = if (isExpanded) 180f else 0f,
+                                                animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+                                                label = "folderChevron"
+                                            )
+                                            Icon(
+                                                imageVector = Icons.Rounded.ExpandMore,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.graphicsLayer { rotationZ = chevronRotation }
                                             )
                                         }
                                     }
@@ -817,3 +906,51 @@ fun HomeRoute(
             }
         }
     }
+@Composable
+private fun HomeConfirmDialog(
+    title: String,
+    text: String,
+    confirmLabel: String,
+    destructive: Boolean = false,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title, maxLines = 3, overflow = TextOverflow.Ellipsis) },
+        text = { Text(text) },
+        confirmButton = {
+            Button(
+                onClick = onConfirm,
+                colors = if (destructive) {
+                    ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                } else ButtonDefaults.buttonColors()
+            ) { Text(confirmLabel) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+internal fun pluralEpisodes(count: Int): String = if (count == 1) "episode" else "episodes"
+
+/** I12: the "Mark all as played?" body, with the number of episodes it changes. */
+internal fun markAllPlayedConfirmText(podcastTitle: String, unplayedCount: Int): String =
+    if (unplayedCount > 0) {
+        "This marks $unplayedCount unplayed ${pluralEpisodes(unplayedCount)} of $podcastTitle as played."
+    } else {
+        "This marks every episode of $podcastTitle as played."
+    }
+
+/** I15: the "Unsubscribe from …?" body, with the number of unplayed episodes. */
+internal fun unsubscribeConfirmText(unplayedCount: Int): String {
+    val unplayed = when (unplayedCount) {
+        0 -> "You have no unplayed episodes of this podcast."
+        else -> "You have $unplayedCount unplayed ${pluralEpisodes(unplayedCount)} of this podcast."
+    }
+    return "$unplayed New episodes will stop arriving. Downloads and history are kept."
+}

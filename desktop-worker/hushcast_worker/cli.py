@@ -1,17 +1,21 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import logging
 import os
 import platform
+import plistlib
 import secrets
+import shlex
 import shutil
 import socket
+import ssl
 import sys
 import tempfile
+import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Callable, Optional
 
 import uvicorn
 from zeroconf import ServiceInfo, Zeroconf
@@ -20,41 +24,71 @@ from . import __version__
 from .pairing import get_lan_ips, print_pairing_qr
 from .pipeline import LocalMlBackend, detect_accelerator
 from .server import create_app
-from .storage import WorkerCache
+from .models import health_schema_problems
+from .storage import ModelVerifier, WorkerCache, download_verified, sha256_file
 
 logger = logging.getLogger("hushcast_worker.cli")
 
-# Pinned model URLs and optional SHA-256 digests (override via env if using custom mirrors)
-BASE_MODELS = [
-    (
-        "ggml-base.en-q5_1.bin",
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1/ggml-base.en-q5_1.bin",
-        "422f1ae452ade6f30a004d7e5c6a43195e4433bc370bf23fac9cc591f01a8898",
-    ),
-    (
-        "Qwen3-Embedding-0.6B-Q8_0.gguf",
-        "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/c80565f1b529c2b2f58f48c0a6e1b2f30f22c2a3/Qwen3-Embedding-0.6B-Q8_0.gguf",
-        None,
-    ),
-]
+# V21: every file `setup` downloads is pinned to an immutable revision and checked by SHA-256.
+# Digests come from the Hugging Face API (`/api/models/<repo>/revision/<sha>?blobs=true`,
+# field lfs.sha256), or from hashing the file at that URL (MMS_FA).
+_HF = "https://huggingface.co"
+WHISPER_CPP_REVISION = "5359861c739e955e79d9a303bcbc70fb988958b1"
+QWEN_EMBED_REVISION = "370f27d7550e0def9b39c1f16d3fbaa13aa67728"
+QWEN_CHAT_REVISION = "f302c64a2269a69fb27b2f9473b362f5bb8e78d8"
 
-QUALITY_MODELS = [
-    (
-        "ggml-large-v3-turbo-q5_0.bin",
-        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin",
-        None,
-    ),
-    (
-        "Qwen3-Embedding-0.6B-Q8_0.gguf",
-        "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/c80565f1b529c2b2f58f48c0a6e1b2f30f22c2a3/Qwen3-Embedding-0.6B-Q8_0.gguf",
-        None,
-    ),
-    (
-        "Qwen2.5-3B-Instruct-Q4_K_M.gguf",
-        "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf",
-        None,
-    ),
-]
+
+@dataclass(frozen=True)
+class ModelFile:
+    filename: str
+    url: str
+    sha256: str
+    size: int
+
+
+WHISPER_BASE_EN = ModelFile(
+    "ggml-base.en-q5_1.bin",
+    f"{_HF}/ggerganov/whisper.cpp/resolve/{WHISPER_CPP_REVISION}/ggml-base.en-q5_1.bin",
+    "4baf70dd0d7c4247ba2b81fafd9c01005ac77c2f9ef064e00dcf195d0e2fdd2f",
+    59721011,
+)
+WHISPER_TURBO_Q5 = ModelFile(
+    "ggml-large-v3-turbo-q5_0.bin",
+    f"{_HF}/ggerganov/whisper.cpp/resolve/{WHISPER_CPP_REVISION}/ggml-large-v3-turbo-q5_0.bin",
+    "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+    574041195,
+)
+QWEN_EMBED = ModelFile(
+    "Qwen3-Embedding-0.6B-Q8_0.gguf",
+    f"{_HF}/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/{QWEN_EMBED_REVISION}/Qwen3-Embedding-0.6B-Q8_0.gguf",
+    "06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439",
+    639150592,
+)
+QWEN_CHAT_3B = ModelFile(
+    "Qwen2.5-3B-Instruct-Q4_K_M.gguf",
+    f"{_HF}/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/{QWEN_CHAT_REVISION}/Qwen2.5-3B-Instruct-Q4_K_M.gguf",
+    "9c9f56a391a3abbd5b89d0245bf6106081bcc3173119d4229235dd9d23253f94",
+    1929903264,
+)
+# torchaudio MMS_FA weights (forced word alignment). Used whenever torch + torchaudio are
+# installed, in either profile; saved where torch.hub caches them under TORCH_HOME.
+MMS_FA_CHECKPOINT = ModelFile(
+    "model.pt",
+    "https://dl.fbaipublicfiles.com/mms/torchaudio/ctc_alignment_mling_uroman/model.pt",
+    "20ef12963ab4924bef49ac4fc7f58ad5da2ee43b2c11bc8c853c9b90ecdbc680",
+    1262047414,
+)
+
+PROFILES: dict[str, tuple[ModelFile, ...]] = {
+    # No Silero VAD file: whisper.cpp VAD stays off on the Mac (1.0.2x) because it shifts token
+    # timestamps; faster-whisper on Modal uses its own bundled VAD.
+    "fast": (WHISPER_BASE_EN, QWEN_EMBED),
+    "quality": (WHISPER_TURBO_Q5, QWEN_EMBED, QWEN_CHAT_3B),
+}
+BASE_MODELS = PROFILES["fast"]
+QUALITY_MODELS = PROFILES["quality"]
+
+LAUNCHD_LABEL = "com.hushcast.worker"
 
 
 def _load_or_create_token(root_dir: Path, cli_token: Optional[str]) -> str:
@@ -80,74 +114,62 @@ def _load_or_create_token(root_dir: Path, cli_token: Optional[str]) -> str:
 
 
 def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        while True:
-            chunk = f.read(1024 * 1024)
-            if not chunk:
-                break
-            h.update(chunk)
-    return h.hexdigest()
+    return sha256_file(path)
 
 
-def _download_with_resume(url: str, dest: Path, expected_sha: Optional[str]) -> bool:
-    import httpx
+def _download_with_resume(
+    url: str,
+    dest: Path,
+    expected_sha: str,
+    size: Optional[int] = None,
+    verifier: Optional[ModelVerifier] = None,
+) -> bool:
+    """Downloads (or resumes) one model and checks its SHA-256. Returns False on failure."""
+    last_print = [0.0]
 
-    if dest.exists() and dest.stat().st_size > 0:
-        if expected_sha:
-            actual = _sha256_file(dest)
-            if actual == expected_sha:
-                print(f"  [OK] {dest.name} already present (sha256={actual[:12]}...)")
-                return True
-            print(f"  [WARN] {dest.name} checksum mismatch; re-downloading")
-            dest.unlink(missing_ok=True)
-        else:
-            print(f"  [OK] {dest.name} already present ({dest.stat().st_size / (1024 * 1024):.1f} MB)")
-            return True
+    def _progress(received: int, total: int) -> None:
+        now = time.monotonic()
+        if total > 0 and (now - last_print[0] >= 0.25 or received >= total):
+            last_print[0] = now
+            pct = int(100 * received / total)
+            print(f"\r    {received / (1024 * 1024):.1f} / {total / (1024 * 1024):.1f} MB ({pct}%)", end="", flush=True)
 
-    part = dest.with_suffix(".part")
-    resume_pos = part.stat().st_size if part.exists() else 0
-    headers = {"Range": f"bytes={resume_pos}-"} if resume_pos > 0 else {}
-
-    print(f"  Downloading {dest.name}" + (f" (resuming from {resume_pos // (1024 * 1024)} MB)" if resume_pos else "") + " ...")
-    with httpx.stream("GET", url, headers=headers, follow_redirects=True, timeout=600.0) as resp:
-        if resp.status_code == 416:
-            resume_pos = 0
-            part.unlink(missing_ok=True)
-            with httpx.stream("GET", url, follow_redirects=True, timeout=600.0) as resp2:
-                resp2.raise_for_status()
-                total = int(resp2.headers.get("content-length") or 0)
-                received = 0
-                with part.open("wb") as f:
-                    for chunk in resp2.iter_bytes(chunk_size=1024 * 1024):
-                        f.write(chunk)
-                        received += len(chunk)
-                        if total > 0:
-                            pct = int(100 * received / total)
-                            print(f"\r    {received / (1024 * 1024):.1f} / {total / (1024 * 1024):.1f} MB ({pct}%)", end="", flush=True)
-        else:
-            resp.raise_for_status()
-            is_resume = resp.status_code == 206 and resume_pos > 0
-            total = int(resp.headers.get("content-length") or 0) + (resume_pos if is_resume else 0)
-            received = resume_pos if is_resume else 0
-            mode = "ab" if is_resume else "wb"
-            with part.open(mode) as f:
-                for chunk in resp.iter_bytes(chunk_size=1024 * 1024):
-                    f.write(chunk)
-                    received += len(chunk)
-                    if total > 0:
-                        pct = int(100 * received / total)
-                        print(f"\r    {received / (1024 * 1024):.1f} / {total / (1024 * 1024):.1f} MB ({pct}%)", end="", flush=True)
-    print()
-
-    actual_sha = _sha256_file(part)
-    if expected_sha and actual_sha != expected_sha:
-        part.unlink(missing_ok=True)
-        print(f"  [FAIL] Checksum mismatch for {dest.name}: expected {expected_sha}, got {actual_sha}")
+    part = dest.with_name(dest.name + ".part")
+    if not dest.exists():
+        resume_mb = part.stat().st_size // (1024 * 1024) if part.exists() else 0
+        print(f"  Downloading {dest.name}" + (f" (resuming from {resume_mb} MB)" if resume_mb else "") + " ...")
+    try:
+        downloaded = download_verified(url, dest, sha256=expected_sha, size=size, verifier=verifier, on_progress=_progress)
+    except Exception as exc:
+        print()
+        print(f"  [FAIL] {dest.name}: {exc}")
         return False
-    os.replace(part, dest)
-    print(f"  [OK] Saved {dest.name} (sha256={actual_sha[:12]}...)")
+    if downloaded:
+        print()
+        print(f"  [OK] Saved {dest.name} (sha256={expected_sha[:12]}...)")
+    else:
+        print(f"  [OK] {dest.name} already present (sha256={expected_sha[:12]}...)")
     return True
+
+
+def _torch_home(models_dir: Path) -> Path:
+    # Same default as ForcedAligner(models_dir / "torch") in pipeline.py.
+    return Path(os.environ.get("TORCH_HOME") or (models_dir / "torch")).expanduser()
+
+
+def _prefetch_mms_fa(models_dir: Path, verifier: ModelVerifier) -> bool:
+    """Downloads the MMS_FA weights when torch + torchaudio are installed (V21)."""
+    try:
+        import torch  # noqa: F401
+        import torchaudio  # noqa: F401
+    except Exception:
+        print("  [INFO] torch/torchaudio not installed: word timings use whisper.cpp DTW.")
+        print("         For MMS_FA word alignment: pip install torch torchaudio, then rerun setup (~1.3 GB).")
+        return True
+    dest = _torch_home(models_dir) / "hub" / "checkpoints" / MMS_FA_CHECKPOINT.filename
+    return _download_with_resume(
+        MMS_FA_CHECKPOINT.url, dest, MMS_FA_CHECKPOINT.sha256, MMS_FA_CHECKPOINT.size, verifier
+    )
 
 
 def _run_smoke_test(backend: LocalMlBackend) -> bool:
@@ -179,16 +201,80 @@ def _run_smoke_test(backend: LocalMlBackend) -> bool:
         return False
 
 
+def _service_program_args(data_dir: Path, port: int) -> list[str]:
+    exe = shutil.which("hushcast-worker")
+    base = [exe] if exe else [sys.executable, "-m", "hushcast_worker.cli"]
+    return base + ["--port", str(port), "--data-dir", str(data_dir)]
+
+
+def build_launchd_plist(program_args: list[str], data_dir: Path, *, env: Optional[dict[str, str]] = None) -> str:
+    """A LaunchAgent that starts the worker at login and restarts it if it stops (V21)."""
+    log_dir = data_dir / "logs"
+    environment = {
+        # launchd starts with a bare PATH; ffmpeg/ffprobe usually live in Homebrew's bin.
+        "PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+        "PYTHONUNBUFFERED": "1",
+    }
+    environment.update(env or {})
+    plist: dict[str, Any] = {
+        "Label": LAUNCHD_LABEL,
+        "ProgramArguments": list(program_args),
+        "WorkingDirectory": str(data_dir),
+        "EnvironmentVariables": environment,
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "ThrottleInterval": 10,
+        "ProcessType": "Interactive",  # don't let macOS throttle long transcriptions
+        "StandardOutPath": str(log_dir / "worker.log"),
+        "StandardErrorPath": str(log_dir / "worker.err.log"),
+    }
+    return plistlib.dumps(plist, sort_keys=False).decode("utf-8")
+
+
+def build_systemd_unit(program_args: list[str], data_dir: Path) -> str:
+    exec_start = " ".join(shlex.quote(a) for a in program_args)
+    return (
+        "[Unit]\n"
+        "Description=HushCast desktop worker\n"
+        "After=network-online.target\n"
+        "Wants=network-online.target\n\n"
+        "[Service]\n"
+        f"ExecStart={exec_start}\n"
+        f"WorkingDirectory={data_dir}\n"
+        "Environment=PYTHONUNBUFFERED=1\n"
+        "Restart=always\n"
+        "RestartSec=10\n\n"
+        "[Install]\n"
+        "WantedBy=default.target\n"
+    )
+
+
 def _print_service_snippet(data_dir: Path, port: int) -> None:
-    exe = shutil.which("hushcast-worker") or f"{sys.executable} -m hushcast_worker.cli"
+    args = _service_program_args(data_dir, port)
     if platform.system() == "Darwin":
-        print("\nOptional macOS launchd plist (~/Library/LaunchAgents/com.hushcast.worker.plist):")
-        print(
-            f"  <string>{exe}</string> with args: --port {port} --data-dir {data_dir}"
-        )
+        plist_text = build_launchd_plist(args, data_dir)
+        plist_copy = data_dir / f"{LAUNCHD_LABEL}.plist"
+        try:
+            (data_dir / "logs").mkdir(parents=True, exist_ok=True)
+            plist_copy.write_text(plist_text, encoding="utf-8")
+        except OSError:
+            plist_copy = None
+        print("\nRun the worker at login (macOS launchd, restarts it if it stops):")
+        if plist_copy is not None:
+            print(f"  A ready-to-use plist was written to {plist_copy}. Install it with:")
+            print(f"    cp {plist_copy} ~/Library/LaunchAgents/{LAUNCHD_LABEL}.plist")
+        else:
+            print(f"  Save this as ~/Library/LaunchAgents/{LAUNCHD_LABEL}.plist:\n")
+            print(plist_text)
+        print(f"    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/{LAUNCHD_LABEL}.plist")
+        print(f"  Logs: {data_dir / 'logs'}/worker.log and worker.err.log")
+        print(f"  Stop: launchctl bootout gui/$(id -u)/{LAUNCHD_LABEL}")
+        print("  For HTTPS, add --tls-cert/--tls-key (and their paths) to ProgramArguments.")
     else:
-        print("\nOptional systemd user service (~/.config/systemd/user/hushcast-worker.service):")
-        print(f"  ExecStart={exe} --port {port} --data-dir {data_dir}")
+        print("\nOptional systemd user service (~/.config/systemd/user/hushcast-worker.service):\n")
+        print(build_systemd_unit(args, data_dir))
+        print("  Enable: systemctl --user daemon-reload && systemctl --user enable --now hushcast-worker")
+        print("  Logs:   journalctl --user -u hushcast-worker -f")
 
 
 def _run_setup(data_dir: Path, ad_tagger_onnx: Optional[Path], profile: str, skip_smoke: bool) -> int:
@@ -201,10 +287,12 @@ def _run_setup(data_dir: Path, ad_tagger_onnx: Optional[Path], profile: str, ski
         path = shutil.which(tool)
         print(f"  {tool:<10}: {path or 'MISSING (install ffmpeg)'}")
 
-    models = QUALITY_MODELS if profile == "quality" else BASE_MODELS
-    for filename, url, expected_sha in models:
-        if not _download_with_resume(url, models_dir / filename, expected_sha):
+    verifier = ModelVerifier(models_dir)
+    for model in PROFILES[profile]:
+        if not _download_with_resume(model.url, models_dir / model.filename, model.sha256, model.size, verifier):
             return 1
+    if not _prefetch_mms_fa(models_dir, verifier):
+        return 1
 
     repo_onnx = Path(__file__).resolve().parents[2] / "model" / "ad_tagger.onnx"
     onnx_src = ad_tagger_onnx or (repo_onnx if repo_onnx.exists() else None)
@@ -225,19 +313,123 @@ def _run_setup(data_dir: Path, ad_tagger_onnx: Optional[Path], profile: str, ski
     return 0 if backend.models_ready() else 1
 
 
-def _run_pair(data_dir: Path, port: int, cli_token: Optional[str]) -> int:
+def cert_sha256_fingerprint(cert_path: Path) -> str:
+    """SHA-256 of the leaf certificate (DER), as the phone pins it: colon-separated hex."""
+    pem = Path(cert_path).read_text(encoding="utf-8")
+    begin = pem.index("-----BEGIN CERTIFICATE-----")
+    end = pem.index("-----END CERTIFICATE-----", begin) + len("-----END CERTIFICATE-----")
+    der = ssl.PEM_cert_to_DER_cert(pem[begin:end])
+    import hashlib
+
+    digest = hashlib.sha256(der).hexdigest().upper()
+    return ":".join(digest[i : i + 2] for i in range(0, len(digest), 2))
+
+
+def tls_options(cert: Optional[Path], key: Optional[Path]) -> dict[str, str]:
+    """V24: uvicorn ssl_* arguments for optional HTTPS. Raises ValueError on bad input."""
+    if cert is None and key is None:
+        return {}
+    if cert is None or key is None:
+        raise ValueError("--tls-cert and --tls-key must be given together")
+    for label, path in (("--tls-cert", cert), ("--tls-key", key)):
+        if not Path(path).expanduser().is_file():
+            raise ValueError(f"{label} file not found: {path}")
+    cert_path = str(Path(cert).expanduser())
+    try:
+        ssl.create_default_context(ssl.Purpose.CLIENT_AUTH).load_cert_chain(cert_path, str(Path(key).expanduser()))
+    except (ssl.SSLError, OSError) as exc:
+        raise ValueError(f"TLS certificate/key could not be loaded: {exc}") from exc
+    return {"ssl_certfile": cert_path, "ssl_keyfile": str(Path(key).expanduser())}
+
+
+def _run_pair(data_dir: Path, port: int, cli_token: Optional[str], tls_cert: Optional[Path] = None) -> int:
     data_dir.mkdir(parents=True, exist_ok=True)
     token = _load_or_create_token(data_dir, cli_token)
     lan_ips = get_lan_ips()
     if not lan_ips:
         print("Could not detect a non-loopback LAN IPv4 address.")
         return 1
-    primary_url = f"http://{lan_ips[0]}:{port}"
+    scheme = "https" if tls_cert else "http"
+    primary_url = f"{scheme}://{lan_ips[0]}:{port}"
     print(f"HushCast Worker Pairing (v{__version__})")
     for ip in lan_ips:
-        print(f"  Candidate URL: http://{ip}:{port}")
+        print(f"  Candidate URL: {scheme}://{ip}:{port}")
     print(f"  Pairing Token: {token}")
+    if tls_cert:
+        print(f"  TLS SHA-256:   {cert_sha256_fingerprint(tls_cert)}")
     print_pairing_qr(primary_url, token)
+    return 0
+
+
+def check_health(
+    url: str,
+    *,
+    attempts: int = 6,
+    delay_sec: float = 10.0,
+    timeout_sec: float = 60.0,
+    expect_deployment: Optional[str] = None,
+    client: Any = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> list[str]:
+    """V19 smoke test: GET <url>/v1/health and check it against the schema.
+
+    Retries connection errors and 5xx (a fresh deploy cold-starts). Returns a list of
+    problems; empty means healthy.
+    """
+    import httpx
+
+    health_url = url.strip().rstrip("/") + "/v1/health"
+    own_client = client is None
+    http = client or httpx.Client(timeout=timeout_sec, follow_redirects=True)
+    last_problem = "no attempt made"
+    try:
+        for attempt in range(1, max(1, attempts) + 1):
+            try:
+                resp = http.get(health_url)
+            except httpx.HTTPError as exc:
+                last_problem = f"request failed: {type(exc).__name__}: {exc}"
+            else:
+                if resp.status_code == 200:
+                    try:
+                        payload = resp.json()
+                    except ValueError:
+                        return [f"response is not JSON: {resp.text[:200]!r}"]
+                    return health_schema_problems(payload, expect_deployment=expect_deployment)
+                last_problem = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                if resp.status_code < 500:
+                    return [last_problem]
+            if attempt < attempts:
+                sleep(delay_sec)
+        return [last_problem]
+    finally:
+        if own_client:
+            http.close()
+
+
+def _run_health_check(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="hushcast-worker health-check",
+        description="Check a deployed worker's /v1/health (status 200 and the current schema).",
+    )
+    parser.add_argument("--url", required=True, help="Worker base URL, e.g. https://<you>--hushcast-worker-fastapi-app.modal.run")
+    parser.add_argument("--attempts", type=int, default=6)
+    parser.add_argument("--delay", type=float, default=10.0, help="Seconds between attempts")
+    parser.add_argument("--timeout", type=float, default=60.0, help="Per-request timeout in seconds")
+    parser.add_argument("--expect-deployment", default=None, help='Require this "deployment" value (e.g. modal)')
+    args = parser.parse_args(argv)
+    problems = check_health(
+        args.url,
+        attempts=args.attempts,
+        delay_sec=args.delay,
+        timeout_sec=args.timeout,
+        expect_deployment=args.expect_deployment,
+    )
+    if problems:
+        print(f"Health check FAILED for {args.url}:")
+        for problem in problems:
+            print(f"  - {problem}")
+        return 1
+    print(f"Health check passed for {args.url}")
     return 0
 
 
@@ -269,8 +461,12 @@ def main() -> None:
         pair_parser.add_argument("--data-dir", type=Path, default=Path.home() / ".hushcast-worker")
         pair_parser.add_argument("--port", type=int, default=8765)
         pair_parser.add_argument("--token", default=None)
+        pair_parser.add_argument("--tls-cert", type=Path, default=None, help="Show an https URL and the cert fingerprint")
         p_args = pair_parser.parse_args(sys.argv[2:])
-        raise SystemExit(_run_pair(p_args.data_dir, p_args.port, p_args.token))
+        raise SystemExit(_run_pair(p_args.data_dir, p_args.port, p_args.token, p_args.tls_cert))
+
+    if len(sys.argv) > 1 and sys.argv[1] == "health-check":
+        raise SystemExit(_run_health_check(sys.argv[2:]))
 
     parser = argparse.ArgumentParser(description="HushCast Desktop Companion Worker")
     parser.add_argument("--host", default="0.0.0.0")
@@ -315,7 +511,13 @@ def main() -> None:
         action="store_true",
         help="Delete only cached .audio files in <data-dir>/cache (keeps transcripts/bundles) and exit",
     )
+    parser.add_argument("--tls-cert", type=Path, default=None, help="PEM certificate: serve HTTPS (with --tls-key)")
+    parser.add_argument("--tls-key", type=Path, default=None, help="PEM private key for --tls-cert")
     args = parser.parse_args()
+    try:
+        ssl_kwargs = tls_options(args.tls_cert, args.tls_key)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     args.data_dir.mkdir(parents=True, exist_ok=True)
     max_cache_bytes = int(max(0.0, args.max_cache_gb) * (1024**3))
@@ -359,15 +561,19 @@ def main() -> None:
     lan_ips = get_lan_ips()
     lan_ip = lan_ips[0] if lan_ips else None
     display_host = lan_ip or "127.0.0.1"
-    worker_url = f"http://{display_host}:{args.port}"
+    scheme = "https" if ssl_kwargs else "http"
+    worker_url = f"{scheme}://{display_host}:{args.port}"
     print(f"HushCast Desktop Worker v{__version__} ({detect_accelerator().upper()})")
     print(f"  URL:           {worker_url}")
     for extra_ip in lan_ips[1:]:
-        print(f"  Alt URL:       http://{extra_ip}:{args.port}")
+        print(f"  Alt URL:       {scheme}://{extra_ip}:{args.port}")
     if token:
         print(f"  Pairing Token: {token}")
     else:
         print("  Pairing Token: DISABLED (--insecure-no-auth)")
+    if ssl_kwargs:
+        print(f"  TLS SHA-256:   {cert_sha256_fingerprint(Path(ssl_kwargs['ssl_certfile']))}")
+        print("                 (enter this as the certificate fingerprint on the phone to pin it)")
     print(f"  Models Ready:  {backend.models_ready()} (dir: {backend.models_dir})")
     print(f"  Whisper Model: {backend.whisper_model_name()}")
     print(f"  Chat Model:    {backend.chat_model_path().name if backend.chat_model_ready() else 'Extractive fallback (drop any Instruct GGUF in models dir to enable LLM summaries)'}")
@@ -386,7 +592,11 @@ def main() -> None:
                 f"HushCast-{hostname}._hushcast._tcp.local.",
                 addresses=[socket.inet_aton(ip) for ip in lan_ips],
                 port=args.port,
-                properties={"version": __version__, "accel": detect_accelerator()},
+                properties={
+                    "version": __version__,
+                    "accel": detect_accelerator(),
+                    "scheme": scheme,
+                },
             )
             zc = Zeroconf()
             zc.register_service(info)
@@ -395,7 +605,7 @@ def main() -> None:
             print(f"  mDNS warning:  {exc}")
 
     try:
-        uvicorn.run(app, host=args.host, port=args.port, log_level="warning", access_log=False)
+        uvicorn.run(app, host=args.host, port=args.port, log_level="warning", access_log=False, **ssl_kwargs)
     finally:
         if zc and info:
             zc.unregister_service(info)

@@ -7,6 +7,7 @@ import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeModel
 import app.podiumpodcasts.podium.api.db.model.PodcastModel
 import app.podiumpodcasts.podium.api.rss.FetchPodcastClient
 import app.podiumpodcasts.podium.api.rss.FetchPodcastClientResult
+import app.podiumpodcasts.podium.api.rss.withFeedExtras
 import app.podiumpodcasts.podium.utils.normalizeOrigin
 import app.podiumpodcasts.podium.utils.rss.toPodcast
 import app.podiumpodcasts.podium.utils.rss.toPodcastEpisode
@@ -38,7 +39,10 @@ class PodcastManager(
             throw Exception(response.toString())
 
         val podcast = response.rssChannel.toPodcast(origin, response.fileSize, null, response.extras.language)
-        val episodes = response.rssChannel.items.map { it.toPodcastEpisode(podcast = podcast, extras = response.extras) }
+        val episodes = response.rssChannel.items.map { item ->
+            item.toPodcastEpisode(podcast = podcast, extras = response.extras)
+                .withFeedExtras(response.extras.lookup(item))
+        }
 
         return addPodcast(podcast, episodes, seedColor, false)
     }

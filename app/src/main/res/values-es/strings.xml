@@ -134,6 +134,9 @@
     <string name="route_podcast_settings">Configuración del podcast</string>
     <string name="route_restore">Restaurar desde una copia de seguridad</string>
     <string name="route_restore_action_restart_app">Reiniciar aplicación</string>
+    <string name="route_restore_action_restore">Restaurar</string>
+    <string name="route_restore_confirm_title">¿Reemplazar tus datos?</string>
+    <string name="common_action_cancel">Cancelar</string>
     <string name="route_restore_confirmation">Restaurar desde una copia de seguridad sobrescribirá la base de datos actual. Todos los datos se perderán.</string>
     <string name="route_restore_invalid_backup_file">Copia de seguridad inválida</string>
     <string name="route_restore_invalid_backup_file_text">Por favor selecciona una copia de seguridad de %1$s válida.</string>

@@ -133,7 +133,7 @@
     <string name="route_downloads_empty_text">It\’s pretty open in here! Download an episode to take it with you, or enable auto-downloads so you never miss a beat.</string>
     <string name="route_downloads_empty_title">Nothing but clear skies</string>
     <string name="route_history">History</string>
-    <string name="route_history_empty_text">You haven\'t listened to anything yet. Start your journey by picking a podcast — your history will appear here as you go!</string>
+    <string name="route_history_empty_text">You haven\'t played anything yet. Start your journey by picking a podcast — your history will appear here as you go!</string>
     <string name="route_history_empty_title">A clean slate</string>
     <string name="route_history_older">Older</string>
     <string name="route_history_this_month">This month</string>
@@ -169,6 +169,9 @@
     <string name="route_podcast_settings">Podcast settings</string>
     <string name="route_restore">Restore from Backup</string>
     <string name="route_restore_action_restart_app">Restart app</string>
+    <string name="route_restore_action_restore">Restore</string>
+    <string name="route_restore_confirm_title">Replace your data?</string>
+    <string name="common_action_cancel">Cancel</string>
     <string name="route_restore_confirmation">Restoring from a backup file will overwrite the current database. All data will be lost.</string>
     <string name="route_restore_invalid_backup_file">Invalid backup file</string>
     <string name="route_restore_invalid_backup_file_text">Please select a valid %1$s backup file.</string>

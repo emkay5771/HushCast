@@ -51,12 +51,18 @@ data class OffsetMap(
 
     fun shiftTimeSec(srcSec: Double): Double = shiftTimeMs((srcSec * 1000.0).toLong()) / 1000.0
 
+    /**
+     * Shifts each word as a unit, by the offset at its midpoint.  (Shifting start and end
+     * separately stretched a word that touches a break, e.g. contiguous words where one ends
+     * exactly where the next stretch starts, across the whole ad.)
+     */
     fun applyToWords(words: List<Word>): List<Word> {
         if (stretches.isEmpty()) return words
         return words.map { w ->
-            val s = shiftTimeSec(w.start)
-            val e = shiftTimeSec(w.end).coerceAtLeast(s + 0.01)
-            w.copy(start = s, end = e)
+            val midMs = ((w.start + w.end) * 500.0).toLong()
+            val d = (shiftTimeMs(midMs) - midMs) / 1000.0
+            val s = (w.start + d).coerceAtLeast(0.0)
+            w.copy(start = s, end = (w.end + d).coerceAtLeast(s + 0.01))
         }
     }
 

@@ -4,10 +4,8 @@ import android.annotation.SuppressLint
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -32,8 +30,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.podiumpodcasts.podium.R
+import app.podiumpodcasts.podium.ui.component.settings.SettingsListItem
 import app.podiumpodcasts.podium.ui.component.settings.SettingsSliderListItem
 import app.podiumpodcasts.podium.ui.component.settings.SettingsSwitchListItem
+import app.podiumpodcasts.podium.ui.component.settings.settingsGroup
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 import app.podiumpodcasts.podium.ui.route.settings.RoamingWarningDialog
@@ -82,252 +82,240 @@ fun SettingsDownloadsAndStoragePane(
 
             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
         ) {
-            item {
-                SettingsSwitchListItem(
-                    checked = downloadMetered.value,
-                    onCheckedChange = {
-                        scope.launch {
-                            vm.repository.behavior.setDownloadMetered(it)
-                            vm.requeueDownloads(context, db)
-                        }
-                    },
-
-                    icon = {
-                        Icon(
-                            Icons.Rounded.SignalCellularAlt,
-                            stringResource(R.string.route_settings_downloads_and_storage_allow_mobile_downloads)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_downloads_and_storage_allow_mobile_downloads),
-                    description = stringResource(R.string.route_settings_downloads_and_storage_allow_mobile_downloads_description),
-
-                    index = 0,
-                    count = 4
-                )
-            }
-
-            item {
-                val downloadInRoaming =
-                    vm.repository.behavior.downloadInRoaming.collectAsState(false)
-
-                SettingsSwitchListItem(
-                    enabled = downloadMetered.value,
-
-                    checked = downloadInRoaming.value,
-                    onCheckedChange = {
-                        if(it) {
-                            vm.roamingWarningDialogState.value =
-                                RoamingWarningDialogState.ShowDownload
-                        } else {
+            settingsGroup(key = "downloads", spaceAbove = 0.dp) {
+                row { pos ->
+                    SettingsSwitchListItem(
+                        checked = downloadMetered.value,
+                        onCheckedChange = {
                             scope.launch {
-                                vm.repository.behavior.setDownloadInRoaming(false)
+                                vm.repository.behavior.setDownloadMetered(it)
                                 vm.requeueDownloads(context, db)
                             }
-                        }
-                    },
+                        },
 
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Public,
-                            stringResource(R.string.route_settings_downloads_and_storage_allow_while_roaming)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_downloads_and_storage_allow_while_roaming),
-                    description = stringResource(R.string.route_settings_downloads_and_storage_allow_while_roaming_description),
-                    index = 1,
-                    count = 4
-                )
-            }
-
-            item {
-                val applySettingsForAutoDownloads =
-                    vm.repository.behavior.applySettingsForAutoDownloads.collectAsState(false)
-
-                SettingsSwitchListItem(
-                    enabled = downloadMetered.value,
-
-                    checked = applySettingsForAutoDownloads.value,
-                    onCheckedChange = {
-                        scope.launch {
-                            vm.repository.behavior.setApplySettingsForAutoDownloads(it)
-                        }
-                    },
-
-                    icon = {
-                        Icon(
-                            Icons.Rounded.FileDownload,
-                            stringResource(R.string.route_settings_downloads_and_storage_include_automatic_downloads)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_downloads_and_storage_include_automatic_downloads),
-                    description = stringResource(R.string.route_settings_downloads_and_storage_include_automatic_downloads_description),
-
-                    index = 2,
-                    count = 4
-                )
-            }
-
-            item {
-                val autoDownloadQueue =
-                    vm.repository.behavior.autoDownloadQueue.collectAsState(false)
-
-                SettingsSwitchListItem(
-                    checked = autoDownloadQueue.value,
-                    onCheckedChange = {
-                        scope.launch {
-                            vm.repository.behavior.setAutoDownloadQueue(it)
-                        }
-                    },
-
-                    icon = {
-                        Icon(
-                            Icons.Rounded.FileDownload,
-                            "Auto-download queued episodes"
-                        )
-                    },
-                    label = "Auto-download queued episodes",
-                    description = "Automatically download episodes when added to the playback queue",
-
-                    index = 3,
-                    count = 4
-                )
-            }
-
-            item {
-                Spacer(Modifier.height(16.dp))
-            }
-
-            item {
-                val deletePlayedDownloads =
-                    vm.repository.behavior.deletePlayedDownloads.collectAsState(false)
-
-                SettingsSwitchListItem(
-                    checked = deletePlayedDownloads.value,
-                    onCheckedChange = {
-                        scope.launch {
-                            vm.repository.behavior.setDeletePlayedDownloads(it)
-                        }
-                    },
-
-                    icon = {
-                        Icon(
-                            Icons.Rounded.CleaningServices,
-                            stringResource(R.string.route_settings_downloads_and_storage_delete_played_downloads)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_downloads_and_storage_delete_played_downloads),
-                    description = stringResource(R.string.route_settings_downloads_and_storage_delete_played_downloads_description),
-
-                    index = 0,
-                    count = 2
-                )
-            }
-
-            item {
-                SettingsSliderListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.AutoDelete,
-                            stringResource(R.string.route_settings_downloads_and_storage_delete_downloads_after)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_downloads_and_storage_delete_downloads_after),
-
-                    value = vm.deleteDownloadsAfterSliderState.floatValue,
-                    onValueChange = { vm.updateDeleteDownloadsAfterSlider(it) },
-                    valueRange = 0f..(DeleteDownloadsAfterValues.entries.size - 1).toFloat(),
-                    steps = DeleteDownloadsAfterValues.entries.size - 2,
-
-                    onValueChangeFinished = {
-                        scope.launch {
-                            vm.repository.behavior.setDeleteDownloadsAfterSeconds(
-                                vm.deleteDownloadsAfterTranslatedSliderState.value.seconds
+                        icon = {
+                            Icon(
+                                Icons.Rounded.SignalCellularAlt,
+                                stringResource(R.string.route_settings_downloads_and_storage_allow_mobile_downloads)
                             )
-                        }
-                    },
+                        },
+                        label = stringResource(R.string.route_settings_downloads_and_storage_allow_mobile_downloads),
+                        description = stringResource(R.string.route_settings_downloads_and_storage_allow_mobile_downloads_description),
 
-                    supportingContent = {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Absolute.SpaceBetween
-                        ) {
-                            vm.deleteDownloadsAfterTranslatedSliderState.value.let { state ->
-                                Text(
-                                    text = stringResource(state.label)
+                        index = pos.index,
+                        count = pos.count
+                    )
+                }
+                row { pos ->
+                    val downloadInRoaming =
+                        vm.repository.behavior.downloadInRoaming.collectAsState(false)
+
+                    SettingsSwitchListItem(
+                        enabled = downloadMetered.value,
+
+                        checked = downloadInRoaming.value,
+                        onCheckedChange = {
+                            if(it) {
+                                vm.roamingWarningDialogState.value =
+                                    RoamingWarningDialogState.ShowDownload
+                            } else {
+                                scope.launch {
+                                    vm.repository.behavior.setDownloadInRoaming(false)
+                                    vm.requeueDownloads(context, db)
+                                }
+                            }
+                        },
+
+                        icon = {
+                            Icon(
+                                Icons.Rounded.Public,
+                                stringResource(R.string.route_settings_downloads_and_storage_allow_while_roaming)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_downloads_and_storage_allow_while_roaming),
+                        description = stringResource(R.string.route_settings_downloads_and_storage_allow_while_roaming_description),
+                        index = pos.index,
+                        count = pos.count
+                    )
+                }
+                row { pos ->
+                    val applySettingsForAutoDownloads =
+                        vm.repository.behavior.applySettingsForAutoDownloads.collectAsState(false)
+
+                    SettingsSwitchListItem(
+                        enabled = downloadMetered.value,
+
+                        checked = applySettingsForAutoDownloads.value,
+                        onCheckedChange = {
+                            scope.launch {
+                                vm.repository.behavior.setApplySettingsForAutoDownloads(it)
+                            }
+                        },
+
+                        icon = {
+                            Icon(
+                                Icons.Rounded.FileDownload,
+                                stringResource(R.string.route_settings_downloads_and_storage_include_automatic_downloads)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_downloads_and_storage_include_automatic_downloads),
+                        description = stringResource(R.string.route_settings_downloads_and_storage_include_automatic_downloads_description),
+
+                        index = pos.index,
+                        count = pos.count
+                    )
+                }
+                row { pos ->
+                    val autoDownloadQueue =
+                        vm.repository.behavior.autoDownloadQueue.collectAsState(false)
+
+                    SettingsSwitchListItem(
+                        checked = autoDownloadQueue.value,
+                        onCheckedChange = {
+                            scope.launch {
+                                vm.repository.behavior.setAutoDownloadQueue(it)
+                            }
+                        },
+
+                        icon = {
+                            Icon(
+                                Icons.Rounded.FileDownload,
+                                "Auto-download queued episodes"
+                            )
+                        },
+                        label = "Auto-download queued episodes",
+                        description = "Automatically download episodes when added to the playback queue",
+
+                        index = pos.index,
+                        count = pos.count
+                    )
+                }
+            }
+
+
+            settingsGroup(key = "cleanup") {
+                row { pos ->
+                    val deletePlayedDownloads =
+                        vm.repository.behavior.deletePlayedDownloads.collectAsState(false)
+
+                    SettingsSwitchListItem(
+                        checked = deletePlayedDownloads.value,
+                        onCheckedChange = {
+                            scope.launch {
+                                vm.repository.behavior.setDeletePlayedDownloads(it)
+                            }
+                        },
+
+                        icon = {
+                            Icon(
+                                Icons.Rounded.CleaningServices,
+                                stringResource(R.string.route_settings_downloads_and_storage_delete_played_downloads)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_downloads_and_storage_delete_played_downloads),
+                        description = stringResource(R.string.route_settings_downloads_and_storage_delete_played_downloads_description),
+
+                        index = pos.index,
+                        count = pos.count
+                    )
+                }
+                row { pos ->
+                    SettingsSliderListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.AutoDelete,
+                                stringResource(R.string.route_settings_downloads_and_storage_delete_downloads_after)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_downloads_and_storage_delete_downloads_after),
+
+                        value = vm.deleteDownloadsAfterSliderState.floatValue,
+                        onValueChange = { vm.updateDeleteDownloadsAfterSlider(it) },
+                        valueRange = 0f..(DeleteDownloadsAfterValues.entries.size - 1).toFloat(),
+                        steps = DeleteDownloadsAfterValues.entries.size - 2,
+
+                        onValueChangeFinished = {
+                            scope.launch {
+                                vm.repository.behavior.setDeleteDownloadsAfterSeconds(
+                                    vm.deleteDownloadsAfterTranslatedSliderState.value.seconds
                                 )
                             }
-                        }
-                    },
-
-                    index = 1,
-                    count = 3
-                )
-            }
-
-            item {
-                val totalSize = db.podcastEpisodeDownloads().totalSize().collectAsState(0L)
-                val showConfirm = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-
-                if(showConfirm.value) {
-                    androidx.compose.material3.AlertDialog(
-                        onDismissRequest = { showConfirm.value = false },
-                        title = { Text("Clean up all downloads?") },
-                        text = {
-                            Text("This will delete all downloaded episode audio files (${app.podiumpodcasts.podium.ui.formatFileSize(totalSize.value)}) from your device.")
                         },
-                        confirmButton = {
-                            androidx.compose.material3.TextButton(
-                                onClick = {
-                                    showConfirm.value = false
-                                    scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                                        db.podcastEpisodeDownloads().allRandomSync().forEach { bundle ->
-                                            bundle.episode?.let { ep ->
-                                                app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
-                                                    context = context,
-                                                    db = db,
-                                                    episode = ep
-                                                )
+
+                        supportingContent = {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Absolute.SpaceBetween
+                            ) {
+                                vm.deleteDownloadsAfterTranslatedSliderState.value.let { state ->
+                                    Text(
+                                        text = stringResource(state.label)
+                                    )
+                                }
+                            }
+                        },
+
+                        index = pos.index,
+                        count = pos.count
+                    )
+                }
+                row { pos ->
+                    val totalSize = db.podcastEpisodeDownloads().totalSize().collectAsState(0L)
+                    val showConfirm = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+                    if(showConfirm.value) {
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { showConfirm.value = false },
+                            title = { Text("Clean up all downloads?") },
+                            text = {
+                                Text("This will delete all downloaded episode audio files (${app.podiumpodcasts.podium.ui.formatFileSize(totalSize.value)}) from your device.")
+                            },
+                            confirmButton = {
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        showConfirm.value = false
+                                        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                            db.podcastEpisodeDownloads().allRandomSync().forEach { bundle ->
+                                                bundle.episode?.let { ep ->
+                                                    app.podiumpodcasts.podium.manager.DownloadManager.deleteEpisodeDownload(
+                                                        context = context,
+                                                        db = db,
+                                                        episode = ep
+                                                    )
+                                                }
                                             }
                                         }
                                     }
+                                ) {
+                                    Text("Delete all")
                                 }
-                            ) {
-                                Text("Delete all")
+                            },
+                            dismissButton = {
+                                androidx.compose.material3.TextButton(onClick = { showConfirm.value = false }) {
+                                    Text("Cancel")
+                                }
                             }
+                        )
+                    }
+
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.CleaningServices,
+                                "Clean up downloaded episodes"
+                            )
                         },
-                        dismissButton = {
-                            androidx.compose.material3.TextButton(onClick = { showConfirm.value = false }) {
-                                Text("Cancel")
-                            }
-                        }
+                        label = "Clean up downloaded episodes",
+                        description = if(totalSize.value > 0L)
+                            "${app.podiumpodcasts.podium.ui.formatFileSize(totalSize.value)} currently used"
+                        else
+                            "No downloaded episodes",
+                        enabled = totalSize.value > 0L,
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = { showConfirm.value = true }
                     )
                 }
-
-                androidx.compose.material3.SegmentedListItem(
-                    shapes = ListItemDefaults.segmentedShapes(
-                        index = 2,
-                        count = 3
-                    ),
-                    leadingContent = {
-                        Icon(
-                            Icons.Rounded.CleaningServices,
-                            "Clean up downloaded episodes"
-                        )
-                    },
-                    content = {
-                        Text("Clean up downloaded episodes")
-                    },
-                    supportingContent = {
-                        Text(
-                            if(totalSize.value > 0L)
-                                "${app.podiumpodcasts.podium.ui.formatFileSize(totalSize.value)} currently used"
-                            else
-                                "No downloaded episodes"
-                        )
-                    },
-                    enabled = totalSize.value > 0L,
-                    onClick = { showConfirm.value = true }
-                )
             }
         }
     }

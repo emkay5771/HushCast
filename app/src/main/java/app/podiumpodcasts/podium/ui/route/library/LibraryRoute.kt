@@ -13,7 +13,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.PlaylistPlay
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.automirrored.rounded.NavigateNext
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.NewReleases
@@ -39,6 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.paging.compose.collectAsLazyPagingItems
@@ -160,7 +162,9 @@ fun LibraryRoute(
                     text = "Filters",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+                    modifier = Modifier
+                        .padding(start = 4.dp, bottom = 4.dp)
+                        .semantics { heading() }
                 )
             }
 
@@ -183,7 +187,9 @@ fun LibraryRoute(
                         text = "Playlists",
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp)
+                        modifier = Modifier
+                            .padding(start = 4.dp, top = 16.dp, bottom = 4.dp)
+                            .semantics { heading() }
                     )
                 }
 
@@ -227,19 +233,19 @@ fun LibraryRoute(
         vm.showListCreateBottomSheet.value = false
     }
 
+    // B7: this scope lives as long as the route, not the sheet.  The sheet's own scope was cancelled
+    // as soon as the sheet closed, usually before the episode lookup finished, so nothing opened.
+    val upNextDb = LocalDatabase.current
+    val upNextScope = androidx.compose.runtime.rememberCoroutineScope()
     if (showUpNextSheet) {
-        val upNextDb = LocalDatabase.current
-        val upNextScope = androidx.compose.runtime.rememberCoroutineScope()
         MediaPlayerQueueBottomSheet(
             onOpenEpisode = { _, episodeId ->
-                showUpNextSheet = false
-                upNextScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                    val bundle = upNextDb.podcastEpisodes().getSyncNullable(episodeId)
-                    if (bundle != null) {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                            onClickEpisode(bundle.episode)
-                        }
+                upNextScope.launch {
+                    val bundle = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        upNextDb.podcastEpisodes().getSyncNullable(episodeId)
                     }
+                    showUpNextSheet = false
+                    if (bundle != null) onClickEpisode(bundle.episode)
                 }
             },
             onDismiss = { showUpNextSheet = false }
@@ -284,8 +290,9 @@ private fun PlaylistRow(
                     }
                     Spacer(Modifier.width(8.dp))
                 }
+                // D7: auto-mirrored, so it points the right way in right-to-left languages.
                 Icon(
-                    imageVector = Icons.Rounded.ChevronRight,
+                    imageVector = Icons.AutoMirrored.Rounded.NavigateNext,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )

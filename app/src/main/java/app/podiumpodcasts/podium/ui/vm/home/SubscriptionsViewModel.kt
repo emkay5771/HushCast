@@ -16,9 +16,33 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
+/** Home grid settings, held by the view model so they survive navigation (R9). */
+data class HomeGridSettings(
+    val layout: app.podiumpodcasts.podium.SubscriptionsLayout,
+    val sort: app.podiumpodcasts.podium.SubscriptionsSort,
+    val badgeMode: app.podiumpodcasts.podium.SubscriptionsBadgeMode,
+    val showTitles: Boolean
+)
+
 class SubscriptionsViewModel(
-    val db: AppDatabase
+    val db: AppDatabase,
+    settingsRepository: app.podiumpodcasts.podium.SettingsRepository? = null
 ) : ViewModel() {
+
+    /**
+     * Started eagerly and kept while the user is elsewhere, so coming back to Home draws the grid
+     * in the saved order straight away.  Re-reading the settings each time used the default sort
+     * for the first frames, and every tile animated into place (R9).
+     */
+    val gridSettings: StateFlow<HomeGridSettings?> = settingsRepository?.let { repo ->
+        kotlinx.coroutines.flow.combine(
+            repo.appearance.subscriptionsLayout,
+            repo.appearance.subscriptionsSort,
+            repo.appearance.subscriptionsBadgeMode,
+            repo.appearance.showGridTitles
+        ) { layout, sort, badge, titles -> HomeGridSettings(layout, sort, badge, titles) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    } ?: kotlinx.coroutines.flow.MutableStateFlow<HomeGridSettings?>(null)
 
     val lazyGridState = LazyGridState()
     val lazyListState = LazyListState()

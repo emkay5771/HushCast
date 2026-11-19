@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -18,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
@@ -37,6 +39,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -127,16 +132,37 @@ fun PlayerHushCastSheet(
     val muteActionMode by settingsRepository.hushCast.muteActionMode.collectAsStateWithLifecycle(
         initialValue = HushCastEngineBridge.defaultActionMode
     )
+    val bleepStyle by settingsRepository.hushCast.bleepStyle.collectAsStateWithLifecycle(
+        initialValue = HushCastEngineBridge.bleepStyle
+    )
+    val muteCustomUri by settingsRepository.hushCast.muteCustomSoundUri.collectAsStateWithLifecycle(initialValue = null)
+    val customSounds by settingsRepository.hushCast.customSounds.collectAsStateWithLifecycle(initialValue = emptyList())
+    val skipSoundEnabled by settingsRepository.hushCast.sponsorSkipSoundEnabled.collectAsStateWithLifecycle(
+        initialValue = HushCastEngineBridge.sponsorSkipSoundEnabled
+    )
+    val skipSound by settingsRepository.hushCast.skipSound.collectAsStateWithLifecycle(initialValue = HushCastEngineBridge.skipSound)
+    val skipCustomUri by settingsRepository.hushCast.sponsorSkipSoundUri.collectAsStateWithLifecycle(initialValue = null)
     val allRules by remember { autoMuteDb.dao().observeRules() }
         .collectAsStateWithLifecycle(initialValue = emptyList())
     val enabledRulesCount = remember(allRules) { allRules.count { it.enabled } }
 
     var showMoreOptions by remember { mutableStateOf(false) }
 
+    val hasWordMutingOverride = podcastWordMuting != null
+    val hasAdPolicyOverride = podcastAdPolicyEntity != null
+    val hushLabels = app.podiumpodcasts.podium.ui.hushcast.HushCastLabels
+
+    // M3: close with the sheet's slide-down, then run the action.
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    fun hideThen(after: () -> Unit) {
+        scope.launch { sheetState.hide() }.invokeOnCompletion { after() }
+    }
+
     ModalBottomSheet(
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
         onDismissRequest = onDismiss
     ) {
+        PlayerSheetBlur()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -183,7 +209,7 @@ fun PlayerHushCastSheet(
                 }
                 ReadinessBadge.NOT_PROCESSED -> {
                     Button(
-                        onClick = onProcessNow,
+                        onClick = { hideThen(onProcessNow) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -191,12 +217,68 @@ fun PlayerHushCastSheet(
                         Text(if (isDownloaded) "Process episode" else "Download & process")
                     }
                 }
-                else -> Unit
+                ReadinessBadge.READY, ReadinessBadge.WORD_MUTE_READY -> {
+                    // R4: processed episodes can be re-processed from here again.
+                    val outdated = (analysisStatus?.pipelineVersion ?: 0) <
+                        app.hushcast.automute.pipeline.AutoMuteAnalyzer.CURRENT_PIPELINE_VERSION
+                    if (outdated) {
+                        androidx.compose.material3.FilledTonalButton(
+                            onClick = { hideThen(onProcessNow) },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Update processing")
+                        }
+                        Text(
+                            text = "Improved timing and transcripts are available for this episode.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    } else {
+                        androidx.compose.material3.TextButton(onClick = { hideThen(onProcessNow) }) {
+                            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Re-process episode")
+                        }
+                    }
+                }
             }
 
             Spacer(Modifier.height(12.dp))
             HorizontalDivider()
             Spacer(Modifier.height(8.dp))
+
+            // I10: these two switches save an override for this podcast only; say so, and offer a
+            // way back to the global setting.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "For this podcast",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+                if (hasWordMutingOverride || hasAdPolicyOverride) {
+                    TextButton(
+                        onClick = {
+                            scope.launch(Dispatchers.IO) {
+                                settingsRepository.hushCast.setPodcastWordMuting(origin, null)
+                                autoMuteDb.dao().deletePodcastAdPolicy(origin)
+                                if (HushCastEngineBridge.currentEpisodeId == episodeId) {
+                                    HushCastEngineBridge.autoMuteProcessor.isEnabled = globalWordMuting
+                                    HushCastEngineBridge.adSkipObserver.policyMode = globalAdPolicy
+                                }
+                            }
+                        }
+                    ) {
+                        Text("Reset to default")
+                    }
+                }
+            }
 
             // Word muting switch naming word list & count
             Row(
@@ -221,7 +303,8 @@ fun PlayerHushCastSheet(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Word muting", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        text = "$enabledRulesCount active rules · ${muteSegments.count { it.enabled }} muted here",
+                        text = (if (hasWordMutingOverride) "Set for this podcast" else "Default (${if (globalWordMuting) "on" else "off"})") +
+                            " · $enabledRulesCount active rules · ${muteSegments.count { it.enabled }} muted here",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -258,7 +341,8 @@ fun PlayerHushCastSheet(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Sponsor skipping", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        text = "${adSegments.size} sponsors detected",
+                        text = (if (hasAdPolicyOverride) "Set for this podcast" else "Default (${if (globalAdPolicy == AdPolicyMode.AUTO_SKIP) "on" else "off"})") +
+                            " · ${adSegments.size} ${if (adSegments.size == 1) "ad" else "ads"} detected",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -266,42 +350,42 @@ fun PlayerHushCastSheet(
                 Switch(checked = sponsorSkippingActive, onCheckedChange = null)
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
 
-            // Scope selector
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(ButtonGroupDefaults.ConnectedSpaceBetween)
-            ) {
-                ToggleButton(
-                    checked = autoSkipScope == AdAutoSkipScope.HIGH_CONFIDENCE_ONLY,
-                    onCheckedChange = {
-                        if (it) {
+            // I10: this choice is the auto-skip confidence (all podcasts), not a scope.  Say so.
+            Text(
+                text = "Auto-skip",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                text = when (autoSkipScope) {
+                    AdAutoSkipScope.HIGH_CONFIDENCE_ONLY -> "Skips ads HushCast is sure about. All podcasts."
+                    AdAutoSkipScope.ALL_DETECTED -> "Skips every detected ad, including likely ones. All podcasts."
+                    AdAutoSkipScope.MODERATE_AND_HIGH -> "Balanced, set in Settings. All podcasts."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(6.dp))
+            val scopeChoices = listOf(
+                AdAutoSkipScope.HIGH_CONFIDENCE_ONLY to "Confirmed sponsors",
+                AdAutoSkipScope.ALL_DETECTED to "All detected ads"
+            )
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                scopeChoices.forEachIndexed { i, (choice, label) ->
+                    SegmentedButton(
+                        selected = autoSkipScope == choice,
+                        onClick = {
                             scope.launch {
-                                settingsRepository.hushCast.setAdAutoSkipScope(AdAutoSkipScope.HIGH_CONFIDENCE_ONLY)
-                                HushCastEngineBridge.autoSkipScope = AdAutoSkipScope.HIGH_CONFIDENCE_ONLY
+                                settingsRepository.hushCast.setAdAutoSkipScope(choice)
+                                HushCastEngineBridge.autoSkipScope = choice
                             }
-                        }
-                    },
-                    shapes = ButtonGroupDefaults.connectedLeadingButtonShapes(),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("High confidence")
-                }
-                ToggleButton(
-                    checked = autoSkipScope == AdAutoSkipScope.ALL_DETECTED,
-                    onCheckedChange = {
-                        if (it) {
-                            scope.launch {
-                                settingsRepository.hushCast.setAdAutoSkipScope(AdAutoSkipScope.ALL_DETECTED)
-                                HushCastEngineBridge.autoSkipScope = AdAutoSkipScope.ALL_DETECTED
-                            }
-                        }
-                    },
-                    shapes = ButtonGroupDefaults.connectedTrailingButtonShapes(),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text("All sponsors")
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index = i, count = scopeChoices.size)
+                    ) {
+                        Text(label, maxLines = 1)
+                    }
                 }
             }
 
@@ -327,22 +411,107 @@ fun PlayerHushCastSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(6.dp))
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(
-                            MuteActionMode.HARD_SILENCE to "Silence",
-                            MuteActionMode.VOLUME_DUCK to "Duck",
-                            MuteActionMode.BEEP to "Bleep",
-                            MuteActionMode.SAMPLE_DROP_MICRO_SKIP to "Micro-skip",
-                            MuteActionMode.CUSTOM_SOUND to "Custom"
-                        ).forEach { (mode, label) ->
-                            FilterChip(
-                                selected = muteActionMode == mode,
+                    // I10: a single choice, so segmented buttons rather than chips.
+                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                        hushLabels.userModes.forEachIndexed { i, mode ->
+                            SegmentedButton(
+                                selected = hushLabels.sameUserChoice(mode, muteActionMode),
                                 onClick = {
+                                    // "Sound" is the selected custom sound when there is one, else the tone (item 20).
+                                    val target = hushLabels.resolveUserChoice(mode, muteCustomUri)
+                                    HushCastEngineBridge.defaultActionMode = target
                                     scope.launch(Dispatchers.IO) {
-                                        settingsRepository.hushCast.setMuteActionMode(mode)
+                                        settingsRepository.hushCast.setMuteActionMode(target)
                                     }
                                 },
-                                label = { Text(label) }
+                                shape = SegmentedButtonDefaults.itemShape(index = i, count = hushLabels.userModes.size),
+                                // Four short labels: no check icon, so none of them is cut off.
+                                icon = {}
+                            ) {
+                                Text(hushLabels.modeLabel(mode), maxLines = 1)
+                            }
+                        }
+                    }
+
+                    if (app.podiumpodcasts.podium.ui.hushcast.HushCastLabels.isSound(muteActionMode)) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            text = "Mute sound",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        app.hushcast.automute.dsp.BleepStyle.entries.forEach { style ->
+                            SoundChoiceRow(
+                                label = style.label + if (style == app.hushcast.automute.dsp.BleepStyle.DEFAULT) " (Default)" else "",
+                                selected = muteActionMode == MuteActionMode.BEEP && bleepStyle == style,
+                                onSelect = {
+                                    HushCastEngineBridge.bleepStyle = style
+                                    HushCastEngineBridge.defaultActionMode = MuteActionMode.BEEP
+                                    HushCastEngineBridge.previewBleep(style)
+                                    scope.launch(Dispatchers.IO) {
+                                        settingsRepository.hushCast.setBleepStyle(style)
+                                        settingsRepository.hushCast.setMuteActionMode(MuteActionMode.BEEP)
+                                        // A built-in tone is now the selection, so no custom sound is
+                                        // selected (item 20; legacy sounds were migrated to the list).
+                                        settingsRepository.hushCast.setMuteCustomSoundUri(null)
+                                    }
+                                },
+                                onTest = { HushCastEngineBridge.previewBleep(style) }
+                            )
+                        }
+                        customSounds.forEach { preset ->
+                            SoundChoiceRow(
+                                label = preset.name,
+                                selected = muteActionMode == MuteActionMode.CUSTOM_SOUND && muteCustomUri == preset.uri,
+                                onSelect = {
+                                    HushCastEngineBridge.loadCustomMuteSound(context, preset.uri)
+                                    HushCastEngineBridge.defaultActionMode = MuteActionMode.CUSTOM_SOUND
+                                    HushCastEngineBridge.previewCustomSound(context, preset.uri)
+                                    scope.launch(Dispatchers.IO) {
+                                        settingsRepository.hushCast.setMuteCustomSoundUri(preset.uri)
+                                        settingsRepository.hushCast.setMuteActionMode(MuteActionMode.CUSTOM_SOUND)
+                                    }
+                                },
+                                onTest = { HushCastEngineBridge.previewCustomSound(context, preset.uri) }
+                            )
+                        }
+                    }
+
+                    if (skipSoundEnabled) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            text = "Skip sound",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        app.podiumpodcasts.podium.SkipSound.entries.forEach { sound ->
+                            SoundChoiceRow(
+                                label = sound.label + if (sound == app.podiumpodcasts.podium.SkipSound.WHOOSH) " (Default)" else "",
+                                selected = skipCustomUri == null && skipSound == sound,
+                                onSelect = {
+                                    HushCastEngineBridge.skipSound = sound
+                                    HushCastEngineBridge.sponsorSkipSoundUri = null
+                                    HushCastEngineBridge.previewSkipSound(context, sound)
+                                    scope.launch(Dispatchers.IO) {
+                                        settingsRepository.hushCast.setSkipSound(sound)
+                                        settingsRepository.hushCast.setSponsorSkipSoundUri(null)
+                                    }
+                                },
+                                onTest = { HushCastEngineBridge.previewSkipSound(context, sound) }
+                            )
+                        }
+                        customSounds.forEach { preset ->
+                            SoundChoiceRow(
+                                label = preset.name,
+                                selected = skipCustomUri == preset.uri,
+                                onSelect = {
+                                    HushCastEngineBridge.sponsorSkipSoundUri = preset.uri
+                                    HushCastEngineBridge.previewCustomSound(context, preset.uri)
+                                    scope.launch(Dispatchers.IO) {
+                                        settingsRepository.hushCast.setSponsorSkipSoundUri(preset.uri)
+                                    }
+                                },
+                                onTest = { HushCastEngineBridge.previewCustomSound(context, preset.uri) }
                             )
                         }
                     }
@@ -429,12 +598,12 @@ fun PlayerHushCastSheet(
                                         putExtra(Intent.EXTRA_STREAM, uri)
                                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                     }
-                                    context.startActivity(Intent.createChooser(intent, "Export Timeline Data"))
+                                    context.startActivity(Intent.createChooser(intent, "Export timeline data"))
                                 }
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Export Timeline Data (Developer)")
+                            Text("Export timeline data (developer)")
                         }
                     }
                 }
@@ -444,3 +613,38 @@ fun PlayerHushCastSheet(
         }
     }
 }
+
+/** One choosable sound: radio, name, and a Test button that plays it (R13). */
+@Composable
+private fun SoundChoiceRow(
+    label: String,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onTest: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .selectableRow(selected, onSelect),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        androidx.compose.material3.RadioButton(selected = selected, onClick = null)
+        Spacer(Modifier.width(8.dp))
+        Text(text = label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        androidx.compose.material3.IconButton(onClick = onTest) {
+            Icon(
+                imageVector = Icons.Rounded.PlayArrow,
+                contentDescription = "Play ${label.removeSuffix(" (Default)")} sample"
+            )
+        }
+    }
+}
+
+private fun Modifier.selectableRow(selected: Boolean, onClick: () -> Unit): Modifier =
+    this.then(
+        Modifier.selectable(
+            selected = selected,
+            role = androidx.compose.ui.semantics.Role.RadioButton,
+            onClick = onClick
+        )
+    )

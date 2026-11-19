@@ -20,17 +20,27 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.lifecycleScope
+import androidx.navigation3.runtime.NavKey
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import app.podiumpodcasts.podium.background.PlaybackService
 import app.podiumpodcasts.podium.manager.DatabaseManager
+import app.podiumpodcasts.podium.ui.LocalStartupDestination
 import app.podiumpodcasts.podium.ui.extractDeepLink
+import app.podiumpodcasts.podium.ui.navigation.parseStartupDestination
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 import app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.InetAddress
 import java.net.URI
 
@@ -59,8 +69,31 @@ class AppActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { _ -> }
 
+    /** S3: the startup destination, read off the main thread before the first frame. */
+    private var startupDestination by mutableStateOf<NavKey?>(null)
+
+    /** S3: true once the first frames with the real settings have been composed. */
+    @Volatile
+    private var uiReady = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // S3: keep the system splash screen up until settings are loaded, instead of blocking
+        // composition with runBlocking (and briefly drawing the default theme and tab).
+        val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
+        splashScreen.setKeepOnScreenCondition { !uiReady }
+
+        lifecycleScope.launch {
+            val raw = withTimeoutOrNull(STARTUP_SETTINGS_TIMEOUT_MS) {
+                settingsRepository.appearance.startupDestination.first()
+            }
+            startupDestination = parseStartupDestination(raw)
+        }
+        lifecycleScope.launch {
+            // Never keep the splash forever, whatever happens to the settings read.
+            delay(SPLASH_MAX_MS)
+            uiReady = true
+        }
 
         if (savedInstanceState == null) {
             handleWorkerPairingIntent(intent)
@@ -75,16 +108,26 @@ class AppActivity : ComponentActivity() {
                 db.lists().createFavorites()
             }
 
+            val startKey = startupDestination ?: return@setContent
+            LaunchedEffect(Unit) {
+                // Let the theme and grid settings (already cached by DataStore) reach the
+                // composition before the splash goes away.
+                withFrameNanos { }
+                withFrameNanos { }
+                uiReady = true
+            }
+
             CompositionLocalProvider(
                 LocalDatabase provides db,
-                LocalSettingsRepository provides settingsRepository
+                LocalSettingsRepository provides settingsRepository,
+                LocalStartupDestination provides startKey
             ) {
                 PodiumApp(deepLink)
 
                 pendingPairing?.let { pairing ->
                     AlertDialog(
                         onDismissRequest = { pendingPairing = null },
-                        title = { Text("Pair Desktop Worker?") },
+                        title = { Text("Pair desktop worker?") },
                         text = {
                             Text(
                                 "Allow HushCast to send episode titles and audio URLs to:\n\n${pairing.host}\n\n(${pairing.url})"
@@ -115,7 +158,7 @@ class AppActivity : ComponentActivity() {
                 pairingErrorMessage?.let { msg ->
                     AlertDialog(
                         onDismissRequest = { pairingErrorMessage = null },
-                        title = { Text("Invalid Worker Link") },
+                        title = { Text("Invalid worker link") },
                         text = { Text(msg) },
                         confirmButton = {
                             TextButton(onClick = { pairingErrorMessage = null }) {
@@ -213,5 +256,10 @@ class AppActivity : ComponentActivity() {
             val addr = InetAddress.getByName(host)
             addr.isLoopbackAddress || addr.isSiteLocalAddress || addr.isLinkLocalAddress
         }.getOrDefault(false)
+    }
+
+    private companion object {
+        const val STARTUP_SETTINGS_TIMEOUT_MS = 1_500L
+        const val SPLASH_MAX_MS = 2_500L
     }
 }

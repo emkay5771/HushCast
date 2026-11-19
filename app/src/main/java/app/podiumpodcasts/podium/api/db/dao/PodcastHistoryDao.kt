@@ -37,8 +37,13 @@ interface PodcastHistoryDao {
     @Query("SELECT * FROM podcastHistory ORDER BY timestamp DESC LIMIT 1")
     fun getLast(): Flow<PodcastHistoryBundle?>
 
-    @Query("UPDATE podcastHistory SET timestamp = :timestamp WHERE episodeId = :episodeId")
-    suspend fun updateTimestamp(episodeId: String, timestamp: Long)
+    /**
+     * Bumps one history entry.  By id, not episode: an episode played again days later has an
+     * older entry too, and updating by episode moved every one of them to "now", so History
+     * showed the episode several times.
+     */
+    @Query("UPDATE podcastHistory SET timestamp = :timestamp WHERE id = :id")
+    suspend fun updateTimestamp(id: Int, timestamp: Long)
 
     @Query("INSERT INTO podcastHistory (origin,episodeId,timestamp) VALUES (:origin,:episodeId,:timestamp)")
     suspend fun insert(

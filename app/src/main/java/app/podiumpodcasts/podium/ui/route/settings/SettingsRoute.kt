@@ -2,9 +2,7 @@ package app.podiumpodcasts.podium.ui.route.settings
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -54,8 +52,8 @@ import app.podiumpodcasts.podium.KOFI_LINK
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.ui.component.common.BackButton
 import app.podiumpodcasts.podium.ui.component.common.ExperimentalBadge
-import app.podiumpodcasts.podium.ui.component.settings.SettingsHeader
 import app.podiumpodcasts.podium.ui.component.settings.SettingsListItem
+import app.podiumpodcasts.podium.ui.component.settings.settingsGroup
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 import app.podiumpodcasts.podium.ui.route.settings.pane.SettingsAppearanceKey
@@ -123,6 +121,7 @@ fun SettingsRoute(
             )
         }
     ) { inset ->
+        val aboutHeader = stringResource(R.string.route_settings_about)
 
         LazyColumn(
             Modifier
@@ -132,287 +131,267 @@ fun SettingsRoute(
 
             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
         ) {
-            item {
-                SettingsHeader(
-                    label = "HushCast"
-                )
-            }
 
-            item {
-                val wordMuting by settingsRepository.hushCast.wordMutingEnabled.collectAsState(initial = true)
-                val adPolicy by settingsRepository.hushCast.adPolicyMode.collectAsState(initial = app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP)
-                val workerConfigured = remember {
-                    app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) &&
-                        app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
-                }
-                val modelsReady = remember { app.hushcast.automute.engine.ModelManager(context).areAllModelsReady() }
-                val whereLabel = when {
-                    workerConfigured -> "Cloud / desktop"
-                    modelsReady -> "This phone"
-                    else -> null
-                }
-                val statusDesc = if (whereLabel == null) {
-                    "Set up muting, sponsor skipping & processing"
-                } else {
-                    val mStr = if (wordMuting) "Muting on" else "Muting off"
-                    val sStr = when (adPolicy) {
-                        app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP -> "Skipping on"
-                        app.hushcast.automute.dsp.AdPolicyMode.MARK_ONLY -> "Marking only"
-                        app.hushcast.automute.dsp.AdPolicyMode.OFF -> "Skipping off"
+            settingsGroup(header = "HushCast", key = "hushcast", spaceAbove = 0.dp) {
+                row { pos ->
+                    val wordMuting by settingsRepository.hushCast.wordMutingEnabled.collectAsState(initial = true)
+                    val adPolicy by settingsRepository.hushCast.adPolicyMode.collectAsState(initial = app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP)
+                    val workerConfigured = remember {
+                        app.hushcast.automute.engine.HushCastPrefs.isWorkerActive(context)
                     }
-                    "$mStr · $sStr · $whereLabel"
-                }
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.AutoMirrored.Rounded.VolumeOff,
-                            contentDescription = ""
-                        )
-                    },
-                    label = "HushCast",
-                    description = statusDesc,
-                    index = 0,
-                    count = 1,
-                    onClick = {
-                        onPane(SettingsHushCastKey())
+                    val modelsReady = remember { app.hushcast.automute.engine.ModelManager(context).areAllModelsReady() }
+                    val whereLabel = when {
+                        workerConfigured -> "Cloud / desktop"
+                        modelsReady -> "This phone"
+                        else -> null
                     }
-                )
-            }
-
-            item {
-                Spacer(Modifier.height(16.dp))
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.ColorLens,
-                            stringResource(R.string.route_settings_appearance)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_appearance),
-                    index = 0,
-                    count = 7,
-                    onClick = {
-                        onPane(SettingsAppearanceKey())
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.PlayArrow,
-                            stringResource(R.string.route_settings_playback)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_playback),
-                    index = 1,
-                    count = 7,
-                    onClick = {
-                        onPane(SettingsPlaybackKey())
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Storage,
-                            stringResource(R.string.route_settings_database_and_backup)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_database_and_backup),
-                    index = 2,
-                    count = 7,
-                    onClick = {
-                        onPane(SettingsDatabaseKey())
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Construction,
-                            "Updates & notifications"
-                        )
-                    },
-                    label = "Updates & notifications",
-                    index = 3,
-                    count = 7,
-                    onClick = {
-                        onPane(SettingsBackgroundActivityKey())
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Download,
-                            stringResource(R.string.route_settings_downloads_and_storage)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_downloads_and_storage),
-                    index = 4,
-                    count = 7,
-                    onClick = {
-                        onPane(SettingsDownloadsAndStorageKey())
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Sync,
-                            stringResource(R.string.route_settings_synchronization)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_synchronization),
-                    trailingContent = {
-                        ExperimentalBadge()
-                    },
-                    index = 5,
-                    count = 7,
-                    onClick = {
-                        onPane(SettingsSynchronizationKey())
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Visibility,
-                            stringResource(R.string.route_settings_privacy)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_privacy),
-                    index = 6,
-                    count = 7,
-                    onClick = {
-                        onPane(SettingsPrivacyKey())
-                    }
-                )
-            }
-
-            item {
-                Spacer(Modifier.height(16.dp))
-            }
-
-            item {
-                SettingsHeader(
-                    label = stringResource(R.string.route_settings_about)
-                )
-            }
-
-            item {
-                val version = remember {
-                    val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-                    Pair(packageInfo.versionName, packageInfo.longVersionCode)
-                }
-
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            painterResource(R.drawable.ic_notification_icon),
-                            contentDescription = "",
-                            modifier = Modifier.size(24.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    },
-                    label = stringResource(R.string.app_name),
-                    description = "v${version.first} (${version.second})",
-                    index = 0,
-                    count = 4,
-                    onClick = {
-                        versionTapCount.intValue++
-                        if (versionTapCount.intValue >= 7 && !devMode) {
-                            scope.launch { settingsRepository.hushCast.setDevMode(true) }
-                            android.widget.Toast.makeText(context, "Developer mode enabled", android.widget.Toast.LENGTH_SHORT).show()
+                    val statusDesc = if (whereLabel == null) {
+                        "Set up muting, sponsor skipping & processing"
+                    } else {
+                        val mStr = if (wordMuting) "Muting on" else "Muting off"
+                        val sStr = when (adPolicy) {
+                            app.hushcast.automute.dsp.AdPolicyMode.AUTO_SKIP -> "Skipping on"
+                            app.hushcast.automute.dsp.AdPolicyMode.MARK_ONLY -> "Marking only"
+                            app.hushcast.automute.dsp.AdPolicyMode.OFF -> "Skipping off"
                         }
+                        "$mStr · $sStr · $whereLabel"
                     }
-                )
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.VolumeOff,
+                                contentDescription = ""
+                            )
+                        },
+                        label = "HushCast",
+                        description = statusDesc,
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = {
+                            onPane(SettingsHushCastKey())
+                        }
+                    )
+                }
             }
 
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Code,
-                            contentDescription = ""
-                        )
-                    },
-                    label = "Source code",
-                    description = "View HushCast on GitHub",
-                    index = 1,
-                    count = 4,
-                    onClick = {
-                        uriHandler.openUri("https://github.com/emkay5771/HushCast")
-                    }
-                )
+
+            settingsGroup(key = "main") {
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.ColorLens,
+                                stringResource(R.string.route_settings_appearance)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_appearance),
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = {
+                            onPane(SettingsAppearanceKey())
+                        }
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.PlayArrow,
+                                stringResource(R.string.route_settings_playback)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_playback),
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = {
+                            onPane(SettingsPlaybackKey())
+                        }
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.Storage,
+                                stringResource(R.string.route_settings_database_and_backup)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_database_and_backup),
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = {
+                            onPane(SettingsDatabaseKey())
+                        }
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.Construction,
+                                "Updates & notifications"
+                            )
+                        },
+                        label = "Updates & notifications",
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = {
+                            onPane(SettingsBackgroundActivityKey())
+                        }
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.Download,
+                                stringResource(R.string.route_settings_downloads_and_storage)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_downloads_and_storage),
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = {
+                            onPane(SettingsDownloadsAndStorageKey())
+                        }
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.Sync,
+                                stringResource(R.string.route_settings_synchronization)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_synchronization),
+                        trailingContent = {
+                            ExperimentalBadge()
+                        },
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = {
+                            onPane(SettingsSynchronizationKey())
+                        }
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.Visibility,
+                                stringResource(R.string.route_settings_privacy)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_privacy),
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = {
+                            onPane(SettingsPrivacyKey())
+                        }
+                    )
+                }
             }
 
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Balance,
-                            contentDescription = ""
-                        )
-                    },
-                    label = "Open-source licenses",
-                    description = "See used software and their licenses",
-                    index = 2,
-                    count = 4,
-                    onClick = {
-                        onLicenses()
-                    }
-                )
-            }
 
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.VolunteerActivism,
-                            contentDescription = ""
-                        )
-                    },
-                    label = "Support upstream podium on Ko-Fi",
-                    description = "HushCast is forked from podium by aimok04 — buy them a coffee :)",
-                    index = 3,
-                    count = 4,
-                    onClick = {
-                        uriHandler.openUri(KOFI_LINK)
+
+            settingsGroup(header = aboutHeader, key = "about") {
+                row { pos ->
+                    val version = remember {
+                        val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+                        Pair(packageInfo.versionName, packageInfo.longVersionCode)
                     }
-                )
+
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                painterResource(R.drawable.ic_notification_icon),
+                                contentDescription = "",
+                                modifier = Modifier.size(24.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        },
+                        label = stringResource(R.string.app_name),
+                        description = "v${version.first} (${version.second})",
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = {
+                            versionTapCount.intValue++
+                            if (versionTapCount.intValue >= 7 && !devMode) {
+                                scope.launch { settingsRepository.hushCast.setDevMode(true) }
+                                android.widget.Toast.makeText(context, "Developer mode enabled", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.Code,
+                                contentDescription = ""
+                            )
+                        },
+                        label = "Source code",
+                        description = "View HushCast on GitHub",
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = {
+                            uriHandler.openUri("https://github.com/emkay5771/HushCast")
+                        }
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.Balance,
+                                contentDescription = ""
+                            )
+                        },
+                        label = "Open-source licenses",
+                        description = "See used software and their licenses",
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = {
+                            onLicenses()
+                        }
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.VolunteerActivism,
+                                contentDescription = ""
+                            )
+                        },
+                        label = "Support upstream podium on Ko-Fi",
+                        description = "HushCast is forked from podium by aimok04 — buy them a coffee :)",
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = {
+                            uriHandler.openUri(KOFI_LINK)
+                        }
+                    )
+                }
             }
 
             if (devMode) {
-                item {
-                    Spacer(Modifier.height(16.dp))
-                }
-
-                item {
-                    SettingsListItem(
-                        icon = {
-                            Icon(Icons.Rounded.Work, "Debug")
-                        },
-                        label = "Debug",
-                        onClick = {
-                            onPane(SettingsDebugKey())
-                        }
-                    )
+                settingsGroup(key = "debug") {
+                    row { pos ->
+                        SettingsListItem(
+                            icon = {
+                                Icon(Icons.Rounded.Work, "Debug")
+                            },
+                            label = "Debug",
+                            index = pos.index,
+                            count = pos.count,
+                            onClick = {
+                                onPane(SettingsDebugKey())
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -432,13 +411,15 @@ fun RoamingWarningDialog(vm: SettingsViewModel) {
         },
 
         icon = {
-            Icon(
-                Icons.Rounded.Warning,
-                stringResource(R.string.route_settings_roaming_warning_title)
-            )
+            Icon(Icons.Rounded.Warning, contentDescription = null)
         },
         title = {
-            Text(stringResource(R.string.route_settings_roaming_warning_title))
+            Text(
+                when (vm.roamingWarningDialogState.value) {
+                    is RoamingWarningDialogState.ShowDownload -> "Download while roaming?"
+                    else -> "Refresh podcasts while roaming?"
+                }
+            )
         },
         text = {
             Text(stringResource(R.string.route_settings_roaming_warning_description))
@@ -458,7 +439,7 @@ fun RoamingWarningDialog(vm: SettingsViewModel) {
                     contentColor = MaterialTheme.colorScheme.onErrorContainer
                 )
             ) {
-                Text(stringResource(R.string.common_action_abort))
+                Text("Cancel")
             }
         },
         confirmButton = {
@@ -486,7 +467,7 @@ fun RoamingWarningDialog(vm: SettingsViewModel) {
                     contentColor = MaterialTheme.colorScheme.onError
                 )
             ) {
-                Text(stringResource(R.string.common_action_continue))
+                Text("Allow")
             }
         }
     )

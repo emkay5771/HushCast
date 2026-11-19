@@ -16,12 +16,25 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.DragHandle
 import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.RemoveCircleOutline
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -65,7 +78,7 @@ fun CreateFolderDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New Folder") },
+        title = { Text("New folder") },
         text = {
             Column(Modifier.fillMaxWidth()) {
                 OutlinedTextField(
@@ -158,6 +171,7 @@ fun FolderBottomSheet(
     onClickPodcast: (String) -> Unit
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     var showRenameDialog by remember { mutableStateOf(false) }
     var showAddPodcastsDialog by remember { mutableStateOf(false) }
     var isEditing by remember { mutableStateOf(false) }
@@ -175,7 +189,9 @@ fun FolderBottomSheet(
                 Text(
                     text = folder.name,
                     style = Typography.titleLargeEmphasized,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .semantics { heading() },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -206,81 +222,109 @@ fun FolderBottomSheet(
                     modifier = Modifier.padding(vertical = 24.dp)
                 )
             } else if (isEditing) {
+                // I15: drag to reorder (the reorderable library), instead of arrow buttons.
+                // A local copy moves at once; each move is saved straight away as well.
+                var ordered by remember(folderSubscriptions) { mutableStateOf(folderSubscriptions) }
+                val editListState = rememberLazyListState()
+                val reorderState = rememberReorderableLazyListState(editListState) { from, to ->
+                    if (from.index !in ordered.indices || to.index !in ordered.indices) return@rememberReorderableLazyListState
+                    val list = ordered.toMutableList()
+                    val moved = list.removeAt(from.index)
+                    list.add(to.index, moved)
+                    ordered = list
+                    PodcastGridOrganization.moveFolderPodcast(
+                        context,
+                        folder.id,
+                        moved.podcast.origin,
+                        to.index - from.index
+                    )
+                    haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+                }
                 LazyColumn(
+                    state = editListState,
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 420.dp),
                     contentPadding = PaddingValues(vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    items(folderSubscriptions.size, key = { folderSubscriptions[it].podcast.origin }) { idx ->
-                        val bundle = folderSubscriptions[idx]
-                        androidx.compose.material3.Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
+                    items(ordered.size, key = { ordered[it].podcast.origin }) { idx ->
+                        val bundle = ordered[idx]
+                        val title = bundle.podcast.fetchTitle()
+                        ReorderableItem(reorderState, key = bundle.podcast.origin) { isDragging ->
+                            val elevation by animateDpAsState(if (isDragging) 6.dp else 0.dp, label = "folderPodcastDrag")
+                            androidx.compose.material3.Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                shadowElevation = elevation,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                    .semantics {
+                                        // Dragging needs a gesture; TalkBack gets move actions.
+                                        customActions = buildList {
+                                            if (idx > 0) add(CustomAccessibilityAction("Move $title up") {
+                                                PodcastGridOrganization.moveFolderPodcast(context, folder.id, bundle.podcast.origin, -1)
+                                                true
+                                            })
+                                            if (idx < ordered.lastIndex) add(CustomAccessibilityAction("Move $title down") {
+                                                PodcastGridOrganization.moveFolderPodcast(context, folder.id, bundle.podcast.origin, 1)
+                                                true
+                                            })
+                                        }
+                                    }
                             ) {
-                                ShimmerAsyncImage(
+                                Row(
                                     modifier = Modifier
-                                        .size(42.dp)
-                                        .clip(RoundedCornerShape(8.dp)),
-                                    model = bundle.podcast.imageUrl,
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    targetSizePx = 128
-                                )
-                                Spacer(Modifier.width(10.dp))
-                                Text(
-                                    text = bundle.podcast.fetchTitle(),
-                                    style = Typography.bodyMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                IconButton(
-                                    enabled = idx > 0,
-                                    onClick = {
-                                        PodcastGridOrganization.moveFolderPodcast(
-                                            context,
-                                            folder.id,
-                                            bundle.podcast.origin,
-                                            -1
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    ShimmerAsyncImage(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(RoundedCornerShape(8.dp)),
+                                        model = bundle.podcast.imageUrl,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        targetSizePx = 128
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        text = title,
+                                        style = Typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            PodcastGridOrganization.removePodcastFromFolder(
+                                                context,
+                                                bundle.podcast.origin,
+                                                folder.id
+                                            )
+                                        }
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.RemoveCircleOutline,
+                                            contentDescription = "Remove $title from folder"
                                         )
                                     }
-                                ) {
-                                    Text("▲")
-                                }
-                                IconButton(
-                                    enabled = idx < folderSubscriptions.lastIndex,
-                                    onClick = {
-                                        PodcastGridOrganization.moveFolderPodcast(
-                                            context,
-                                            folder.id,
-                                            bundle.podcast.origin,
-                                            1
-                                        )
-                                    }
-                                ) {
-                                    Text("▼")
-                                }
-                                IconButton(
-                                    onClick = {
-                                        PodcastGridOrganization.removePodcastFromFolder(
-                                            context,
-                                            bundle.podcast.origin,
-                                            folder.id
-                                        )
-                                    }
-                                ) {
                                     Icon(
-                                        Icons.Rounded.Close,
-                                        contentDescription = "Remove from folder"
+                                        Icons.Rounded.DragHandle,
+                                        contentDescription = "Drag to reorder $title",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .padding(12.dp)
+                                            .draggableHandle(
+                                                onDragStarted = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                                },
+                                                onDragStopped = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                                                }
+                                            )
                                     )
                                 }
                             }
@@ -320,7 +364,7 @@ fun FolderBottomSheet(
         var newName by remember { mutableStateOf(folder.name) }
         AlertDialog(
             onDismissRequest = { showRenameDialog = false },
-            title = { Text("Rename Folder") },
+            title = { Text("Rename folder") },
             text = {
                 OutlinedTextField(
                     value = newName,
@@ -513,9 +557,10 @@ fun OrganizeFoldersDialog(
     onCreateNewFolder: () -> Unit
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Organize Folders") },
+        title = { Text("Organize folders") },
         text = {
             Column(Modifier.fillMaxWidth()) {
                 if (folders.isEmpty()) {
@@ -526,54 +571,96 @@ fun OrganizeFoldersDialog(
                     )
                 } else {
                     Text(
-                        text = "Use arrows to reorder folders, or long-press and drag items in the grid.",
+                        text = "Drag the handles to reorder folders.",
                         style = Typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(10.dp))
+                    // I15: drag to reorder (the reorderable library), instead of arrow buttons.
+                    // A local copy moves at once; each move is saved straight away as well.
+                    var ordered by remember(folders) { mutableStateOf(folders) }
+                    val listState = rememberLazyListState()
+                    val reorderState = rememberReorderableLazyListState(listState) { from, to ->
+                        if (from.index !in ordered.indices || to.index !in ordered.indices) return@rememberReorderableLazyListState
+                        val list = ordered.toMutableList()
+                        val moved = list.removeAt(from.index)
+                        list.add(to.index, moved)
+                        ordered = list
+                        PodcastGridOrganization.moveFolder(context, moved.id, to.index - from.index)
+                        haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+                    }
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 280.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        items(folders.size, key = { folders[it].id }) { idx ->
-                            val folder = folders[idx]
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = folder.name,
-                                        style = Typography.bodyLarge,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "${folder.origins.size} podcast${if (folder.origins.size == 1) "" else "s"}",
-                                        style = Typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                IconButton(
-                                    enabled = idx > 0,
-                                    onClick = { PodcastGridOrganization.moveFolder(context, folder.id, -1) }
+                        items(ordered.size, key = { ordered[it].id }) { idx ->
+                            val folder = ordered[idx]
+                            ReorderableItem(reorderState, key = folder.id) { isDragging ->
+                                val elevation by animateDpAsState(if (isDragging) 6.dp else 0.dp, label = "folderDrag")
+                                androidx.compose.material3.Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = if (isDragging) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent,
+                                    shadowElevation = elevation,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .semantics {
+                                            // Dragging needs a gesture; TalkBack gets move actions.
+                                            customActions = buildList {
+                                                if (idx > 0) add(CustomAccessibilityAction("Move ${folder.name} up") {
+                                                    PodcastGridOrganization.moveFolder(context, folder.id, -1)
+                                                    true
+                                                })
+                                                if (idx < ordered.lastIndex) add(CustomAccessibilityAction("Move ${folder.name} down") {
+                                                    PodcastGridOrganization.moveFolder(context, folder.id, 1)
+                                                    true
+                                                })
+                                            }
+                                        }
                                 ) {
-                                    Text("▲")
-                                }
-                                IconButton(
-                                    enabled = idx < folders.lastIndex,
-                                    onClick = { PodcastGridOrganization.moveFolder(context, folder.id, 1) }
-                                ) {
-                                    Text("▼")
-                                }
-                                IconButton(
-                                    onClick = { PodcastGridOrganization.deleteFolder(context, folder.id) }
-                                ) {
-                                    Icon(Icons.Rounded.Delete, contentDescription = "Delete folder")
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.DragHandle,
+                                            contentDescription = "Drag to reorder ${folder.name}",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .padding(12.dp)
+                                                .draggableHandle(
+                                                    onDragStarted = {
+                                                        haptic.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                                                    },
+                                                    onDragStopped = {
+                                                        haptic.performHapticFeedback(HapticFeedbackType.GestureEnd)
+                                                    }
+                                                )
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                text = folder.name,
+                                                style = Typography.bodyLarge,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "${folder.origins.size} podcast${if (folder.origins.size == 1) "" else "s"}",
+                                                style = Typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = { PodcastGridOrganization.deleteFolder(context, folder.id) }
+                                        ) {
+                                            Icon(Icons.Rounded.Delete, contentDescription = "Delete folder ${folder.name}")
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -591,10 +678,8 @@ fun OrganizeFoldersDialog(
                     onCreateNewFolder()
                 }
             ) {
-                Text("New Folder")
+                Text("New folder")
             }
         }
     )
 }
-
-

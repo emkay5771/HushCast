@@ -17,8 +17,19 @@ data class DesktopHealthResponse(
     val pipelineVersion: Int = 1,
     val deployment: String = "local",
     val gpuName: String? = null,
-    val modelsLoaded: Boolean = false
-)
+    val modelsLoaded: Boolean = false,
+    /** Jobs waiting for the worker (optional; older workers don't send it). */
+    val queuePosition: Int? = null
+) {
+    /** Cloud (Modal) worker: a queued job may be waiting for a GPU container to start. */
+    val isCloud: Boolean get() = deployment.equals("modal", ignoreCase = true)
+
+    /** Older than this app expects: results still work but may miss newer fixes (V15). */
+    fun isOutdated(
+        currentPipelineVersion: Int = app.hushcast.automute.pipeline.AutoMuteAnalyzer.CURRENT_PIPELINE_VERSION,
+        minApiVersion: Int = DesktopWorkerClient.MIN_WORKER_API_VERSION
+    ): Boolean = pipelineVersion < currentPipelineVersion || apiVersion < minApiVersion
+}
 
 @Serializable
 data class DesktopJobRequest(
@@ -32,7 +43,9 @@ data class DesktopJobRequest(
     val feedChaptersType: String? = null,
     val language: String? = null,
     val force: Boolean = false,
-    val reprocessStage: String? = null
+    val reprocessStage: String? = null,
+    /** Helps the worker's transcription prompt (spellings of names and the show). */
+    val podcastTitle: String? = null
 )
 
 @Serializable
@@ -118,3 +131,48 @@ data class DesktopSearchResponse(
     val query: String,
     val hits: List<DesktopSearchHit> = emptyList()
 )
+
+/** Short, user-facing text for worker states (pure, so it's unit-tested). */
+object DesktopWorkerStatusText {
+    const val OUTDATED_NOTE = "Worker is out of date. Update it for the best results"
+
+    /** How long a job may sit in QUEUED before the phone explains the wait (V20). */
+    const val COLD_START_AFTER_MS = 10_000L
+
+    /**
+     * The label for a job that's been QUEUED for [queuedForMs], or null while that's still short.
+     * [jobQueuePosition] is the job's "jobs ahead of it"; [healthQueuePosition] the worker's queue
+     * length from /v1/health.
+     */
+    fun queuedLabel(
+        queuedForMs: Long,
+        isCloud: Boolean,
+        jobQueuePosition: Int = 0,
+        healthQueuePosition: Int? = null
+    ): String? {
+        if (queuedForMs < COLD_START_AFTER_MS) return null
+        val base = if (isCloud) "Starting the cloud GPU…" else "Waiting for the worker…"
+        return when {
+            jobQueuePosition > 0 -> "$base ($jobQueuePosition ahead)"
+            healthQueuePosition != null && healthQueuePosition > 0 -> "$base ($healthQueuePosition in queue)"
+            else -> base
+        }
+    }
+
+    /**
+     * A worker's failure reason, short enough for an episode row (V10): first non-blank line,
+     * without "Desktop worker failed:" or a leading `SomeError:` class name, at most [maxLen].
+     */
+    fun shortReason(raw: String?, maxLen: Int = 80): String? {
+        var line = raw?.lineSequence()?.map { it.trim() }?.firstOrNull { it.isNotEmpty() } ?: return null
+        line = line.removePrefix("Desktop worker failed:").trim()
+        line = ERROR_CLASS_PREFIX.replace(line, "").trim()
+        line = WHITESPACE.replace(line, " ")
+        if (line.isEmpty()) return null
+        line = line.replaceFirstChar { it.uppercaseChar() }
+        return if (line.length <= maxLen) line else line.take(maxLen - 1).trimEnd() + "…"
+    }
+
+    private val ERROR_CLASS_PREFIX = Regex("^(?:[A-Za-z_][\\w.]*(?:Error|Exception)):\\s*")
+    private val WHITESPACE = Regex("\\s+")
+}

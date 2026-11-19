@@ -34,7 +34,11 @@ import app.podiumpodcasts.podium.background.COMMAND_CYCLE_SPEED
 import app.podiumpodcasts.podium.background.COMMAND_SET_SEEK_BACK_INCREMENT
 import app.podiumpodcasts.podium.background.COMMAND_SET_SEEK_FORWARD_INCREMENT
 import app.podiumpodcasts.podium.background.COMMAND_SLEEP_TIMER_SET
+import app.podiumpodcasts.podium.background.EXTRA_SLEEP_TIMER_END_MS
+import app.podiumpodcasts.podium.background.EXTRA_SLEEP_TIMER_MODE
 import app.podiumpodcasts.podium.background.EXTRA_SLEEP_TIMER_TRIGGER
+import app.podiumpodcasts.podium.background.HushCastEngineBridge
+import app.podiumpodcasts.podium.background.SleepTimerModes
 import app.podiumpodcasts.podium.manager.DatabaseManager
 import app.podiumpodcasts.podium.manager.DownloadManager
 import app.podiumpodcasts.podium.utils.getEpisodeId
@@ -48,6 +52,44 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
+
+/**
+ * The sleep timer's countdown (item 6).  "End of chapter" and "End of episode" stop at a playback
+ * position, so their time left comes from the position, the target and the speed: it holds still
+ * while paused instead of running down a wall-clock estimate to "0 min".
+ */
+object SleepTimerCountdown {
+    /** The position a position-based timer stops at, or null when there is none (or it's unknown). */
+    fun targetEndMs(mode: String?, chapterEndMs: Long, durationMs: Long): Long? = when (mode) {
+        SleepTimerModes.END_OF_EPISODE -> durationMs.takeIf { it > 1L }
+        SleepTimerModes.END_OF_CHAPTER -> chapterEndMs.takeIf { it >= 0L }
+        else -> null
+    }
+
+    /** Listening time (wall-clock ms) from [positionMs] to [endMs] at [speed], minus ranges that are skipped. */
+    fun remainingWallMs(
+        positionMs: Long,
+        endMs: Long,
+        speed: Float,
+        skipRanges: List<app.hushcast.automute.dsp.SkipAwareSeekCalculator.SkipRange> = emptyList()
+    ): Long {
+        val safeSpeed = if (speed.isNaN() || speed <= 0f) 1f else speed
+        return app.hushcast.automute.dsp.SkipAwareSeekCalculator.computeWallRemainingMs(
+            fromMs = positionMs.coerceAtLeast(0L),
+            targetEndMs = endMs,
+            speed = safeSpeed,
+            skipRanges = skipRanges
+        )
+    }
+
+    /** Minutes to show for [remainingMs]: rounded up, so "1 min" stays until the timer actually ends. */
+    fun displayMinutes(remainingMs: Long): Int =
+        if (remainingMs <= 0L) 0 else ((remainingMs + 59_999L) / 60_000L).toInt()
+
+    /** Minutes left on a plain timer that ends at wall-clock [triggerMs]. */
+    fun wallClockMinutes(triggerMs: Long, nowMs: Long): Int =
+        (((triggerMs - nowMs) / 1000L) / 60f).roundToInt().coerceAtLeast(0)
+}
 
 interface SourceTypeState {
     object Unknown : SourceTypeState
@@ -82,6 +124,14 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
     // unix millis when sleep timer should trigger
     var sleepTimerTrigger by mutableStateOf<Long?>(null)
     var sleepTimerPresetKey by mutableStateOf<String?>(null)
+    /** [SleepTimerModes] of the running timer (from the service), null when none. */
+    var sleepTimerMode by mutableStateOf<String?>(null)
+    /** "End of chapter" stop position, -1 when unused. */
+    var sleepTimerEndPositionMs by mutableLongStateOf(-1L)
+
+    /** True while a position-based sleep timer (end of chapter/episode) is waiting on a pause. */
+    val isSleepTimerHeldByPause: Boolean
+        get() = sleepTimerTrigger != null && SleepTimerModes.isPositionBased(sleepTimerMode) && !isPlaying
 
     var metadataOrigin by mutableStateOf<String?>(null)
     var metadataEpisodeId by mutableStateOf<String?>(null)
@@ -152,9 +202,10 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         val currentIdx = controller.currentMediaItemIndex.takeIf { it in 0 until controller.mediaItemCount } ?: 0
         val currentId = controller.currentMediaItem?.getEpisodeId()
 
-        // If tapping Play on the currently playing episode, just seek/play
+        // If tapping Play on the currently playing episode, just seek/play.  Seek whenever the caller
+        // gave a position, including 0 (a chapter at 0:00); otherwise keep the current position.
         if (currentId == bundle.episode.id) {
-            if (startPosMs > 0L) controller.seekTo(currentIdx, startPosMs)
+            if (startPositionMs != null) controller.seekTo(currentIdx, startPositionMs.coerceAtLeast(0L))
             controller.prepare()
             controller.play()
             return
@@ -322,14 +373,18 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
             } else {
                 null
             }
-            val desktopEnabled = app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(appCtx)
+            val desktopEnabled = app.hushcast.automute.engine.HushCastPrefs.isWorkerActive(appCtx)
             if (localPath != null) {
+                val feedTranscript = app.podiumpodcasts.podium.api.download.FeedTranscriptFetcher
+                    .fetchBestForAnalysis(bundle.episode)
                 app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueAnalyzeNow(
                     context = appCtx,
                     episodeId = bundle.episode.id,
                     audioPath = localPath,
                     actionMode = repo.hushCast.muteActionMode.first(),
-                    episodeTitle = bundle.episode.title
+                    episodeTitle = bundle.episode.title,
+                    feedTranscriptRaw = feedTranscript?.raw,
+                    feedTranscriptMime = feedTranscript?.mime ?: bundle.episode.transcriptType
                 )
             } else if (desktopEnabled) {
                 DownloadManager.downloadEpisode(
@@ -466,7 +521,9 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     fun seek(position: Long) {
         val controller = mediaController ?: return
-        val clamped = if (currentDuration > 0L) {
+        // currentDuration is 1 while the duration is unknown (just after an item change), so only
+        // clamp to a real duration; clamping to 1 ms used to send chapter taps to 0:00.
+        val clamped = if (currentDuration > 1L) {
             position.coerceIn(0L, currentDuration)
         } else {
             position.coerceAtLeast(0L)
@@ -499,6 +556,8 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         val next = sleepTimer?.takeIf { it != 0L }
         sleepTimerTrigger = next
         sleepTimerPresetKey = if (next == null) null else presetKey
+        sleepTimerMode = if (next == null) null else SleepTimerModes.TIME
+        sleepTimerEndPositionMs = -1L
         mediaController?.sendCustomCommand(
             SessionCommand(COMMAND_SLEEP_TIMER_SET, Bundle().apply {
                 putLong("trigger", sleepTimer ?: 0L)
@@ -510,7 +569,9 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun setSleepTimerEndOfEpisode(approxWallMs: Long) {
         val approxTrigger = System.currentTimeMillis() + approxWallMs
         sleepTimerTrigger = approxTrigger
-        sleepTimerPresetKey = "END_OF_EPISODE"
+        sleepTimerPresetKey = SleepTimerModes.END_OF_EPISODE
+        sleepTimerMode = SleepTimerModes.END_OF_EPISODE
+        sleepTimerEndPositionMs = -1L
         mediaController?.sendCustomCommand(
             SessionCommand(COMMAND_SLEEP_TIMER_SET, Bundle().apply {
                 putString("mode", "END_OF_EPISODE")
@@ -523,7 +584,9 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
     fun setSleepTimerEndOfChapter(chapterEndMs: Long, approxWallMs: Long) {
         val approxTrigger = System.currentTimeMillis() + approxWallMs
         sleepTimerTrigger = approxTrigger
-        sleepTimerPresetKey = "END_OF_CHAPTER"
+        sleepTimerPresetKey = SleepTimerModes.END_OF_CHAPTER
+        sleepTimerMode = SleepTimerModes.END_OF_CHAPTER
+        sleepTimerEndPositionMs = chapterEndMs
         mediaController?.sendCustomCommand(
             SessionCommand(COMMAND_SLEEP_TIMER_SET, Bundle().apply {
                 putString("mode", "END_OF_CHAPTER")
@@ -611,29 +674,71 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
     }
 
     /**
-     * Returns sleep timer state (in minutes)
+     * Returns sleep timer state (in minutes).  A plain timer counts down in wall-clock time; "End of
+     * chapter/episode" counts down from the playback position and holds while paused (item 6).
      */
     @Composable
     fun getSleepTimerState(): MutableState<Int?> {
         val sleepTimerState = remember { mutableStateOf<Int?>(null) }
         val lifecycleOwner = LocalLifecycleOwner.current
 
-        LaunchedEffect(lifecycleOwner, sleepTimerTrigger) {
+        LaunchedEffect(
+            lifecycleOwner, sleepTimerTrigger, sleepTimerMode, sleepTimerEndPositionMs,
+            isPlaying, lastProgressUpdate, currentPosition, currentDuration, speed
+        ) {
             val trigger = sleepTimerTrigger
             if (trigger == null) {
                 sleepTimerState.value = null
                 return@LaunchedEffect
             }
+            val mode = sleepTimerMode
+            if (SleepTimerModes.isPositionBased(mode)) {
+                fun minutesLeft(): Int? {
+                    val end = SleepTimerCountdown.targetEndMs(mode, sleepTimerEndPositionMs, currentDuration)
+                        ?: return sleepTimerState.value
+                    val remaining = SleepTimerCountdown.remainingWallMs(
+                        positionMs = livePositionNowMs(),
+                        endMs = end,
+                        speed = speed,
+                        skipRanges = HushCastEngineBridge.getActiveSkipRanges()
+                    )
+                    return SleepTimerCountdown.displayMinutes(remaining)
+                }
+                sleepTimerState.value = minutesLeft()
+                if (!isPlaying) return@LaunchedEffect
+                lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                    while (true) {
+                        sleepTimerState.value = minutesLeft()
+                        delay(5_000L)
+                    }
+                }
+                return@LaunchedEffect
+            }
             lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 while (true) {
-                    val diff = trigger - System.currentTimeMillis()
-                    sleepTimerState.value = ((diff / 1000L) / 60f).roundToInt().coerceAtLeast(0)
-                    delay(30_000L)
+                    sleepTimerState.value = SleepTimerCountdown.wallClockMinutes(trigger, System.currentTimeMillis())
+                    delay(15_000L)
                 }
             }
         }
 
         return sleepTimerState
+    }
+
+    private fun applySleepTimerExtras(extras: Bundle) {
+        val trigger = extras.getLong(EXTRA_SLEEP_TIMER_TRIGGER, 0L).takeIf { it != 0L }
+        sleepTimerTrigger = trigger
+        if (trigger == null) {
+            sleepTimerMode = null
+            sleepTimerEndPositionMs = -1L
+            sleepTimerPresetKey = null
+            return
+        }
+        val mode = extras.getString(EXTRA_SLEEP_TIMER_MODE)
+        sleepTimerMode = mode
+        sleepTimerEndPositionMs = extras.getLong(EXTRA_SLEEP_TIMER_END_MS, -1L)
+        // Keeps the check mark on "End of chapter/episode" after the screen is recreated.
+        if (SleepTimerModes.isPositionBased(mode)) sleepTimerPresetKey = mode
     }
 
     fun syncQueue(persist: Boolean = hasRestoredQueue, debouncePersist: Boolean = false) {
@@ -745,8 +850,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     val controllerListener = object : MediaController.Listener {
         override fun onExtrasChanged(controller: MediaController, extras: Bundle) {
-            val trigger = extras.getLong(EXTRA_SLEEP_TIMER_TRIGGER, 0L)
-            sleepTimerTrigger = trigger.takeIf { it != 0L }
+            applySleepTimerExtras(extras)
         }
     }
 
@@ -849,8 +953,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
             }
         }
 
-        val initialTimer = mediaController.sessionExtras.getLong(EXTRA_SLEEP_TIMER_TRIGGER, 0L)
-        this@MediaPlayerViewModel.sleepTimerTrigger = initialTimer.takeIf { it != 0L }
+        applySleepTimerExtras(mediaController.sessionExtras)
 
         this@MediaPlayerViewModel.playbackState = mediaController.playbackState
         this@MediaPlayerViewModel.isPlayerVisible = mediaController.mediaItemCount > 0 || mediaController.playbackState != Player.STATE_IDLE

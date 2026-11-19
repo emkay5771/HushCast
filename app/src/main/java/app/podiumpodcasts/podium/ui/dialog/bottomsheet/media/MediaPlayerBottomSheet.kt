@@ -7,6 +7,8 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -23,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -51,6 +54,10 @@ import androidx.compose.material.icons.rounded.Forward30
 import androidx.compose.material.icons.rounded.Forward5
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -112,6 +119,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -154,6 +162,7 @@ import app.podiumpodcasts.podium.ui.vm.SourceTypeState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private enum class MediaPlayerTab(val label: String) {
     PLAYER("Playing"),
@@ -181,7 +190,8 @@ fun MediaPlayerBottomSheet(
     val playerVm = viewModel<PlayerScreenViewModel>()
 
     val episodeId = vm.metadataEpisodeId ?: ""
-    LaunchedEffect(episodeId, vm.currentDuration) {
+    // Bound during composition, so the first frame already asks for this episode's data.
+    remember(episodeId, vm.currentDuration) {
         playerVm.bindEpisode(episodeId, vm.currentDuration)
     }
 
@@ -198,6 +208,9 @@ fun MediaPlayerBottomSheet(
     val devMode by settingsRepository.hushCast.devMode.collectAsStateWithLifecycle(initialValue = false)
     val wordMutingGlobal by settingsRepository.hushCast.wordMutingEnabled.collectAsStateWithLifecycle(initialValue = true)
     val adPolicyGlobal by settingsRepository.hushCast.adPolicyMode.collectAsStateWithLifecycle(initialValue = AdPolicyMode.AUTO_SKIP)
+    val blurBackground by settingsRepository.appearance.playerBlurBackground.collectAsStateWithLifecycle(initialValue = true)
+    val blurSheets by settingsRepository.appearance.playerBlurSheets.collectAsStateWithLifecycle(initialValue = true)
+    val toolbarVisibleCount by settingsRepository.behavior.playerToolbarVisibleCount.collectAsStateWithLifecycle(initialValue = 4)
 
     val currentEpisodeBundle by playerVm.episodeBundle.collectAsStateWithLifecycle()
     val analysisStatus by playerVm.analysisStatus.collectAsStateWithLifecycle()
@@ -224,8 +237,17 @@ fun MediaPlayerBottomSheet(
     val isProcessed = shieldBadge == ReadinessBadge.READY || shieldBadge == ReadinessBadge.WORD_MUTE_READY
     val protectionActive = wordMutingGlobal || adPolicyGlobal == AdPolicyMode.AUTO_SKIP
 
-    val isDownloaded = remember(episodeId, currentEpisodeBundle) {
-        currentEpisodeBundle?.episode?.craftDownloadFile(context)?.exists() == true
+    // S5: File.exists() runs off the main thread.
+    val isDownloaded by androidx.compose.runtime.produceState(
+        initialValue = vm.mediaSourceType is SourceTypeState.Downloaded,
+        episodeId,
+        currentEpisodeBundle?.episode?.id,
+        currentEpisodeBundle?.download?.state
+    ) {
+        val episode = currentEpisodeBundle?.episode?.takeIf { it.id == episodeId }
+        value = if (episode == null) false else withContext(Dispatchers.IO) {
+            episode.craftDownloadFile(context).exists()
+        }
     }
 
     LaunchedEffect(pendingUndo) {
@@ -258,9 +280,21 @@ fun MediaPlayerBottomSheet(
         withPlayer
     }
 
-    var selectedTab by remember { mutableStateOf(MediaPlayerTab.PLAYER) }
+    // S6: the tab survives configuration changes.
+    var selectedTab by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(MediaPlayerTab.PLAYER) }
     var chaptersScrollTargetIndex by remember { mutableStateOf<Int?>(null) }
     var showTranscriptOverlay by remember { mutableStateOf(false) }
+
+    // M6: a new episode opens on the Playing tab.
+    var lastEpisodeId by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(episodeId) }
+    LaunchedEffect(episodeId) {
+        if (episodeId.isBlank()) return@LaunchedEffect
+        if (lastEpisodeId.isNotBlank() && episodeId != lastEpisodeId) {
+            selectedTab = MediaPlayerTab.PLAYER
+            chaptersScrollTargetIndex = null
+        }
+        lastEpisodeId = episodeId
+    }
 
     val pagerState = rememberPagerState(
         initialPage = visibleTabs.indexOf(selectedTab).coerceAtLeast(0)
@@ -319,13 +353,11 @@ fun MediaPlayerBottomSheet(
     )
 
     val orderedAllActions = remember(configuredToolbarActions) {
-        val mapped = configuredToolbarActions
-            .map { if (it == PlayerToolbarAction.ANALYZE) PlayerToolbarAction.HUSHCAST else it }
-            .filter { it in availablePlayerActions }
-        (mapped + availablePlayerActions.filter { it !in mapped }).distinct()
+        // Actions the user never placed come after theirs, Transcript first (T1).
+        PlayerToolbarOrder.ordered(configuredToolbarActions, availablePlayerActions)
     }
-    val shortcutActions = remember(orderedAllActions) { orderedAllActions.take(4) }
-    val overflowActions = remember(orderedAllActions) { orderedAllActions.drop(4) }
+    val shortcutActions = remember(orderedAllActions, toolbarVisibleCount) { orderedAllActions.take(toolbarVisibleCount) }
+    val overflowActions = remember(orderedAllActions, toolbarVisibleCount) { orderedAllActions.drop(toolbarVisibleCount) }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     fun dismissGracefully(after: () -> Unit = {}) = scope.launch {
@@ -336,41 +368,24 @@ fun MediaPlayerBottomSheet(
 
     fun triggerAnalyzeNow() {
         if (episodeId.isBlank()) return
-        val hasDesktopWorker = HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
-        if (hasDesktopWorker) {
-            scope.launch(Dispatchers.IO) {
-                DownloadManager.downloadEpisode(
-                    context = context,
-                    db = appDb,
-                    episodeId = episodeId,
-                    downloadMethod = DownloadAnalysisMethod.DESKTOP,
-                    forceReprocess = true
-                )
+        scope.launch {
+            // Same routing everywhere: worker if set up, else on the phone (replacing any queued job).
+            val outcome = app.podiumpodcasts.podium.ui.hushcast.HushCastAnalyze.start(
+                context = context,
+                db = appDb,
+                episodeId = episodeId,
+                actionMode = HushCastEngineBridge.defaultActionMode
+            )
+            when (outcome) {
+                app.podiumpodcasts.podium.ui.hushcast.HushCastAnalyze.Outcome.NEEDS_DOWNLOAD -> showNotDownloadedDialog = true
+                app.podiumpodcasts.podium.ui.hushcast.HushCastAnalyze.Outcome.WAITING_FOR_CHARGER ->
+                    android.widget.Toast.makeText(
+                        context,
+                        app.podiumpodcasts.podium.ui.hushcast.HushCastAnalyze.message(outcome),
+                        android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                else -> Unit
             }
-            return
-        }
-        val localFile = currentEpisodeBundle?.episode?.craftDownloadFile(context)
-        if (isDownloaded && localFile != null && localFile.exists()) {
-            scope.launch(Dispatchers.IO) {
-                val autoMuteDb = AutoMuteDatabase.getInstance(context)
-                autoMuteDb.dao().upsertStatus(
-                    EpisodeAnalysisStatusEntity(
-                        episodeId = episodeId,
-                        badge = ReadinessBadge.ANALYZING.name,
-                        progressPercent = 0,
-                        stageLabel = "Queued for AI analysis…"
-                    )
-                )
-                EpisodeAnalysisWorker.enqueueAnalyzeNow(
-                    context = context,
-                    episodeId = episodeId,
-                    audioPath = localFile.absolutePath,
-                    actionMode = HushCastEngineBridge.defaultActionMode,
-                    episodeTitle = currentEpisodeBundle?.episode?.title
-                )
-            }
-        } else {
-            showNotDownloadedDialog = true
         }
     }
 
@@ -400,7 +415,13 @@ fun MediaPlayerBottomSheet(
                     else -> showTranscriptOverlay = true
                 }
             }
-            PlayerToolbarAction.FAVORITE -> playerVm.toggleFavorite(isFavorite)
+            PlayerToolbarAction.FAVORITE -> {
+                // M10
+                haptic.performHapticFeedback(
+                    if (isFavorite) HapticFeedbackType.ToggleOff else HapticFeedbackType.ToggleOn
+                )
+                playerVm.toggleFavorite(isFavorite)
+            }
             PlayerToolbarAction.DOWNLOAD -> {
                 if (isDownloaded) showDeleteDownloadConfirm = true else triggerDownloadNow()
             }
@@ -438,10 +459,15 @@ fun MediaPlayerBottomSheet(
     }
     val currentChapter = resolvedChapters.getOrNull(currentChapterIndex)
 
-    SwitchableDynamicMaterialExpressiveTheme(
+    // M6: one shared, cached palette (also used by the mini player and Up Next), cross-faded on change.
+    PlayerArtworkTheme(
         enable = enableArtworkColors,
-        seedColor = Color(vm.metadataImageSeedColor ?: 1)
+        seedColor = vm.metadataImageSeedColor
     ) {
+        val blurredArtwork = app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.rememberBlurredArtwork(
+            artworkUri = vm.mediaMetadata?.artworkUri?.toString(),
+            enabled = blurBackground
+        )
         ModalBottomSheet(
             sheetState = sheetState,
             sheetMaxWidth = androidx.compose.ui.unit.Dp.Infinity,
@@ -465,9 +491,18 @@ fun MediaPlayerBottomSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .fillMaxHeight()
+                    // R19: blurred artwork behind the player, blending into the sheet at the top.
+                    .playerBackdrop(blurredArtwork, androidx.compose.material3.BottomSheetDefaults.ContainerColor)
             ) {
-                // Top row: Collapse, Tabs, Up Next (hidden cleanly during transcript overlay, Tune icon removed per I9)
-                if (!showTranscriptOverlay) {
+                // Top row: Collapse, Tabs, Up Next.  T2: slides away (instead of popping) while the
+                // transcript is open.
+                AnimatedVisibility(
+                    visible = !showTranscriptOverlay,
+                    enter = expandVertically(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()) +
+                        fadeIn(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
+                    exit = shrinkVertically(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()) +
+                        fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec())
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -573,10 +608,41 @@ fun MediaPlayerBottomSheet(
                                             horizontalAlignment = Alignment.CenterHorizontally,
                                             verticalArrangement = Arrangement.SpaceBetween
                                         ) {
-                                            Column(
+                                            androidx.compose.foundation.layout.BoxWithConstraints(
                                                 modifier = Modifier
                                                     .weight(1f)
-                                                    .fillMaxWidth(),
+                                                    .fillMaxWidth()
+                                                    // R18: swipe up anywhere above the seek bar opens Up Next.
+                                                    .pointerInput(Unit) {
+                                                        val thresholdPx = 64.dp.toPx()
+                                                        awaitEachGesture {
+                                                            val down = awaitFirstDown(requireUnconsumed = false)
+                                                            var totalDy = 0f
+                                                            var totalDx = 0f
+                                                            var triggered = false
+                                                            while (true) {
+                                                                val event = awaitPointerEvent()
+                                                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                                                if (!change.pressed) break
+                                                                totalDy += (change.position.y - change.previousPosition.y)
+                                                                totalDx += (change.position.x - change.previousPosition.x)
+                                                                if (!triggered && totalDy < -thresholdPx &&
+                                                                    kotlin.math.abs(totalDy) > kotlin.math.abs(totalDx) * 1.5f
+                                                                ) {
+                                                                    triggered = true
+                                                                    change.consume()
+                                                                    showQueueBottomSheet = true
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                            ) {
+                                            // R7: the artwork takes the room the text below leaves, instead of a fixed 300 dp.
+                                            val reservedForText = if (compactLayout) 110.dp else 200.dp
+                                            val fittedArt = minOf(maxWidth, maxHeight - reservedForText)
+                                                .coerceIn(if (compactLayout) 96.dp else 160.dp, 420.dp)
+                                            Column(
+                                                modifier = Modifier.fillMaxSize(),
                                                 horizontalAlignment = Alignment.CenterHorizontally,
                                                 verticalArrangement = Arrangement.Center
                                             ) {
@@ -586,29 +652,9 @@ fun MediaPlayerBottomSheet(
 
                                                 // Artwork with chapter image cross-fade & link button (C3) + swipe-up for Up Next (M4)
                                                 Box(
-                                                    modifier = Modifier
-                                                        .pointerInput(Unit) {
-                                                            val thresholdPx = 64.dp.toPx()
-                                                            awaitEachGesture {
-                                                                val down = awaitFirstDown(requireUnconsumed = true)
-                                                                var totalDy = 0f
-                                                                var triggered = false
-                                                                while (true) {
-                                                                    val event = awaitPointerEvent()
-                                                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                                                    if (!change.pressed) break
-                                                                    totalDy += (change.position.y - change.previousPosition.y)
-                                                                    if (!triggered && totalDy < -thresholdPx) {
-                                                                        triggered = true
-                                                                        change.consume()
-                                                                        showQueueBottomSheet = true
-                                                                    }
-                                                                }
-                                                            }
-                                                        },
                                                     contentAlignment = Alignment.Center
                                                 ) {
-                                                    val artSize = if (compactLayout) 128.dp else 300.dp
+                                                    val artSize = fittedArt
                                                     val artUri = currentChapter?.imageUrl?.takeIf { it.isNotBlank() }
                                                         ?: vm.mediaMetadata?.artworkUri?.toString()
                                                     val isActivelyBuffering =
@@ -668,6 +714,27 @@ fun MediaPlayerBottomSheet(
                                                             )
                                                         }
                                                     }
+
+                                                    // R7: the skip / undo pill sits on the artwork's bottom edge instead of
+                                                    // holding an empty 48 dp slot above the seek bar.
+                                                    PlayerSkipPill(
+                                                        adWindows = adWindows,
+                                                        positionMsState = livePosState,
+                                                        pendingUndo = pendingUndo,
+                                                        onUndo = { undo ->
+                                                            HushCastEngineBridge.adSkipObserver.bypassAd(undo.adWindow.startMs)
+                                                            vm.seek(undo.adWindow.startMs)
+                                                            HushCastEngineBridge.clearPendingUndo()
+                                                        },
+                                                        onDismissUndo = { HushCastEngineBridge.clearPendingUndo() },
+                                                        onSkip = { ad ->
+                                                            haptic.performHapticFeedback(HapticFeedbackType.Confirm)
+                                                            vm.seek(ad.endMs)
+                                                        },
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomCenter)
+                                                            .padding(bottom = 12.dp)
+                                                    )
                                                 }
 
                                                 vm.playerError?.let { errMsg ->
@@ -704,7 +771,10 @@ fun MediaPlayerBottomSheet(
                                                     text = vm.mediaMetadata?.title?.toString() ?: "",
                                                     style = if (compactLayout) Typography.titleMediumEmphasized else Typography.headlineSmall,
                                                     maxLines = 2,
-                                                    overflow = TextOverflow.Ellipsis
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    // R7: centered like the podcast name and chapter row below it.
+                                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                                    modifier = Modifier.fillMaxWidth()
                                                 )
 
                                                 Spacer(Modifier.height(6.dp))
@@ -729,7 +799,9 @@ fun MediaPlayerBottomSheet(
                                                         overflow = TextOverflow.Ellipsis
                                                     )
                                                 }
-                                                if (vm.mediaSourceType is SourceTypeState.Streaming && !downloadBannerDismissedForEp) {
+                                                // Item 14: hidden once the file is on the phone (the stream
+                                                // item is swapped for the file a moment later).
+                                                if (vm.mediaSourceType is SourceTypeState.Streaming && !downloadBannerDismissedForEp && !isDownloaded) {
                                                     Spacer(Modifier.height(4.dp))
                                                     Row(
                                                         verticalAlignment = Alignment.CenterVertically,
@@ -740,32 +812,45 @@ fun MediaPlayerBottomSheet(
                                                             style = MaterialTheme.typography.labelMedium,
                                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                                         )
+                                                        // Item 14: a 32 dp pill inside a 48 dp touch target, announced as a button.
+                                                        // The 48 dp box gives the pill's extended touch area room.
+                                                        Box(
+                                                            modifier = Modifier.heightIn(min = 48.dp),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
                                                         Surface(
                                                             shape = RoundedCornerShape(50),
                                                             color = MaterialTheme.colorScheme.secondaryContainer,
                                                             contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                                                             modifier = Modifier
+                                                                .heightIn(min = 32.dp)
                                                                 .clip(RoundedCornerShape(50))
-                                                                .clickable {
+                                                                .clickable(
+                                                                    role = androidx.compose.ui.semantics.Role.Button,
+                                                                    onClickLabel = "Download episode"
+                                                                ) {
                                                                     triggerDownloadNow()
                                                                     downloadBannerDismissedForEp = true
                                                                 }
                                                         ) {
                                                             Row(
-                                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                                modifier = Modifier
+                                                                    .heightIn(min = 32.dp)
+                                                                    .padding(horizontal = 12.dp, vertical = 6.dp),
                                                                 verticalAlignment = Alignment.CenterVertically,
                                                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
                                                             ) {
                                                                 Icon(
                                                                     imageVector = Icons.Rounded.Download,
                                                                     contentDescription = null,
-                                                                    modifier = Modifier.size(14.dp)
+                                                                    modifier = Modifier.size(16.dp)
                                                                 )
                                                                 Text(
                                                                     text = "Download",
-                                                                    style = MaterialTheme.typography.labelSmall
+                                                                    style = MaterialTheme.typography.labelLarge
                                                                 )
                                                             }
+                                                        }
                                                         }
                                                     }
                                                 }
@@ -778,7 +863,7 @@ fun MediaPlayerBottomSheet(
                                                         currentChapter = currentChapter,
                                                         currentIndex = currentChapterIndex,
                                                         skippedStarts = skippedChapterStarts,
-                                                        positionMs = livePosState.value,
+                                                        positionMsState = livePosState,
                                                         speed = vm.speed,
                                                         adjustForSpeed = adjustRemainingForSpeed,
                                                         onSeekToMs = { vm.seek(it) },
@@ -792,48 +877,6 @@ fun MediaPlayerBottomSheet(
                                                 }
                                             }
 
-                                            // Fixed-height skip/undo pill slot (M7, D1)
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(48.dp)
-                                                    .semantics { liveRegion = LiveRegionMode.Polite },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                val activeAd by remember(adWindows) {
-                                                    derivedStateOf {
-                                                        val pos = livePosState.value
-                                                        adWindows.firstOrNull { pos in it.startMs..it.endMs }
-                                                    }
-                                                }
-                                                val ad = activeAd
-                                                val undo = pendingUndo
-                                                when {
-                                                    undo != null -> {
-                                                        OneTapUndoAdSkipBanner(
-                                                            event = undo,
-                                                            onUndo = {
-                                                                HushCastEngineBridge.adSkipObserver.bypassAd(undo.adWindow.startMs)
-                                                                vm.seek(undo.adWindow.startMs)
-                                                                HushCastEngineBridge.clearPendingUndo()
-                                                            },
-                                                            onDismiss = { HushCastEngineBridge.clearPendingUndo() }
-                                                        )
-                                                    }
-                                                    ad != null -> {
-                                                        FilledTonalButton(
-                                                            onClick = {
-                                                                haptic.performHapticFeedback(HapticFeedbackType.Confirm)
-                                                                vm.seek(ad.endMs)
-                                                            },
-                                                            modifier = Modifier.height(40.dp)
-                                                        ) {
-                                                            Icon(Icons.Rounded.SkipNext, contentDescription = null, modifier = Modifier.size(18.dp))
-                                                            Spacer(Modifier.width(6.dp))
-                                                            Text("Skip ${formatAdDisplayLabel(ad)}")
-                                                        }
-                                                    }
-                                                }
                                             }
                                         }
 
@@ -851,11 +894,24 @@ fun MediaPlayerBottomSheet(
                                                 animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()
                                             )
                                         ) {
+                                            // T3: which sponsor blocks will auto-skip, so they get "Play anyway".
+                                            val autoSkipAdStarts = remember(adWindows, showTranscriptOverlay) {
+                                                HushCastEngineBridge.adSkipObserver.getActiveAutoSkipRanges()
+                                                    .map { it.startMs }
+                                                    .toSet()
+                                            }
                                             TranscriptOverlay(
                                                 state = transcriptState,
                                                 episodeTitle = vm.mediaMetadata?.title?.toString() ?: "",
-                                                currentPositionMs = livePosState.value,
                                                 positionMsState = livePosState,
+                                                adWindows = adWindows,
+                                                autoSkipAdStarts = autoSkipAdStarts,
+                                                onPlayAnyway = { ad ->
+                                                    // Same as Undo: let this block play once, from its start.
+                                                    HushCastEngineBridge.adSkipObserver.bypassAd(ad.startMs)
+                                                    vm.seek(ad.startMs)
+                                                    if (!vm.isPlaying) vm.play()
+                                                },
                                                 isPlaying = vm.isPlaying,
                                                 muteWindows = muteWindows,
                                                 onClose = { showTranscriptOverlay = false },
@@ -894,7 +950,7 @@ fun MediaPlayerBottomSheet(
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         PlayerSeekBar(
-                                            positionMs = livePosState.value,
+                                            positionMsState = livePosState,
                                             durationMs = durationMs,
                                             playbackSpeed = vm.speed,
                                             adjustRemainingForSpeed = adjustRemainingForSpeed,
@@ -902,7 +958,8 @@ fun MediaPlayerBottomSheet(
                                             adWindows = adWindows,
                                             onSeekToMs = { vm.seek(it) },
                                             onSkipAd = { ad -> vm.seek(ad.endMs) },
-                                            compact = showTranscriptOverlay
+                                            compact = showTranscriptOverlay,
+                                            chapters = resolvedChapters
                                         )
 
                                         Spacer(Modifier.height(if (showTranscriptOverlay) 4.dp else 10.dp))
@@ -963,7 +1020,7 @@ fun MediaPlayerBottomSheet(
                                         ) {
                                             Column(Modifier.padding(14.dp)) {
                                                 Text(
-                                                    text = "AI Summary",
+                                                    text = "AI summary",
                                                     style = MaterialTheme.typography.labelLarge,
                                                     color = MaterialTheme.colorScheme.primary
                                                 )
@@ -1001,10 +1058,16 @@ fun MediaPlayerBottomSheet(
                             }
 
                             MediaPlayerTab.CHAPTERS -> {
+                                // S6: off-screen (the pager keeps one neighbor composed), the tab
+                                // doesn't read the position at all.
+                                val chaptersPageActive = pagerState.currentPage == pageIndex ||
+                                    pagerState.targetPage == pageIndex
                                 PlayerChaptersTab(
                                     chapters = resolvedChapters,
                                     skippedPublishedStarts = skippedChapterStarts,
-                                    currentPositionMs = livePosState.value,
+                                    positionMsState = livePosState,
+                                    active = chaptersPageActive,
+                                    onTargetConsumed = { chaptersScrollTargetIndex = null },
                                     onToggleSkip = { pubStart, skip ->
                                         playerVm.toggleSkippedChapter(pubStart, skip)
                                     },
@@ -1024,19 +1087,47 @@ fun MediaPlayerBottomSheet(
                     }
                 }
 
-                // M5: Single AnimatedContent bottom slot switching toolbar (Playing) <-> mini playback strip (other tabs)
-                if (!showTranscriptOverlay) {
+                // M5: one bottom slot switching toolbar (Playing) <-> mini playback strip (other tabs).
+                // It follows the tab being swiped to (targetPage), and keeps the taller of the two
+                // heights, so switching never resizes the pager above it.  T2: it slides away while
+                // the transcript is open instead of popping out.
+                AnimatedVisibility(
+                    visible = !showTranscriptOverlay,
+                    enter = expandVertically(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()) +
+                        fadeIn(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec()),
+                    exit = shrinkVertically(animationSpec = MaterialTheme.motionScheme.defaultSpatialSpec()) +
+                        fadeOut(animationSpec = MaterialTheme.motionScheme.fastEffectsSpec())
+                ) {
                     val bottomSlotFadeSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+                    val density = androidx.compose.ui.platform.LocalDensity.current
+                    var slotMinHeightPx by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+                    val targetIsPlaying = (visibleTabs.getOrNull(pagerState.targetPage) ?: MediaPlayerTab.PLAYER) ==
+                        MediaPlayerTab.PLAYER
                     AnimatedContent(
-                        targetState = selectedTab == MediaPlayerTab.PLAYER,
+                        targetState = targetIsPlaying,
                         transitionSpec = {
                             fadeIn(animationSpec = bottomSlotFadeSpec) togetherWith
                                 fadeOut(animationSpec = bottomSlotFadeSpec)
                         },
+                        contentAlignment = Alignment.BottomCenter,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = with(density) { slotMinHeightPx.toDp() }),
                         label = "playerBottomSlot"
                     ) { isPlayingTab ->
+                      Box(
+                          modifier = Modifier.onSizeChanged { size ->
+                              if (size.height > slotMinHeightPx) slotMinHeightPx = size.height
+                          }
+                      ) {
                         if (isPlayingTab) {
+                          Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             PlayerActionToolbar(
+                                analysisPercent = if (shieldBadge == ReadinessBadge.ANALYZING) {
+                                    (analysisStatus?.progressPercent ?: 0).coerceIn(0, 100)
+                                } else {
+                                    null
+                                },
                                 shortcutActions = shortcutActions,
                                 overflowActions = overflowActions,
                                 isProcessed = isProcessed,
@@ -1054,6 +1145,8 @@ fun MediaPlayerBottomSheet(
                                     showCustomizeSheet = true
                                 }
                             )
+                            UpNextGrip(onClick = { showQueueBottomSheet = true })
+                          }
                         } else {
                             // Mini playback strip for Details / Chapters tabs
                             Surface(
@@ -1116,6 +1209,7 @@ fun MediaPlayerBottomSheet(
                                 }
                             }
                         }
+                      }
                     }
                 }
             }
@@ -1167,7 +1261,7 @@ fun MediaPlayerBottomSheet(
                 triggerAnalyzeNow()
             },
             onCancelProcessing = {
-                EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
+                scope.launch { app.podiumpodcasts.podium.ui.hushcast.HushCastAnalyze.cancel(context, episodeId) }
             },
             onDismiss = { showHushCastSheet = false }
         )
@@ -1230,14 +1324,14 @@ fun MediaPlayerBottomSheet(
     if (showNotDownloadedDialog) {
         AlertDialog(
             onDismissRequest = { showNotDownloadedDialog = false },
-            title = { Text("Download & process episode") },
-            text = { Text("Download this episode so HushCast can transcribe it and detect sponsors.") },
+            title = { Text("Download and process this episode?") },
+            text = { Text("HushCast needs the episode on your phone to transcribe it and find ads.") },
             confirmButton = {
                 Button(
                     onClick = {
                         showNotDownloadedDialog = false
                         scope.launch {
-                            val method = if (HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()) {
+                            val method = if (HushCastPrefs.isWorkerActive(context)) {
                                 DownloadAnalysisMethod.AUTO
                             } else {
                                 DownloadAnalysisMethod.ON_DEVICE
@@ -1251,7 +1345,7 @@ fun MediaPlayerBottomSheet(
                         }
                     }
                 ) {
-                    Text("Download & Process")
+                    Text("Download & process")
                 }
             },
             dismissButton = {
@@ -1291,55 +1385,13 @@ fun MediaPlayerBottomSheet(
     }
 
     pendingWordMute?.let { word ->
-        val cleanWord = word.text.trim().trim { !it.isLetterOrDigit() && it != '\'' && it != '-' }
-        val wStartMs = (word.start * 1000.0).toLong()
-        val wEndMs = (word.end * 1000.0).toLong()
-        val existingMute = muteEntities.firstOrNull { m ->
-            m.enabled && wEndMs >= m.startMs && wStartMs <= m.endMs
-        }
-        if (existingMute != null) {
-            AlertDialog(
-                onDismissRequest = { pendingWordMute = null },
-                title = { Text("Unmute \"$cleanWord\"?") },
-                text = { Text("Restore audio for this word in the current episode.") },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            pendingWordMute = null
-                            playerVm.toggleMuteSegment(existingMute.id, false)
-                        }
-                    ) {
-                        Text("Unmute")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { pendingWordMute = null }) {
-                        Text("Cancel")
-                    }
-                }
-            )
-        } else {
-            AlertDialog(
-                onDismissRequest = { pendingWordMute = null },
-                title = { Text("Mute \"$cleanWord\"?") },
-                text = { Text("Add \"$cleanWord\" to your HushCast word mute list so it is muted across episodes.") },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            pendingWordMute = null
-                            playerVm.addMuteWordRule(cleanWord, HushCastEngineBridge.defaultActionMode)
-                        }
-                    ) {
-                        Text("Mute word")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { pendingWordMute = null }) {
-                        Text("Cancel")
-                    }
-                }
-            )
-        }
+        WordMuteDialog(
+            word = word,
+            muteSegments = muteEntities,
+            onUnmuteSegments = { ids -> playerVm.setMuteSegmentsEnabled(ids, false) },
+            onAddMuteWord = { clean -> playerVm.addMuteWordRule(clean, HushCastEngineBridge.defaultActionMode) },
+            onDismiss = { pendingWordMute = null }
+        )
     }
 }
 
@@ -1350,7 +1402,8 @@ private fun ChapterNavigationLine(
     currentChapter: ResolvedChapter,
     currentIndex: Int,
     skippedStarts: Set<Long>,
-    positionMs: Long,
+    /** S4: read only in derived state (minutes left) and in the progress bar's draw lambda. */
+    positionMsState: androidx.compose.runtime.State<Long>,
     speed: Float,
     adjustForSpeed: Boolean,
     onSeekToMs: (Long) -> Unit,
@@ -1365,35 +1418,42 @@ private fun ChapterNavigationLine(
     }
 
     val chapterDurMs = (currentChapter.endMs - currentChapter.startMs).coerceAtLeast(1L)
-    val remainingFraction = ((currentChapter.endMs - positionMs).toFloat() / chapterDurMs.toFloat()).coerceIn(0f, 1f)
-    val remainingWallMs = if (adjustForSpeed) {
-        SkipAwareSeekCalculator.computeWallRemainingMs(
-            fromMs = positionMs,
-            targetEndMs = currentChapter.endMs,
-            speed = speed,
-            skipRanges = HushCastEngineBridge.getActiveSkipRanges()
-        )
-    } else {
-        (currentChapter.endMs - positionMs).coerceAtLeast(0L)
+    val remMins by remember(currentChapter, speed, adjustForSpeed, positionMsState) {
+        derivedStateOf {
+            val positionMs = positionMsState.value
+            val remainingWallMs = if (adjustForSpeed) {
+                SkipAwareSeekCalculator.computeWallRemainingMs(
+                    fromMs = positionMs,
+                    targetEndMs = currentChapter.endMs,
+                    speed = speed,
+                    skipRanges = HushCastEngineBridge.getActiveSkipRanges()
+                )
+            } else {
+                (currentChapter.endMs - positionMs).coerceAtLeast(0L)
+            }
+            ((remainingWallMs + 30_000L) / 60_000L).coerceAtLeast(1L)
+        }
     }
-    val remMins = ((remainingWallMs + 30_000L) / 60_000L).coerceAtLeast(1L)
 
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {
-        IconButton(
-            enabled = prevChapter != null,
-            onClick = {
-                if (prevChapter != null) {
-                    haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
-                    onSeekToMs(prevChapter.startMs)
-                }
-            },
-            modifier = Modifier.size(48.dp)
-        ) {
-            Icon(Icons.Rounded.ChevronLeft, contentDescription = "Previous chapter")
+        // R7: both arrows in the same 40 dp tonal container (previously a bare arrow vs a ringed one).
+        Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+            FilledTonalIconButton(
+                enabled = prevChapter != null,
+                onClick = {
+                    if (prevChapter != null) {
+                        haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+                        onSeekToMs(prevChapter.startMs)
+                    }
+                },
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowLeft, contentDescription = "Previous chapter")
+            }
         }
 
         val spatial = MaterialTheme.motionScheme.fastSpatialSpec<Float>()
@@ -1422,6 +1482,19 @@ private fun ChapterNavigationLine(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1
                 )
+                Spacer(Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = {
+                        // Evaluated when drawing, so position ticks don't recompose the row.
+                        val remainingFraction = ((currentChapter.endMs - positionMsState.value).toFloat() /
+                            chapterDurMs.toFloat()).coerceIn(0f, 1f)
+                        1f - remainingFraction
+                    },
+                    modifier = Modifier
+                        .width(96.dp)
+                        .height(3.dp),
+                    drawStopIndicator = {}
+                )
             }
         }
 
@@ -1429,12 +1502,7 @@ private fun ChapterNavigationLine(
             modifier = Modifier.size(48.dp),
             contentAlignment = Alignment.Center
         ) {
-            CircularProgressIndicator(
-                progress = { remainingFraction },
-                modifier = Modifier.size(28.dp),
-                strokeWidth = 2.dp
-            )
-            IconButton(
+            FilledTonalIconButton(
                 enabled = nextChapter != null,
                 onClick = {
                     if (nextChapter != null) {
@@ -1442,9 +1510,9 @@ private fun ChapterNavigationLine(
                         onSeekToMs(nextChapter.startMs)
                     }
                 },
-                modifier = Modifier.size(48.dp)
+                modifier = Modifier.size(40.dp)
             ) {
-                Icon(Icons.Rounded.ChevronRight, contentDescription = "Next chapter")
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, contentDescription = "Next chapter")
             }
         }
     }
@@ -1489,10 +1557,11 @@ private fun PlayerTransportControls(
             )
         }
 
-        FilledIconToggleButton(
-            checked = isPlaying,
-            onCheckedChange = { onTogglePlay() },
-            shapes = IconButtonDefaults.toggleableShapes(),
+        // R7: play/pause is an action, not a toggle, so it keeps the primary color in both states
+        // (as a toggle, "paused" used the dim unchecked colors and looked disabled).
+        FilledIconButton(
+            onClick = onTogglePlay,
+            shapes = IconButtonDefaults.shapes(),
             modifier = Modifier.size(width = 96.dp, height = 68.dp)
         ) {
             Icon(
@@ -1517,6 +1586,8 @@ private fun PlayerTransportControls(
 
 @Composable
 private fun PlayerActionToolbar(
+    /** Processing progress while the episode is being analyzed, drawn as a ring on the HushCast icon (R16). */
+    analysisPercent: Int?,
     shortcutActions: List<PlayerToolbarAction>,
     overflowActions: List<PlayerToolbarAction>,
     isProcessed: Boolean,
@@ -1567,7 +1638,7 @@ private fun PlayerActionToolbar(
                     ) {
                         Icon(
                             imageVector = icon,
-                            contentDescription = action.label,
+                            contentDescription = action.uiLabel(),
                             tint = when {
                                 action == PlayerToolbarAction.HUSHCAST && isProcessed && protectionActive ->
                                     MaterialTheme.colorScheme.primary
@@ -1578,11 +1649,14 @@ private fun PlayerActionToolbar(
                         )
                     }
 
-                    if (action == PlayerToolbarAction.TRANSCRIPT && transcriptState is TranscriptLoadState.Transcribing) {
+                    if ((action == PlayerToolbarAction.HUSHCAST || action == PlayerToolbarAction.ANALYZE) && analysisPercent != null) {
+                        // R16: processing progress traced around the HushCast icon (1.0.27 behavior).
                         CircularProgressIndicator(
-                            progress = { transcriptState.progressPercent.coerceIn(0, 100) / 100f },
-                            modifier = Modifier.size(32.dp),
-                            strokeWidth = 2.dp
+                            progress = { (analysisPercent / 100f).coerceAtLeast(0.03f) },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .semantics { contentDescription = "HushCast, processing $analysisPercent%" },
+                            strokeWidth = 2.5.dp
                         )
                     }
                 }
@@ -1615,7 +1689,7 @@ private fun PlayerActionToolbar(
             ) {
                 overflowActions.forEach { action ->
                     DropdownMenuItem(
-                        text = { Text(action.label) },
+                        text = { Text(action.uiLabel()) },
                         onClick = {
                             onToggleMoreMenu(false)
                             onPerformAction(action)
@@ -1630,5 +1704,74 @@ private fun PlayerActionToolbar(
                 )
             }
         }
+    }
+}
+
+/**
+ * The skip-ad / undo pill (R7).  Overlaid on the artwork's bottom edge, so it no longer reserves an
+ * empty 48 dp slot above the seek bar.  Reads the position only inside derived state.
+ */
+@Composable
+private fun PlayerSkipPill(
+    adWindows: List<app.hushcast.automute.dsp.AdWindow>,
+    positionMsState: androidx.compose.runtime.State<Long>,
+    pendingUndo: app.hushcast.automute.dsp.AdSkipEvent?,
+    onUndo: (app.hushcast.automute.dsp.AdSkipEvent) -> Unit,
+    onDismissUndo: () -> Unit,
+    onSkip: (app.hushcast.automute.dsp.AdWindow) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val activeAd by remember(adWindows) {
+        derivedStateOf {
+            val pos = positionMsState.value
+            adWindows.firstOrNull { pos in it.startMs..it.endMs }
+        }
+    }
+    Box(
+        modifier = modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        contentAlignment = Alignment.Center
+    ) {
+        val ad = activeAd
+        val undo = pendingUndo
+        when {
+            undo != null -> OneTapUndoAdSkipBanner(
+                event = undo,
+                onUndo = { onUndo(undo) },
+                onDismiss = onDismissUndo
+            )
+            ad != null -> FilledTonalButton(
+                onClick = { onSkip(ad) },
+                modifier = Modifier.height(40.dp)
+            ) {
+                Icon(Icons.Rounded.SkipNext, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Skip ${formatAdDisplayLabel(ad)}")
+            }
+        }
+    }
+}
+
+/** A small "Up Next" grip under the toolbar, so the swipe-up gesture is discoverable (R18). */
+@Composable
+private fun UpNextGrip(onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClickLabel = "Open Up Next", onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+    ) {
+        Box(
+            Modifier
+                .size(width = 32.dp, height = 4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+        )
+        Spacer(Modifier.height(2.dp))
+        Text(
+            text = "Up Next",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }

@@ -9,25 +9,37 @@ import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsBytes
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
-import org.w3c.dom.Element
-import org.w3c.dom.Node
-import java.io.ByteArrayInputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.concurrent.CancellationException
-import javax.xml.parsers.DocumentBuilderFactory
 
 data class RssEpisodeExtras(
     val transcriptUrl: String = "",
     val transcriptType: String = "",
     val chaptersUrl: String = "",
     val chaptersType: String = "",
-    val inlineChapters: List<app.podiumpodcasts.podium.api.chapters.PodcastChapter> = emptyList()
-)
+    val inlineChapters: List<app.podiumpodcasts.podium.api.chapters.PodcastChapter> = emptyList(),
+    /** Every other `<podcast:transcript>` of the item, best first (T5 fall-through). */
+    val transcriptAlternates: List<TranscriptRef> = emptyList()
+) {
+    /** [transcriptAlternates] as stored in `podcastEpisode.transcriptAlternatesJson`. */
+    val transcriptAlternatesJson: String
+        get() = TranscriptRanking.encodeAlternates(transcriptAlternates)
+}
 
 data class RssPodcastExtras(
     val language: String = "",
-    val byItemKey: Map<String, RssEpisodeExtras> = emptyMap()
+    val byItemKey: Map<String, RssEpisodeExtras> = emptyMap(),
+    /** Exact per-item extras from the single parse (identity keys: the parsed RssItem objects). */
+    val byItem: Map<RssItem, RssEpisodeExtras> = emptyMap(),
+    /** Every item of that parse (identity set), so an item without extras isn't matched by key. */
+    val parsedItems: Set<RssItem> = emptySet()
 ) {
     fun lookup(item: RssItem): RssEpisodeExtras? {
+        byItem[item]?.let { return it }
+        // An item from the same parse that has no extras: don't borrow another item's extras
+        // through a shared key (many feeds give every item the show's homepage as <link>).
+        if (item in parsedItems) return null
         val keys = listOfNotNull(
             item.guid?.takeIf { it.isNotBlank() },
             item.audio?.takeIf { it.isNotBlank() },
@@ -101,14 +113,15 @@ class FetchPodcastClient(
 
         val bytes = response.bodyAsBytes()
         val string = bytes.decodeToString()
+        val (channel, extras) = parseFeed(string)
 
         return FetchPodcastClientResult.Success(
-            rssChannel = RssParser().parse(string),
+            rssChannel = channel,
             fileSize = bytes.size.toLong(),
             eTag = response.headers[HttpHeaders.ETag] ?: "",
             lastModified = response.headers[HttpHeaders.LastModified] ?: "",
             contentLength = response.headers[HttpHeaders.ContentLength] ?: "",
-            extras = parsePodcastExtras(string)
+            extras = extras
         )
     }
 
@@ -121,176 +134,18 @@ class FetchPodcastClient(
     companion object {
         val sharedClient: HttpClient by lazy { HttpClient { } }
 
-        private fun transcriptTypeRank(mime: String): Int {
-            val lower = mime.lowercase()
-            return when {
-                "json" in lower -> 4
-                "vtt" in lower -> 3
-                "srt" in lower || "subrip" in lower -> 2
-                "html" in lower -> 0
-                else -> 1
-            }
-        }
+        /**
+         * The Podcasting 2.0 extras of a feed.  Kept for callers that only have the XML; feed
+         * fetches get them from the same single parse as the channel ([RssFeedParser]).
+         */
+        fun parsePodcastExtras(xml: String): RssPodcastExtras =
+            RssFeedParser.parse(xml)?.extras ?: RssPodcastExtras()
 
-        fun parsePodcastExtras(xml: String): RssPodcastExtras {
-            return runCatching {
-                val spf = javax.xml.parsers.SAXParserFactory.newInstance().apply {
-                    isNamespaceAware = true
-                    runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
-                }
-                val saxParser = spf.newSAXParser()
-
-                var channelLang = ""
-                val map = HashMap<String, RssEpisodeExtras>()
-
-                var depth = 0
-                var inChannel = false
-                var inItem = false
-                var inChapters = false
-                var itemDepth = 0
-
-                var guid = ""
-                var enclosureUrl = ""
-                var link = ""
-                var title = ""
-                var pubDate = ""
-                var bestTranscriptUrl = ""
-                var bestTranscriptType = ""
-                var bestTranscriptRank = -1
-                var chaptersUrl = ""
-                var chaptersType = ""
-                val inlineChapters = ArrayList<app.podiumpodcasts.podium.api.chapters.PodcastChapter>()
-
-                var capturingTag: String? = null
-                val textBuf = StringBuilder()
-
-                val handler = object : org.xml.sax.helpers.DefaultHandler() {
-                    override fun startElement(
-                        uri: String?,
-                        localName: String?,
-                        qName: String?,
-                        attributes: org.xml.sax.Attributes?
-                    ) {
-                        depth++
-                        val local = (localName?.takeIf { it.isNotEmpty() } ?: qName?.substringAfter(':')).orEmpty()
-                        capturingTag = null
-                        textBuf.setLength(0)
-
-                        when {
-                            local == "channel" -> inChannel = true
-                            local == "item" && inChannel -> {
-                                inItem = true
-                                itemDepth = depth
-                                guid = ""
-                                enclosureUrl = ""
-                                link = ""
-                                title = ""
-                                pubDate = ""
-                                bestTranscriptUrl = ""
-                                bestTranscriptType = ""
-                                bestTranscriptRank = -1
-                                chaptersUrl = ""
-                                chaptersType = ""
-                                inlineChapters.clear()
-                            }
-                            inChannel && !inItem && local == "language" && channelLang.isBlank() -> {
-                                capturingTag = "channel:language"
-                            }
-                            inItem && depth == itemDepth + 1 -> {
-                                when (local) {
-                                    "guid", "link", "title", "pubDate" -> capturingTag = local
-                                    "enclosure" -> if (enclosureUrl.isBlank()) {
-                                        enclosureUrl = attributes?.getValue("url")?.trim().orEmpty()
-                                    }
-                                    "transcript" -> {
-                                        val url = attributes?.getValue("url")?.trim().orEmpty()
-                                        val type = attributes?.getValue("type")?.trim().orEmpty()
-                                        val rank = transcriptTypeRank(type)
-                                        if (url.isNotBlank() && rank > bestTranscriptRank) {
-                                            bestTranscriptRank = rank
-                                            bestTranscriptUrl = url
-                                            bestTranscriptType = type
-                                        }
-                                    }
-                                    "chapters" -> {
-                                        val url = attributes?.getValue("url")?.trim().orEmpty()
-                                        val type = attributes?.getValue("type")?.trim().orEmpty()
-                                        if (url.isNotBlank() && chaptersUrl.isBlank()) {
-                                            chaptersUrl = url
-                                            chaptersType = type.ifBlank { "application/json+chapters" }
-                                        } else {
-                                            inChapters = true
-                                        }
-                                    }
-                                }
-                            }
-                            inItem && inChapters && local == "chapter" -> {
-                                val startStr = attributes?.getValue("start")?.trim().orEmpty()
-                                val startMs = app.podiumpodcasts.podium.api.chapters.ChapterParser
-                                    .parseNptTimeMs(startStr)
-                                val chTitle = attributes?.getValue("title")?.trim().orEmpty()
-                                val chHref = attributes?.getValue("href")?.trim()?.takeIf { it.isNotBlank() }
-                                if (startMs >= 0L) {
-                                    inlineChapters.add(
-                                        app.podiumpodcasts.podium.api.chapters.PodcastChapter(
-                                            startTimeMs = startMs,
-                                            title = chTitle,
-                                            url = chHref
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    override fun characters(ch: CharArray?, start: Int, length: Int) {
-                        if (capturingTag != null && ch != null && length > 0) {
-                            textBuf.append(ch, start, length)
-                        }
-                    }
-
-                    override fun endElement(uri: String?, localName: String?, qName: String?) {
-                        val local = (localName?.takeIf { it.isNotEmpty() } ?: qName?.substringAfter(':')).orEmpty()
-                        when (capturingTag) {
-                            "channel:language" -> if (channelLang.isBlank()) channelLang = textBuf.toString().trim()
-                            "guid" -> if (guid.isBlank()) guid = textBuf.toString().trim()
-                            "link" -> if (link.isBlank()) link = textBuf.toString().trim()
-                            "title" -> if (title.isBlank()) title = textBuf.toString().trim()
-                            "pubDate" -> if (pubDate.isBlank()) pubDate = textBuf.toString().trim()
-                        }
-                        capturingTag = null
-                        textBuf.setLength(0)
-
-                        if (local == "chapters") {
-                            inChapters = false
-                        } else if (local == "item" && inItem && depth == itemDepth) {
-                            inItem = false
-                            inChapters = false
-                            if (bestTranscriptUrl.isNotBlank() || chaptersUrl.isNotBlank() || inlineChapters.isNotEmpty()) {
-                                val extra = RssEpisodeExtras(
-                                    transcriptUrl = bestTranscriptUrl,
-                                    transcriptType = bestTranscriptType,
-                                    chaptersUrl = chaptersUrl,
-                                    chaptersType = chaptersType,
-                                    inlineChapters = inlineChapters.sortedBy { it.startTimeMs }
-                                )
-                                if (guid.isNotBlank()) map[guid] = extra
-                                if (enclosureUrl.isNotBlank()) map[enclosureUrl] = extra
-                                if (link.isNotBlank()) map[link] = extra
-                                if (title.isNotBlank() || pubDate.isNotBlank()) {
-                                    map["$title|$pubDate"] = extra
-                                }
-                            }
-                        } else if (local == "channel") {
-                            inChannel = false
-                        }
-                        depth--
-                    }
-                }
-
-                saxParser.parse(org.xml.sax.InputSource(java.io.StringReader(xml)), handler)
-                RssPodcastExtras(language = channelLang, byItemKey = map)
-            }.getOrDefault(RssPodcastExtras())
+        /** One parse for RSS feeds; RssParser (no extras) for Atom/RDF or XML our parser rejects. */
+        suspend fun parseFeed(xml: String): Pair<RssChannel, RssPodcastExtras> {
+            val parsed = withContext(Dispatchers.Default) { RssFeedParser.parse(xml) }
+            if (parsed != null) return parsed.channel to parsed.extras
+            return RssParser().parse(xml) to RssPodcastExtras()
         }
     }
 }

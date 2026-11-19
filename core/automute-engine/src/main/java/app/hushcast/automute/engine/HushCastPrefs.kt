@@ -64,6 +64,36 @@ object HushCastPrefs {
         prefs(context).edit().putBoolean(KEY_DESKTOP_ENABLED, enabled).apply()
     }
 
+    /** A worker is used only when it's switched on and has an address. */
+    fun isWorkerActive(context: Context): Boolean =
+        isDesktopWorkerEnabled(context) && getDesktopWorkerUrl(context).isNotBlank()
+
+    fun isRuleModeMigrated(context: Context): Boolean =
+        prefs(context).getBoolean("rule_mode_default_migrated_v1", false)
+
+    fun setRuleModeMigrated(context: Context) {
+        prefs(context).edit().putBoolean("rule_mode_default_migrated_v1", true).apply()
+    }
+
+    /** One-time removal of checkpoint rows leaked by 1.0.30 and earlier (see AutoMuteAnalyzer). */
+    fun isCheckpointPruneDone(context: Context): Boolean =
+        prefs(context).getBoolean("checkpoint_orphan_prune_v1", false)
+
+    fun setCheckpointPruneDone(context: Context) {
+        prefs(context).edit().putBoolean("checkpoint_orphan_prune_v1", true).apply()
+    }
+
+    /** Remote job id per episode, so a retried download re-attaches instead of starting over. */
+    fun getWorkerJobId(context: Context, episodeId: String): String? =
+        prefs(context).getString("worker_job_${episodeId.hashCode()}", null)?.takeIf { it.isNotBlank() }
+
+    fun setWorkerJobId(context: Context, episodeId: String, jobId: String?) {
+        prefs(context).edit().apply {
+            if (jobId.isNullOrBlank()) remove("worker_job_${episodeId.hashCode()}")
+            else putString("worker_job_${episodeId.hashCode()}", jobId)
+        }.apply()
+    }
+
     fun getDesktopWorkerUrl(context: Context): String =
         prefs(context).getString(KEY_DESKTOP_URL, "").orEmpty()
 

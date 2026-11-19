@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.ui.component.settings.SettingsSwitchListItem
+import app.podiumpodcasts.podium.ui.component.settings.settingsGroup
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 import app.podiumpodcasts.podium.ui.route.settings.SettingsPaneKey
@@ -66,27 +67,29 @@ fun SettingsPrivacyPane(
 
             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
         ) {
-            item {
-                val disableApplePodcastsApi =
-                    vm.repository.privacy.disableApplePodcastsApi.collectAsState(false)
+            settingsGroup(spaceAbove = 0.dp) {
+                row { pos ->
+                    val disableApplePodcastsApi =
+                        vm.repository.privacy.disableApplePodcastsApi.collectAsState(false)
 
-                SettingsSwitchListItem(
-                    checked = disableApplePodcastsApi.value,
-                    onCheckedChange = {
-                        scope.launch {
-                            vm.repository.privacy.setDisableApplePodcastsApi(it)
-                        }
-                    },
+                    SettingsSwitchListItem(
+                        checked = disableApplePodcastsApi.value,
+                        onCheckedChange = {
+                            scope.launch {
+                                vm.repository.privacy.setDisableApplePodcastsApi(it)
+                            }
+                        },
 
-                    icon = {
-                        Icon(Icons.Rounded.ExploreOff, "")
-                    },
-                    label = stringResource(R.string.route_settings_privacy_disable_apple_podcasts_api),
-                    description = stringResource(R.string.route_settings_privacy_disable_apple_podcasts_api_description),
+                        icon = {
+                            Icon(Icons.Rounded.ExploreOff, "")
+                        },
+                        label = stringResource(R.string.route_settings_privacy_disable_apple_podcasts_api),
+                        description = stringResource(R.string.route_settings_privacy_disable_apple_podcasts_api_description),
 
-                    index = 0,
-                    count = 1
-                )
+                        index = pos.index,
+                        count = pos.count
+                    )
+                }
             }
         }
     }

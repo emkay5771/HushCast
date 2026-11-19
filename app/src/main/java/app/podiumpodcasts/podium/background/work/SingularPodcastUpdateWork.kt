@@ -1,10 +1,13 @@
 package app.podiumpodcasts.podium.background.work
 
 import android.content.Context
+import app.podiumpodcasts.podium.api.chapters.EpisodeChapterHelper
 import app.podiumpodcasts.podium.api.db.AppDatabase
+import app.podiumpodcasts.podium.api.db.model.FEED_EXTRAS_VERSION
 import app.podiumpodcasts.podium.api.db.model.PodcastModel
 import app.podiumpodcasts.podium.api.rss.FetchPodcastClient
 import app.podiumpodcasts.podium.api.rss.FetchPodcastClientResult
+import app.podiumpodcasts.podium.api.rss.withFeedExtras
 import app.podiumpodcasts.podium.manager.DownloadManager
 import app.podiumpodcasts.podium.utils.rss.computeEpisodeId
 import app.podiumpodcasts.podium.utils.rss.toPodcast
@@ -37,19 +40,27 @@ class SingularPodcastUpdateWork(
 
             val candidateEpisodes = response.rssChannel.items
                 .filter { !episodeIds.contains(it.computeEpisodeId(podcast.origin)) }
-                .map { it.toPodcastEpisode(podcast = podcast, new = true, extras = response.extras) }
+                .map { item ->
+                    item.toPodcastEpisode(podcast = podcast, new = true, extras = response.extras)
+                        .withFeedExtras(response.extras.lookup(item))
+                }
 
             val inserted = db.podcastEpisodes()
                 .insertAllAndUpdateNewEpisodesCount(
                     podcast.origin, *candidateEpisodes.toTypedArray()
                 )
 
-            app.podiumpodcasts.podium.api.chapters.EpisodeChapterHelper.applyFeedExtrasOnRefresh(
-                db = db,
-                origin = podcast.origin,
-                items = response.rssChannel.items,
-                extras = response.extras
-            )
+            // DB writes only; the chapter URLs worth fetching come back for the end.
+            val chapterCandidates = runCatching {
+                EpisodeChapterHelper.applyFeedExtrasOnRefresh(
+                    db = db,
+                    origin = podcast.origin,
+                    items = response.rssChannel.items,
+                    extras = response.extras,
+                    newEpisodeIds = inserted.mapTo(HashSet()) { it.id }
+                )
+            }.onFailure { if (it is CancellationException) throw it else it.printStackTrace() }
+                .getOrDefault(emptyList())
 
             val subscription = db.podcastSubscriptions().getSync(podcast.origin)
             if (subscription?.enableAutoDownload == true && inserted.isNotEmpty()) {
@@ -65,6 +76,13 @@ class SingularPodcastUpdateWork(
             }
 
             db.podcastSubscriptions().logUpdate(origin = podcast.origin)
+            // A no-cache fetch: the extras are current, so the periodic refresh can skip its
+            // one-off unconditional fetch for this podcast.
+            if (subscription != null && subscription.extrasVersion != FEED_EXTRAS_VERSION) {
+                db.podcastSubscriptions().setExtrasVersion(podcast.origin, FEED_EXTRAS_VERSION)
+            }
+            // Chapters last, without holding up the caller (the podcast screen's refresh).
+            EpisodeChapterHelper.launchCandidateChapterFetch(db, chapterCandidates)
             Result.success(inserted.size)
         } catch (c: CancellationException) {
             throw c

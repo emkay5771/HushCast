@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import json
 import logging
 import os
@@ -22,8 +23,9 @@ from .audio import (
     decode_audio_streams,
     validate_fetch_url,
 )
-from .chapters import generate_chapters_and_summary
-from .forced_align import ForcedAligner
+from .chapters import generate_chapters_and_summary, release_chat_llm
+from .forced_align import MIN_WORD_SCORE, ForcedAligner, count_alignable_words
+from .transcript_repair import build_initial_prompt, repair_hard_cuts, strip_prompt_leak
 from .models import (
     PIPELINE_VERSION,
     AdSegmentDto,
@@ -144,6 +146,8 @@ class AnalysisBackend(Protocol):
         feed_chapters_url: Optional[str] = None,
         feed_chapters_type: str = "",
         cancel_event: Optional[threading.Event] = None,
+        episode_title: Optional[str] = None,
+        podcast_title: Optional[str] = None,
     ) -> DesktopAnalysisBundle: ...
 
     def analyze_with_embeddings(
@@ -160,6 +164,8 @@ class AnalysisBackend(Protocol):
         feed_chapters_url: Optional[str] = None,
         feed_chapters_type: str = "",
         cancel_event: Optional[threading.Event] = None,
+        episode_title: Optional[str] = None,
+        podcast_title: Optional[str] = None,
     ) -> tuple[DesktopAnalysisBundle, Optional[object]]: ...
 
 
@@ -300,6 +306,294 @@ def _fetch_feed_url_text(url: str, *, allow_lan: bool = False) -> Optional[str]:
         return None
 
 
+# --- faster-whisper model pin ------------------------------------------------------------------
+# faster-whisper 1.2.1 resolves "large-v3-turbo" to mobiuslabsgmbh/faster-whisper-large-v3-turbo on
+# `main`, which now redirects to dropbox-dash/faster-whisper-large-v3-turbo. Pin the final repo id
+# and a commit so a cold start never resolves `main` (from the HF API on 2026-11-18).
+# model.bin: 1,617,884,929 bytes, sha256 e76620f83d5f5b69efd3d87e3dc180c1bd21df9fbebacfd4335e5e1efcc018da.
+FASTER_WHISPER_PINS: dict[str, tuple[str, str]] = {
+    "large-v3-turbo": (
+        "dropbox-dash/faster-whisper-large-v3-turbo",
+        "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf",
+    ),
+}
+_FASTER_WHISPER_ALIASES = {
+    "turbo": "large-v3-turbo",
+    "mobiuslabsgmbh/faster-whisper-large-v3-turbo": "large-v3-turbo",
+    "dropbox-dash/faster-whisper-large-v3-turbo": "large-v3-turbo",
+}
+# Older commits with byte-identical model files (0a363e9 only edited the README), so a cache made
+# before the pin is still used offline instead of downloading 1.6 GB again.
+_FASTER_WHISPER_EQUIVALENT_REVISIONS: dict[str, tuple[str, ...]] = {
+    "0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf": ("0c94664816ec82be77b20e824c8e8675995b0029",),
+}
+# Repo ids older workers cached the same weights under (the HF cache folder is named after the id).
+_FASTER_WHISPER_LEGACY_REPOS: dict[str, tuple[str, ...]] = {
+    "dropbox-dash/faster-whisper-large-v3-turbo": ("mobiuslabsgmbh/faster-whisper-large-v3-turbo",),
+}
+# A cached snapshot is used only if complete: without tokenizer.json faster-whisper fetches a
+# tokenizer online, and without preprocessor_config.json large-v3 models get the wrong mel count.
+_FASTER_WHISPER_REQUIRED_FILES = ("model.bin", "config.json", "tokenizer.json")
+_FASTER_WHISPER_PINNED_FILES = (
+    "model.bin",
+    "config.json",
+    "tokenizer.json",
+    "preprocessor_config.json",
+    "vocabulary.json",
+)
+
+
+def resolve_faster_whisper_source(name: str, revision_override: str = "") -> tuple[str, Optional[str]]:
+    """
+    Maps `HUSHCAST_FASTER_WHISPER_MODEL` to (local directory or HF repo id, revision).
+    Known names get the pinned repo and commit; `revision_override` replaces the pinned commit.
+    Unknown names pass through unpinned unless an override is given.
+    """
+    name = (name or "").strip() or "large-v3-turbo"
+    local = Path(name).expanduser()
+    if local.is_dir():
+        return str(local), None
+    key = _FASTER_WHISPER_ALIASES.get(name, name)
+    if key in FASTER_WHISPER_PINS:
+        repo_id, revision = FASTER_WHISPER_PINS[key]
+        return repo_id, (revision_override or revision)
+    return name, (revision_override or None)
+
+
+def load_faster_whisper_model_dir(
+    model: str,
+    revision: Optional[str],
+    download_root: str,
+    *,
+    download_fn: Optional[Callable[..., str]] = None,
+) -> str:
+    """
+    Local first: returns the snapshot of `revision` already in `download_root` (also under a legacy
+    repo id) without any network call, and downloads that revision only when it is missing.
+    `download_fn` defaults to faster-whisper's `download_model` (huggingface_hub snapshot_download).
+    """
+    if os.path.isdir(model):
+        return model
+    if download_fn is None:
+        from faster_whisper.utils import download_model as download_fn
+    revisions = (revision, *_FASTER_WHISPER_EQUIVALENT_REVISIONS.get(revision or "", ()))
+    pinned_repos = {repo for repo, _ in FASTER_WHISPER_PINS.values()}
+    required = _FASTER_WHISPER_PINNED_FILES if model in pinned_repos else _FASTER_WHISPER_REQUIRED_FILES
+    for repo in (model, *_FASTER_WHISPER_LEGACY_REPOS.get(model, ())):
+        for rev in revisions:
+            try:
+                path = download_fn(repo, local_files_only=True, cache_dir=download_root, revision=rev)
+            except Exception:
+                continue
+            if path and all(os.path.isfile(os.path.join(path, f)) for f in required):
+                logger.info("faster-whisper: using cached %s@%s", repo, (rev or "main")[:12])
+                return str(path)
+    logger.info("faster-whisper: %s@%s not cached in %s; downloading", model, (revision or "main")[:12], download_root)
+    return str(download_fn(model, local_files_only=False, cache_dir=download_root, revision=revision))
+
+
+# --- publisher transcript checks ----------------------------------------------------------------
+# Word-level publisher JSON is trusted only if three ~20 s speech clips (at ~20/50/80% of the
+# episode) transcribed by the loaded ASR match the publisher words at the same times. Dynamic ad
+# insertion shifts the audio against a publisher transcript, and the clips catch that.
+SPOT_CHECK_FRACTIONS = (0.2, 0.5, 0.8)
+SPOT_CHECK_CLIP_S = 20.0
+SPOT_CHECK_TOLERANCE_S = 1.5
+SPOT_CHECK_MIN_OVERLAP = 0.60
+SPOT_CHECK_MIN_TOKENS = 8  # fewer recognized words than this: not a speech clip, try a nearby one
+# An SRT/VTT (or segment-level JSON) transcript is used only if MMS_FA aligns at least this share
+# of its alignable words at MIN_WORD_SCORE.
+FEED_ALIGN_MIN_FRACTION = 0.90
+
+ClipTranscriber = Callable[[float, float], list[WordDto]]  # (start_s, end_s) -> words, absolute times
+_SPOT_TOKEN_RE = re.compile(r"[\W_]+", re.UNICODE)
+
+
+def _spot_token(text: str) -> str:
+    return _SPOT_TOKEN_RE.sub("", (text or "").lower())
+
+
+def _tokens_match(a: str, b: str) -> bool:
+    if a == b:
+        return True
+    if min(len(a), len(b)) < 4:
+        return False
+    return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio() >= 0.8
+
+
+def clip_token_overlap(
+    asr_words: list[WordDto],
+    publisher_words: list[WordDto],
+    clip_start: float,
+    clip_end: float,
+    tolerance_s: float = SPOT_CHECK_TOLERANCE_S,
+) -> tuple[float, int, int]:
+    """
+    Fuzzy-matches the clip's ASR words against publisher words that start within `tolerance_s` of
+    each ASR word. Returns (overlap, n_asr_tokens, n_publisher_tokens_in_clip), where overlap is
+    matched / max(n_asr, n_publisher), so missing words on either side count against it.
+    """
+    asr = [(tok, float(w.start)) for w in asr_words if (tok := _spot_token(w.text))]
+    near: list[tuple[str, float]] = []
+    n_pub = 0
+    for w in publisher_words:
+        ws = float(w.start)
+        if ws < clip_start - tolerance_s or ws > clip_end + tolerance_s:
+            continue
+        tok = _spot_token(w.text)
+        if not tok:
+            continue
+        near.append((tok, ws))
+        if clip_start <= ws < clip_end:
+            n_pub += 1
+    used = [False] * len(near)
+    matched = 0
+    for tok, t in asr:
+        best_k = -1
+        best_dt = tolerance_s + 1e-9
+        for k, (ptok, pt) in enumerate(near):
+            dt = abs(pt - t)
+            if used[k] or dt > best_dt or not _tokens_match(tok, ptok):
+                continue
+            best_k, best_dt = k, dt
+        if best_k >= 0:
+            used[best_k] = True
+            matched += 1
+    denom = max(len(asr), n_pub)
+    return (matched / denom if denom else 0.0), len(asr), n_pub
+
+
+def spot_check_publisher_timings(
+    publisher_words: list[WordDto],
+    duration_sec: float,
+    transcribe_clip: ClipTranscriber,
+    *,
+    cancel_event: Optional[threading.Event] = None,
+    on_clip: Optional[Callable[[int, int], None]] = None,
+) -> tuple[bool, list[tuple[float, float, int, int]]]:
+    """
+    Returns (accepted, [(clip_start, overlap, n_asr, n_publisher), ...]). Accepted only when every
+    clip has speech and at least SPOT_CHECK_MIN_OVERLAP of its tokens match.
+    """
+    clip = SPOT_CHECK_CLIP_S
+    last_start = max(0.0, duration_sec - clip)
+    starts: list[float] = []
+    for frac in SPOT_CHECK_FRACTIONS:
+        st = round(min(last_start, max(0.0, frac * duration_sec - clip / 2.0)), 3)
+        if st not in starts:
+            starts.append(st)
+    results: list[tuple[float, float, int, int]] = []
+    accepted = bool(starts) and duration_sec > 0
+    for i, base in enumerate(starts):
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("Job cancelled")
+        if on_clip is not None:
+            on_clip(i + 1, len(starts))
+        best: Optional[tuple[float, float, int, int]] = None
+        # Music beds and silences have no words to compare: slide to the next clip, then the previous.
+        for offset in (0.0, clip, -clip):
+            st = min(last_start, max(0.0, base + offset))
+            if best is not None and st == best[0]:
+                continue
+            asr = transcribe_clip(st, min(duration_sec, st + clip))
+            overlap, n_asr, n_pub = clip_token_overlap(asr, publisher_words, st, min(duration_sec, st + clip))
+            best = (st, overlap, n_asr, n_pub)
+            if n_asr >= SPOT_CHECK_MIN_TOKENS:
+                break
+        assert best is not None
+        results.append(best)
+        if best[2] < SPOT_CHECK_MIN_TOKENS or best[1] < SPOT_CHECK_MIN_OVERLAP:
+            accepted = False
+            break  # one failed clip decides it; skip the remaining ASR work
+    return accepted, results
+
+
+def feed_alignment_accepted(n_aligned: int, n_alignable: int, n_words: int) -> bool:
+    """SRT/VTT gate: >= 90% of the alignable words aligned, and most words alignable at all."""
+    if n_words <= 0 or n_alignable <= 0 or n_alignable < 0.5 * n_words:
+        return False
+    return n_aligned >= FEED_ALIGN_MIN_FRACTION * n_alignable
+
+
+# --- progress -----------------------------------------------------------------------------------
+class _MonotonicProgress:
+    """Wraps a ProgressCallback so the reported percentage never goes down. Thread-safe."""
+
+    def __init__(self, callback: ProgressCallback) -> None:
+        self._callback = callback
+        self._lock = threading.Lock()
+        self._last = -1
+
+    def __call__(self, state: JobState, pct: int, message: str) -> None:
+        with self._lock:
+            pct = max(int(pct), self._last)
+            self._last = pct
+            self._callback(state, pct, message)
+
+
+class _TranscribeProgress:
+    """
+    Progress for one Whisper run: pywhispercpp's segment callback once it fires, and the elapsed-time
+    estimate only before the first segment (or for the whole run on faster-whisper, which has no
+    callback). Pass a `_MonotonicProgress` so the switch-over can't step backwards.
+    """
+
+    def __init__(
+        self,
+        on_progress: ProgressCallback,
+        *,
+        duration_sec: float,
+        est_sec: float,
+        model_name: str,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._on_progress = on_progress
+        self._duration = duration_sec
+        self._est = max(1e-6, est_sec)
+        self._model = model_name
+        self._clock = clock
+        self._t0 = clock()
+        self._dur_str = f"{int(duration_sec // 60)}m{int(duration_sec % 60):02d}s"
+        self._segment_seen = threading.Event()
+        self._last_segment_emit: Optional[float] = None
+
+    @property
+    def segments_seen(self) -> bool:
+        return self._segment_seen.is_set()
+
+    def tick(self) -> bool:
+        """Timer fallback. Returns False (and reports nothing) once segments drive the progress."""
+        if self._segment_seen.is_set():
+            return False
+        el = self._clock() - self._t0
+        pct = min(58, 30 + int(28 * (el / self._est)))
+        self._on_progress(JobState.TRANSCRIBING, pct, f"Transcribing {self._dur_str} ({self._model}) • {el:.0f}s")
+        return True
+
+    def segment(self, t_end_sec: float) -> None:
+        self._segment_seen.set()
+        now = self._clock()
+        if self._last_segment_emit is not None and now - self._last_segment_emit < 0.75:
+            return
+        if self._duration > 0 and t_end_sec > 0:
+            self._last_segment_emit = now
+            pct = min(59, 30 + int(29 * min(1.0, t_end_sec / self._duration)))
+            self._on_progress(
+                JobState.TRANSCRIBING,
+                pct,
+                f"Transcribing ({int(t_end_sec // 60)}m/{int(self._duration // 60)}m)",
+            )
+
+
+def _close_llm(llm) -> None:
+    close = getattr(llm, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            logger.debug("LLM close() failed", exc_info=True)
+
+
 class LocalMlBackend:
     """
     Runs whisper.cpp (or faster-whisper on CUDA) + Qwen3-Embedding-0.6B + ad_tagger.onnx.
@@ -334,13 +628,6 @@ class LocalMlBackend:
             if candidate.exists():
                 return candidate
         return self.models_dir / "ggml-base.en-q5_1.bin"
-
-    def _resolve_vad_model(self) -> Optional[Path]:
-        for name in ("ggml-silero-v5.1.2.bin", "silero-vad.bin", "silero_vad.bin"):
-            p = self.models_dir / name
-            if p.exists():
-                return p
-        return None
 
     def whisper_model_name(self) -> str:
         return self.whisper_model.name
@@ -430,14 +717,13 @@ class LocalMlBackend:
             return self._faster_whisper_pipeline
         from faster_whisper import BatchedInferencePipeline, WhisperModel
 
-        model_id = os.environ.get("HUSHCAST_FASTER_WHISPER_MODEL", "large-v3-turbo").strip() or "large-v3-turbo"
-        compute_type = os.environ.get("HUSHCAST_FASTER_WHISPER_COMPUTE", "float16").strip() or "float16"
-        fw = WhisperModel(
-            model_id,
-            device="cuda",
-            compute_type=compute_type,
-            download_root=str(self.models_dir / "faster-whisper"),
+        model_id, revision = resolve_faster_whisper_source(
+            os.environ.get("HUSHCAST_FASTER_WHISPER_MODEL", "large-v3-turbo"),
+            os.environ.get("HUSHCAST_FASTER_WHISPER_REVISION", "").strip(),
         )
+        model_dir = load_faster_whisper_model_dir(model_id, revision, str(self.models_dir / "faster-whisper"))
+        compute_type = os.environ.get("HUSHCAST_FASTER_WHISPER_COMPUTE", "float16").strip() or "float16"
+        fw = WhisperModel(model_dir, device="cuda", compute_type=compute_type)
         self._faster_whisper_pipeline = BatchedInferencePipeline(model=fw)
         return self._faster_whisper_pipeline
 
@@ -582,53 +868,184 @@ class LocalMlBackend:
         emb_list: list[np.ndarray] = []
         batch_size = 16
         last_emit = 0.0
+        n_batches = 0
+        n_fallbacks = 0
+        first_error: Optional[str] = None
 
-        for b_start in range(0, total_segs, batch_size):
-            if cancel_event is not None and cancel_event.is_set():
-                raise RuntimeError("Job cancelled")
-            batch = texts[b_start : b_start + batch_size]
-            with self._model_lock:
-                llm = self._get_embedding_llm()
-                try:
-                    raw = llm.embed(batch)
-                    arr = np.asarray(raw, dtype=np.float32)
-                    if arr.ndim == 2 and arr.shape[0] == len(batch):
-                        batch_vecs = [arr[i] for i in range(len(batch))]
-                    else:
-                        raise ValueError("Unexpected batch embed shape")
-                except Exception:
-                    batch_vecs = []
-                    for t in batch:
-                        v = np.asarray(llm.embed(t), dtype=np.float32)
-                        if v.ndim == 2:
-                            v = v[-1]
-                        elif v.ndim > 2:
-                            v = v.reshape(-1, v.shape[-1])[-1]
-                        batch_vecs.append(v)
+        try:
+            for b_start in range(0, total_segs, batch_size):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise RuntimeError("Job cancelled")
+                batch = texts[b_start : b_start + batch_size]
+                n_batches += 1
+                with self._model_lock:
+                    llm = self._get_embedding_llm()
+                    try:
+                        raw = llm.embed(batch)
+                        arr = np.asarray(raw, dtype=np.float32)
+                        if arr.ndim == 2 and arr.shape[0] == len(batch):
+                            batch_vecs = [arr[i] for i in range(len(batch))]
+                        else:
+                            raise ValueError(
+                                f"unexpected batch embedding shape {arr.shape} for {len(batch)} texts"
+                            )
+                    except Exception as exc:
+                        # Keep going one sentence at a time, but don't hide it: on Modal this was
+                        # llama-cpp-python 0.3.19 failing every batch, ~15 s per episode.
+                        n_fallbacks += 1
+                        if first_error is None:
+                            first_error = f"{type(exc).__name__}: {str(exc)[:300]}"
+                        batch_vecs = []
+                        for t in batch:
+                            v = np.asarray(llm.embed(t), dtype=np.float32)
+                            if v.ndim == 2:
+                                v = v[-1]
+                            elif v.ndim > 2:
+                                v = v.reshape(-1, v.shape[-1])[-1]
+                            batch_vecs.append(v)
 
-            for vec in batch_vecs:
-                norm = float(np.linalg.norm(vec))
-                if norm > 1e-12:
-                    vec = vec / norm
-                emb_list.append(vec.astype(np.float32))
+                for vec in batch_vecs:
+                    norm = float(np.linalg.norm(vec))
+                    if norm > 1e-12:
+                        vec = vec / norm
+                    emb_list.append(vec.astype(np.float32))
 
-            if on_progress is not None:
-                done = min(total_segs, b_start + len(batch))
-                now = time.monotonic()
-                if done == total_segs or (now - last_emit) >= 0.2:
-                    last_emit = now
-                    pct = 66 + int(19 * done / total_segs)
-                    on_progress(
-                        JobState.EMBEDDING,
-                        pct,
-                        f"Embedding segments ({done}/{total_segs})",
-                    )
-
-        if self._low_mem:
-            with self._model_lock:
-                self._embedding_llm = None
+                if on_progress is not None:
+                    done = min(total_segs, b_start + len(batch))
+                    now = time.monotonic()
+                    if done == total_segs or (now - last_emit) >= 0.2:
+                        last_emit = now
+                        pct = 66 + int(19 * done / total_segs)
+                        on_progress(
+                            JobState.EMBEDDING,
+                            pct,
+                            f"Embedding segments ({done}/{total_segs})",
+                        )
+        finally:
+            if n_fallbacks:
+                logger.warning(
+                    "Batch embedding failed for %d/%d batch(es) (%d segments); used one call per "
+                    "sentence instead. First error: %s",
+                    n_fallbacks,
+                    n_batches,
+                    total_segs,
+                    first_error,
+                )
+            if self._low_mem:
+                with self._model_lock:
+                    llm_to_free, self._embedding_llm = self._embedding_llm, None
+                if llm_to_free is not None:
+                    _close_llm(llm_to_free)
 
         return np.stack(emb_list, axis=0)
+
+    def _release_chat_model_if_low_mem(self) -> None:
+        """V18: on a low-memory machine the chat model (~1-2 GB) is loaded per job, not kept."""
+        if self._low_mem and release_chat_llm():
+            logger.info("Released chat model (low-memory mode)")
+
+    def _make_clip_transcriber(
+        self,
+        pcm_16k,
+        lang: str,
+        cancel_event: Optional[threading.Event] = None,
+    ) -> ClipTranscriber:
+        """Transcribes [start_s, end_s) of the episode with the loaded ASR; word times are absolute."""
+        import numpy as np
+
+        sr = 16000
+        if self._should_use_faster_whisper():
+            decode = _make_fw_window_decoder(self._get_faster_whisper_pipeline().model, pcm_16k, lang, sr)
+
+            def _fw_clip(start_s: float, end_s: float) -> list[WordDto]:
+                return [
+                    WordDto(
+                        start=round(start_s + float(w.start), 3),
+                        end=round(start_s + float(w.end), 3),
+                        text=w.text.strip(),
+                    )
+                    for w in decode(start_s, end_s, "")
+                ]
+
+            return _fw_clip
+
+        whisper = self._get_whisper_cpp(use_dtw=not self._forced_aligner.is_available())
+
+        def _noop_segment(_seg) -> None:
+            # pywhispercpp keeps the last segment callback on the class; replace the previous
+            # job's so it doesn't report progress for this clip.
+            return None
+
+        def _abort_cb() -> bool:
+            return bool(cancel_event is not None and cancel_event.is_set())
+
+        def _cpp_clip(start_s: float, end_s: float) -> list[WordDto]:
+            s_idx = max(0, int(round(start_s * sr)))
+            e_idx = min(len(pcm_16k), int(round(end_s * sr)))
+            if e_idx - s_idx < sr // 2:
+                return []
+            clip = np.ascontiguousarray(pcm_16k[s_idx:e_idx], dtype=np.float32)
+            try:
+                raw = whisper.transcribe(
+                    clip,
+                    token_timestamps=True,
+                    language=lang,
+                    temperature_inc=0.0,
+                    new_segment_callback=_noop_segment,
+                    abort_callback=_abort_cb,
+                )
+            except TypeError:
+                raw = whisper.transcribe(clip, token_timestamps=True, new_segment_callback=_noop_segment)
+            clip_words, _ = _extract_whisper_words_and_segments(whisper, raw)
+            return [
+                WordDto(start=round(start_s + w.start, 3), end=round(start_s + w.end, 3), text=w.text)
+                for w in clip_words
+            ]
+
+        return _cpp_clip
+
+    def _publisher_timings_ok(
+        self,
+        words: list[WordDto],
+        pcm_16k,
+        duration_sec: float,
+        lang: str,
+        on_progress: ProgressCallback,
+        cancel_event: Optional[threading.Event],
+    ) -> bool:
+        """Spot-checks word-level publisher timings against the audio (see SPOT_CHECK_*)."""
+        if len(pcm_16k) == 0 or duration_sec <= 0 or not words:
+            return False
+        on_progress(JobState.TRANSCRIBING, 35, f"Checking publisher word timings ({len(words)} words)")
+
+        def _on_clip(i: int, n: int) -> None:
+            on_progress(JobState.TRANSCRIBING, 35 + 3 * i, f"Checking publisher word timings (clip {i}/{n})")
+
+        t_chk = time.monotonic()
+        try:
+            clip_fn = self._make_clip_transcriber(pcm_16k, lang, cancel_event)
+            accepted, results = spot_check_publisher_timings(
+                words, duration_sec, clip_fn, cancel_event=cancel_event, on_clip=_on_clip
+            )
+        except Exception:
+            if cancel_event is not None and cancel_event.is_set():
+                raise RuntimeError("Job cancelled")
+            logger.warning("Publisher transcript spot check failed; using Whisper", exc_info=True)
+            return False
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("Job cancelled")
+        detail = ", ".join(
+            f"{int(st // 60)}:{int(st % 60):02d} {ov:.0%} ({n_asr} asr/{n_pub} pub words)"
+            for st, ov, n_asr, n_pub in results
+        )
+        logger.info(
+            "Publisher word timings %s in %.1fs (need >= %.0f%% on every clip): %s",
+            "accepted" if accepted else "rejected, using Whisper",
+            time.monotonic() - t_chk,
+            SPOT_CHECK_MIN_OVERLAP * 100,
+            detail,
+        )
+        return accepted
 
     def analyze(
         self,
@@ -644,6 +1061,8 @@ class LocalMlBackend:
         feed_chapters_url: Optional[str] = None,
         feed_chapters_type: str = "",
         cancel_event: Optional[threading.Event] = None,
+        episode_title: Optional[str] = None,
+        podcast_title: Optional[str] = None,
     ) -> DesktopAnalysisBundle:
         bundle, _ = self.analyze_with_embeddings(
             audio_path=audio_path,
@@ -657,6 +1076,8 @@ class LocalMlBackend:
             feed_chapters_url=feed_chapters_url,
             feed_chapters_type=feed_chapters_type,
             cancel_event=cancel_event,
+            episode_title=episode_title,
+            podcast_title=podcast_title,
         )
         return bundle
 
@@ -674,6 +1095,8 @@ class LocalMlBackend:
         feed_chapters_url: Optional[str] = None,
         feed_chapters_type: str = "",
         cancel_event: Optional[threading.Event] = None,
+        episode_title: Optional[str] = None,
+        podcast_title: Optional[str] = None,
     ):
         self.whisper_model = self._resolve_whisper_model()
         if not self.ml_imports_ready():
@@ -691,6 +1114,9 @@ class LocalMlBackend:
 
         t0 = time.monotonic()
         lang = _normalize_whisper_language(language)
+        # Stages report out of order (a rejected publisher transcript, the Whisper timer vs its
+        # segment callback); the phone should never see the percentage go down.
+        on_progress = _MonotonicProgress(on_progress)
         on_progress(JobState.TRANSCRIBING, 25, f"Decoding audio for {self.whisper_model.name}")
 
         t_dec = time.monotonic()
@@ -720,25 +1146,38 @@ class LocalMlBackend:
         if parsed_feed is not None:
             f_words, f_segments, needs_align = parsed_feed
             if not needs_align:
-                words, segments = f_words, f_segments
-                use_feed_transcript = True
-                on_progress(
-                    JobState.TRANSCRIBING,
-                    60,
-                    f"Using feed transcript ({len(segments)} segments / {len(words)} words)",
-                )
+                # Word-level publisher JSON: trust its timings only if spot checks against the
+                # audio agree (dynamic ad insertion shifts the audio against the transcript).
+                if self._publisher_timings_ok(f_words, pcm_16k, duration_sec, lang, on_progress, cancel_event):
+                    words, segments = f_words, f_segments
+                    use_feed_transcript = True
+                    on_progress(
+                        JobState.TRANSCRIBING,
+                        60,
+                        f"Using feed transcript ({len(segments)} segments / {len(words)} words)",
+                    )
             elif self._forced_aligner.is_available() and len(pcm_16k) > 0:
                 on_progress(
                     JobState.TRANSCRIBING,
                     45,
                     f"Aligning feed transcript ({len(f_words)} words)",
                 )
+                n_alignable = count_alignable_words(f_words)
                 n_aligned = self._forced_aligner.align_words(
                     pcm_16k, f_segments, f_words, cancel_event=cancel_event
                 )
-                if n_aligned >= max(1, int(len(f_words) * 0.85)):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise RuntimeError("Job cancelled")
+                if feed_alignment_accepted(n_aligned, n_alignable, len(f_words)):
                     words, segments = f_words, f_segments
                     use_feed_transcript = True
+                    logger.info(
+                        "Feed transcript accepted: %d/%d alignable words (%d total) aligned at score >= %.2f",
+                        n_aligned,
+                        n_alignable,
+                        len(f_words),
+                        MIN_WORD_SCORE,
+                    )
                     on_progress(
                         JobState.TRANSCRIBING,
                         60,
@@ -746,9 +1185,13 @@ class LocalMlBackend:
                     )
                 else:
                     logger.info(
-                        "Feed transcript aligned only %d/%d words; falling back to Whisper",
+                        "Feed transcript aligned only %d/%d alignable words (%d total) at score >= %.2f "
+                        "(need %.0f%%); falling back to Whisper",
                         n_aligned,
+                        n_alignable,
                         len(f_words),
+                        MIN_WORD_SCORE,
+                        FEED_ALIGN_MIN_FRACTION * 100,
                     )
 
         if not use_feed_transcript:
@@ -758,22 +1201,23 @@ class LocalMlBackend:
                 f"Transcribing {int(duration_sec // 60)}m{int(duration_sec % 60):02d}s audio ({self.whisper_model.name}, {time.monotonic() - t_dec:.1f}s decode)",
             )
             t_tr = time.monotonic()
-            dur_str = f"{int(duration_sec // 60)}m{int(duration_sec % 60):02d}s"
             tr_done = threading.Event()
             est_sec = max(4.0, float(self.estimate_eta_sec(duration_sec) or (duration_sec / 12.0)))
+            tr_progress = _TranscribeProgress(
+                on_progress,
+                duration_sec=duration_sec,
+                est_sec=est_sec,
+                model_name=self.whisper_model.name,
+            )
 
             def _whisper_heartbeat() -> None:
+                # Elapsed-time estimate until whisper.cpp's segment callback takes over.
                 while not tr_done.wait(0.5):
                     if cancel_event is not None and cancel_event.is_set():
                         return
-                    el = time.monotonic() - t_tr
-                    pct = min(58, 30 + int(28 * (el / est_sec)))
                     try:
-                        on_progress(
-                            JobState.TRANSCRIBING,
-                            pct,
-                            f"Transcribing {dur_str} ({self.whisper_model.name}) • {el:.0f}s",
-                        )
+                        if not tr_progress.tick():
+                            return
                     except Exception:
                         return
 
@@ -782,57 +1226,23 @@ class LocalMlBackend:
             try:
                 if self._should_use_faster_whisper():
                     fw_pipe = self._get_faster_whisper_pipeline()
-                    fw_segs, _ = fw_pipe.transcribe(
+                    words, segments = _transcribe_faster_whisper(
+                        fw_pipe,
                         pcm_16k,
-                        batch_size=8,
-                        language=lang,
-                        temperature=0.0,
-                        condition_on_previous_text=False,
-                        vad_filter=True,
-                        word_timestamps=True,
+                        lang=lang,
+                        duration_sec=duration_sec,
+                        initial_prompt=build_initial_prompt(podcast_title, episode_title, lang),
+                        cancel_event=cancel_event,
                     )
-                    for seg in fw_segs:
-                        if cancel_event is not None and cancel_event.is_set():
-                            raise RuntimeError("Job cancelled")
-                        seg_words_raw = getattr(seg, "words", None) or []
-                        seg_word_dtos: list[WordDto] = []
-                        for w in seg_words_raw:
-                            wt = str(getattr(w, "word", "") or "")
-                            if not wt.strip():
-                                continue
-                            ws = round(float(getattr(w, "start", seg.start)), 3)
-                            we = round(max(ws + 0.01, float(getattr(w, "end", ws + 0.1))), 3)
-                            words.append(WordDto(start=ws, end=we, text=wt.strip()))
-                            seg_word_dtos.append(WordDto(start=ws, end=we, text=wt))
-                        if seg_word_dtos:
-                            segments.extend(split_sentences(seg_word_dtos))
-                        elif (seg.text or "").strip():
-                            st = seg.text.strip()
-                            segments.append(
-                                SegmentDto(
-                                    start=round(float(seg.start), 3),
-                                    end=round(float(seg.end), 3),
-                                    text=st,
-                                    nWords=len(st.split()),
-                                )
-                            )
                 else:
                     use_dtw = not self._forced_aligner.is_available()
                     whisper = self._get_whisper_cpp(use_dtw=use_dtw)
-                    last_cb_ts = 0.0
 
                     def _on_new_segment(seg) -> None:
-                        nonlocal last_cb_ts
                         if cancel_event is not None and cancel_event.is_set():
                             return
-                        now_m = time.monotonic()
-                        if now_m - last_cb_ts < 0.75:
-                            return
-                        last_cb_ts = now_m
                         t_end_sec = getattr(seg, "t1", 0) / 100.0 if hasattr(seg, "t1") else 0.0
-                        if duration_sec > 0 and t_end_sec > 0:
-                            pct = min(59, 30 + int(29 * min(1.0, t_end_sec / duration_sec)))
-                            on_progress(JobState.TRANSCRIBING, pct, f"Transcribing ({int(t_end_sec // 60)}m/{int(duration_sec // 60)}m)")
+                        tr_progress.segment(t_end_sec)
 
                     def _abort_cb() -> bool:
                         return bool(cancel_event is not None and cancel_event.is_set())
@@ -928,15 +1338,18 @@ class LocalMlBackend:
                     pct = min(97, 92 + tok_count // 120)
                     on_progress(JobState.TAGGING, pct, f"Summarizing ({tok_count} tokens)")
 
-            summary, chapters = generate_chapters_and_summary(
-                segments=segments,
-                embeddings=emb_2d,
-                ad_segments=ad_segments,
-                chat_model_path=chat_path,
-                audio_path=audio_path,
-                has_feed_chapters=bool(feed_chapters_url),
-                on_token=_on_llm_token,
-            )
+            try:
+                summary, chapters = generate_chapters_and_summary(
+                    segments=segments,
+                    embeddings=emb_2d,
+                    ad_segments=ad_segments,
+                    chat_model_path=chat_path,
+                    audio_path=audio_path,
+                    has_feed_chapters=bool(feed_chapters_url),
+                    on_token=_on_llm_token,
+                )
+            finally:
+                self._release_chat_model_if_low_mem()
             on_progress(
                 JobState.TAGGING,
                 98,
@@ -1020,6 +1433,21 @@ class LocalMlBackend:
                 chat_path = self.chat_model_path()
                 sum_mode = f"LLM ({chat_path.name})" if (chat_path and chat_path.exists()) else "Extractive summary"
                 on_progress(JobState.TAGGING, 90, f"Generating chapters & {sum_mode}")
+                try:
+                    summary, chapters = generate_chapters_and_summary(
+                        segments=segments,
+                        embeddings=emb_2d,
+                        ad_segments=ad_segments,
+                        chat_model_path=chat_path,
+                        audio_path=audio_path,
+                    )
+                finally:
+                    self._release_chat_model_if_low_mem()
+        elif stage_upper == "SUMMARY_CHAPTERS":
+            chat_path = self.chat_model_path()
+            sum_mode = f"LLM ({chat_path.name})" if (chat_path and chat_path.exists()) else "Extractive summary"
+            on_progress(JobState.TAGGING, 70, f"Regenerating chapters & {sum_mode}")
+            try:
                 summary, chapters = generate_chapters_and_summary(
                     segments=segments,
                     embeddings=emb_2d,
@@ -1027,17 +1455,8 @@ class LocalMlBackend:
                     chat_model_path=chat_path,
                     audio_path=audio_path,
                 )
-        elif stage_upper == "SUMMARY_CHAPTERS":
-            chat_path = self.chat_model_path()
-            sum_mode = f"LLM ({chat_path.name})" if (chat_path and chat_path.exists()) else "Extractive summary"
-            on_progress(JobState.TAGGING, 70, f"Regenerating chapters & {sum_mode}")
-            summary, chapters = generate_chapters_and_summary(
-                segments=segments,
-                embeddings=emb_2d,
-                ad_segments=ad_segments,
-                chat_model_path=chat_path,
-                audio_path=audio_path,
-            )
+            finally:
+                self._release_chat_model_if_low_mem()
             on_progress(JobState.TAGGING, 95, f"Generated {len(chapters)} chapters")
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -1055,6 +1474,113 @@ class LocalMlBackend:
             pipelineVersion=PIPELINE_VERSION,
         )
         return bundle, emb_2d
+
+
+def _fw_words_to_dtos(raw_words, default_start: float) -> list[WordDto]:
+    """faster-whisper Word objects -> WordDto with a single leading space (for split_sentences)."""
+    out: list[WordDto] = []
+    for w in raw_words or []:
+        wt = str(getattr(w, "word", "") or "").strip()
+        if not wt:
+            continue
+        ws = round(float(getattr(w, "start", default_start)), 3)
+        we = round(max(ws + 0.01, float(getattr(w, "end", ws + 0.1))), 3)
+        out.append(WordDto(start=ws, end=we, text=" " + wt))
+    return out
+
+
+def _make_fw_window_decoder(fw_model, pcm_16k, lang: str, sr: int = 16000):
+    """Sequential (non-batched) re-decode of one audio window, for `repair_hard_cuts`."""
+
+    def _decode(start_s: float, end_s: float, prompt: str) -> list[WordDto]:
+        s_idx = max(0, int(round(start_s * sr)))
+        e_idx = min(len(pcm_16k), int(round(end_s * sr)))
+        if e_idx - s_idx < int(0.5 * sr):
+            return []
+        segs, _ = fw_model.transcribe(
+            pcm_16k[s_idx:e_idx],
+            language=lang,
+            temperature=0.0,
+            condition_on_previous_text=False,
+            vad_filter=False,
+            word_timestamps=True,
+            initial_prompt=prompt or None,
+        )
+        out: list[WordDto] = []
+        for seg in segs:
+            out.extend(_fw_words_to_dtos(getattr(seg, "words", None), float(getattr(seg, "start", 0.0))))
+        return out
+
+    return _decode
+
+
+def _transcribe_faster_whisper(
+    fw_pipe,
+    pcm_16k,
+    *,
+    lang: str,
+    duration_sec: float,
+    initial_prompt: Optional[str],
+    cancel_event: Optional[threading.Event] = None,
+) -> tuple[list[WordDto], list[SegmentDto]]:
+    """
+    Batched faster-whisper pass, then: drop prompt leakage, repair hard window cuts, and split
+    sentences over the whole episode so they can span windows. `words` and `segments` come
+    from the same flat word list.
+    """
+    fw_segs, _ = fw_pipe.transcribe(
+        pcm_16k,
+        batch_size=8,
+        language=lang,
+        temperature=0.0,
+        condition_on_previous_text=False,
+        vad_filter=True,
+        word_timestamps=True,
+        initial_prompt=initial_prompt,
+    )
+    window_words: list[list[WordDto]] = []
+    n_leaked = 0
+    for seg in fw_segs:
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("Job cancelled")
+        seg_words = _fw_words_to_dtos(getattr(seg, "words", None), float(seg.start))
+        if not seg_words and (seg.text or "").strip():
+            # No word timings: spread the text evenly so words and segments stay in step.
+            toks = seg.text.split()
+            s0, s1 = float(seg.start), max(float(seg.end), float(seg.start) + 0.01 * len(toks))
+            step = (s1 - s0) / len(toks)
+            seg_words = [
+                WordDto(start=round(s0 + i * step, 3), end=round(s0 + (i + 1) * step, 3), text=" " + t)
+                for i, t in enumerate(toks)
+            ]
+        seg_words, dropped = strip_prompt_leak(seg_words, initial_prompt)
+        n_leaked += dropped
+        if seg_words:
+            window_words.append(seg_words)
+    if n_leaked:
+        logger.info("Dropped %d prompt-leak word(s) from near-silent windows", n_leaked)
+
+    fw_logger = logging.getLogger("faster_whisper")
+    prev_level = fw_logger.level
+    fw_logger.setLevel(max(prev_level, logging.WARNING))  # one "Processing audio" line per re-decode
+    try:
+        flat, _ = repair_hard_cuts(
+            window_words,
+            _make_fw_window_decoder(fw_pipe.model, pcm_16k, lang),
+            audio_duration_s=duration_sec,
+            cancel_event=cancel_event,
+        )
+    finally:
+        fw_logger.setLevel(prev_level)
+
+    flat = [WordDto(start=w.start, end=w.end, text=" " + w.text.strip()) for w in flat if w.text.strip()]
+    for i in range(len(flat) - 1):
+        # Re-decoded words can overlap their neighbours slightly at the repair seams.
+        if flat[i + 1].start > flat[i].start and flat[i].end > flat[i + 1].start:
+            flat[i].end = flat[i + 1].start
+    segments = split_sentences(flat)
+    words = [WordDto(start=w.start, end=w.end, text=w.text.strip()) for w in flat]
+    return words, segments
 
 
 _DTW_PRESET_TABLE: tuple[tuple[str, str, int], ...] = (

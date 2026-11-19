@@ -25,11 +25,13 @@ import app.hushcast.automute.storage.AutoMuteDatabase
 import app.hushcast.automute.storage.EpisodeAnalysisStatusEntity
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.CancellationException
+import java.util.concurrent.Executors
 
 /**
  * WorkManager worker for on-device episode analysis.
@@ -57,6 +59,11 @@ class EpisodeAnalysisWorker(
         val audioFile = File(audioPath)
         val displayTitle = episodeTitle.ifBlank { "Episode analysis" }
         val notificationId = NOTIFICATION_ID_BASE + (episodeId.hashCode() and 0x0FFF)
+
+        if (inputData.getBoolean(KEY_REALIGN_ONLY, false)) {
+            if (!audioFile.exists()) return Result.success()
+            return analysisSemaphore.withPermit { runRealign(db, episodeId, audioFile, actionMode) }
+        }
 
         if (!audioFile.exists()) {
             db.dao().upsertStatus(
@@ -112,6 +119,8 @@ class EpisodeAnalysisWorker(
                 android.util.Log.w("HushCastPerf", "Worker stopped: ep=$episodeId reason=$reason paused=$isPausedBySystem")
                 withContext(NonCancellable) {
                     val existing = runCatching { db.dao().getStatus(episodeId) }.getOrNull()
+                    // A stopped re-run of a Ready episode keeps its old, still-valid results.
+                    if (existing?.badge == ReadinessBadge.READY.name) return@withContext
                     val preservedWordMute = existing?.badge == ReadinessBadge.WORD_MUTE_READY.name
                     val label = when {
                         isPausedBySystem && preservedWordMute -> "Paused (Word-Mute Ready)"
@@ -135,6 +144,11 @@ class EpisodeAnalysisWorker(
             } catch (t: Throwable) {
                 android.util.Log.e("HushCastPerf", "Worker failed: ep=$episodeId ${t.javaClass.simpleName}: ${t.message}", t)
                 val existing = runCatching { db.dao().getStatus(episodeId) }.getOrNull()
+                if (existing?.badge == ReadinessBadge.READY.name) {
+                    // A failed re-run never downgrades a Ready episode; its old results stay in use.
+                    deleteStagedTranscriptFile(inputData)
+                    return@withPermit Result.failure()
+                }
                 val preservedWordMute = existing?.badge == ReadinessBadge.WORD_MUTE_READY.name
                 db.dao().upsertStatus(
                     EpisodeAnalysisStatusEntity(
@@ -151,6 +165,24 @@ class EpisodeAnalysisWorker(
                 Result.failure()
             }
         }
+    }
+
+    /** Re-aligns SRT/VTT cues that rules added since analysis match; never touches the badge. */
+    private suspend fun runRealign(
+        db: AutoMuteDatabase,
+        episodeId: String,
+        audioFile: File,
+        actionMode: MuteActionMode
+    ): Result = try {
+        val n = AutoMuteAnalyzer(applicationContext, db).realignApproximateMatches(episodeId, audioFile, actionMode)
+        android.util.Log.i("HushCastPerf", "Realign: ep=$episodeId cues=$n")
+        Result.success()
+    } catch (c: CancellationException) {
+        throw c
+    } catch (t: Throwable) {
+        // The approximate (widened) windows stay in place; the next play or analysis tries again.
+        android.util.Log.w("HushCastPerf", "Realign failed: ep=$episodeId ${t.javaClass.simpleName}: ${t.message}")
+        Result.success()
     }
 
     private fun createForegroundInfo(
@@ -220,6 +252,41 @@ class EpisodeAnalysisWorker(
         const val KEY_FEED_TRANSCRIPT_RAW = "feed_transcript_raw"
         const val KEY_FEED_TRANSCRIPT_PATH = "feed_transcript_path"
         const val KEY_FEED_TRANSCRIPT_MIME = "feed_transcript_mime"
+        const val KEY_REALIGN_ONLY = "realign_only"
+
+        /** Tag prefix carrying [requestSignature] on every analysis request (R2). */
+        internal const val SIGNATURE_TAG_PREFIX = "sig:"
+        internal const val CONSTRAINTS_NONE = "none"
+        internal const val CONSTRAINTS_CHARGING = "charging"
+        internal const val CONSTRAINTS_CHARGING_UNMETERED = "charging+unmetered"
+
+        /** Checks and enqueues one request at a time, so two quick taps can't race. */
+        private val enqueueExecutor = Executors.newSingleThreadExecutor { r ->
+            Thread(r, "HushCast-Enqueue").apply { isDaemon = true }
+        }
+
+        /** What makes two analysis requests the same job (R2). */
+        internal fun requestSignature(
+            audioPath: String,
+            quickMode: Boolean,
+            actionMode: MuteActionMode,
+            constraints: String
+        ): String = "$SIGNATURE_TAG_PREFIX$audioPath|quick=$quickMode|mode=${actionMode.name}|$constraints"
+
+        /**
+         * R2: keep the pending (or running) request only when it is the same request; otherwise
+         * replace it.  [force] always replaces.  With nothing pending, KEEP simply enqueues.
+         */
+        internal fun analyzeNowPolicy(
+            existing: List<Pair<WorkInfo.State, Set<String>>>,
+            signature: String,
+            force: Boolean
+        ): ExistingWorkPolicy {
+            if (force) return ExistingWorkPolicy.REPLACE
+            val unfinished = existing.filter { !it.first.isFinished }
+            if (unfinished.isEmpty()) return ExistingWorkPolicy.KEEP
+            return if (unfinished.all { signature in it.second }) ExistingWorkPolicy.KEEP else ExistingWorkPolicy.REPLACE
+        }
 
         const val ANALYSIS_QUEUE_NAME = "hushcast_analysis_queue"
         private const val NOTIFICATION_ID_BASE = 41001
@@ -275,6 +342,7 @@ class EpisodeAnalysisWorker(
             val request = OneTimeWorkRequestBuilder<EpisodeAnalysisWorker>()
                 .addTag(ANALYSIS_QUEUE_NAME)
                 .addTag("episode:$episodeId")
+                .addTag(requestSignature(audioPath, quickMode, actionMode, CONSTRAINTS_CHARGING))
                 .setConstraints(constraints)
                 .setInputData(
                     workDataOf(
@@ -335,13 +403,64 @@ class EpisodeAnalysisWorker(
             } else {
                 builder.setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             }
-
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                uniqueWorkName(episodeId),
-                if (force) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
-                builder.build()
+            val signature = requestSignature(
+                audioPath, quickMode, actionMode, if (chargingOnly) CONSTRAINTS_CHARGING else CONSTRAINTS_NONE
             )
+            builder.addTag(signature)
+            val request = builder.build()
+            val wm = WorkManager.getInstance(context)
+            val name = uniqueWorkName(episodeId)
+            // R2: KEEP only an identical pending request (a second tap must not cancel a running
+            // analysis); a different one, such as auto-download's charging-only job, is replaced.
+            enqueueExecutor.execute {
+                val existing = runCatching { wm.getWorkInfosForUniqueWork(name).get() }.getOrDefault(emptyList())
+                val policy = analyzeNowPolicy(existing.map { it.state to it.tags }, signature, force)
+                runCatching { wm.enqueueUniqueWork(name, policy, request).result.get() }
+                    .onFailure { android.util.Log.w("HushCastPerf", "Enqueue failed: ep=$episodeId ${it.message}") }
+            }
         }
+
+        /**
+         * Call when an episode starts playing (and after rules change while it plays).  If a rule
+         * now matches SRT/VTT words whose times are only estimates, a short job runs Whisper
+         * within +-2 s of those cues and fixes their times.  Does nothing otherwise; the check
+         * runs off the calling thread.
+         */
+        fun enqueueRealignIfNeeded(
+            context: Context,
+            episodeId: String,
+            audioPath: String,
+            actionMode: MuteActionMode = MuteActionMode.HARD_SILENCE
+        ) {
+            val app = context.applicationContext
+            enqueueExecutor.execute {
+                if (!File(audioPath).exists()) return@execute
+                val needed = runCatching {
+                    runBlocking { AutoMuteAnalyzer(app).needsRealign(episodeId, actionMode) }
+                }.getOrDefault(false)
+                if (!needed) return@execute
+                val request = OneTimeWorkRequestBuilder<EpisodeAnalysisWorker>()
+                    .addTag(ANALYSIS_QUEUE_NAME)
+                    .addTag(REALIGN_TAG)
+                    .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                    .setInputData(
+                        workDataOf(
+                            KEY_EPISODE_ID to episodeId,
+                            KEY_AUDIO_PATH to audioPath,
+                            KEY_ACTION_MODE to actionMode.name,
+                            KEY_REALIGN_ONLY to true
+                        )
+                    )
+                    .build()
+                WorkManager.getInstance(app).enqueueUniqueWork(
+                    "hushcast_realign_$episodeId",
+                    ExistingWorkPolicy.KEEP,
+                    request
+                )
+            }
+        }
+
+        const val REALIGN_TAG = "hushcast_realign"
 
         fun cancelEpisode(context: Context, episodeId: String) {
             WorkManager.getInstance(context).cancelUniqueWork(uniqueWorkName(episodeId))
@@ -374,19 +493,18 @@ class EpisodeAnalysisWorker(
             actionMode: MuteActionMode = MuteActionMode.HARD_SILENCE,
             episodeTitle: String? = null,
             feedTranscriptRaw: String? = null,
-            feedTranscriptMime: String = "",
-            isWorkerConfigured: Boolean = false
+            feedTranscriptMime: String = ""
         ) {
+            // On-device re-runs only ever happen while charging on unmetered Wi-Fi.  When a worker is
+            // active, the caller re-processes through the worker instead of calling this.
             val constraintsBuilder = Constraints.Builder()
-            if (!isWorkerConfigured) {
-                constraintsBuilder
-                    .setRequiresCharging(true)
-                    .setRequiredNetworkType(NetworkType.UNMETERED)
-            }
+                .setRequiresCharging(true)
+                .setRequiredNetworkType(NetworkType.UNMETERED)
             val transcriptPath = stageTranscriptFile(context, episodeId, feedTranscriptRaw)
             val request = OneTimeWorkRequestBuilder<EpisodeAnalysisWorker>()
                 .addTag(ANALYSIS_QUEUE_NAME)
                 .addTag("episode:$episodeId")
+                .addTag(requestSignature(audioPath, false, actionMode, CONSTRAINTS_CHARGING_UNMETERED))
                 .setConstraints(constraintsBuilder.build())
                 .setInputData(
                     workDataOf(

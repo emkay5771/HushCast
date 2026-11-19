@@ -34,41 +34,14 @@ class PodcastEpisodeDownloadWork(
         private val transferSemaphore = Semaphore(2)
         private val desktopOffloadSemaphore = Semaphore(4)
         private const val PROGRESS_THROTTLE_MS = 500L
+
+        /** Health reads outlive nothing: a detached scope, so a slow worker never delays a result. */
+        private val healthScope = kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + Dispatchers.IO
+        )
     }
 
     private var lastProgressUpdate = 0L
-
-    private suspend fun fetchFeedTranscriptRaw(url: String): String? {
-        if (url.isBlank()) return null
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                val conn = (java.net.URL(url).openConnection() as java.net.HttpURLConnection).apply {
-                    connectTimeout = 10_000
-                    readTimeout = 15_000
-                    instanceFollowRedirects = true
-                }
-                try {
-                    if (conn.responseCode !in 200..299) return@runCatching null
-                    val bytes = conn.inputStream.use { input ->
-                        val out = java.io.ByteArrayOutputStream()
-                        val buf = ByteArray(8192)
-                        var total = 0
-                        while (true) {
-                            val n = input.read(buf)
-                            if (n <= 0) break
-                            total += n
-                            if (total > 5 * 1024 * 1024) return@runCatching null
-                            out.write(buf, 0, n)
-                        }
-                        out.toByteArray()
-                    }
-                    bytes.decodeToString()
-                } finally {
-                    conn.disconnect()
-                }
-            }.getOrNull()
-        }
-    }
 
     suspend fun doWork(
         episodeId: String,
@@ -78,12 +51,15 @@ class PodcastEpisodeDownloadWork(
         reprocessStage: String? = null,
         isFinalAttempt: Boolean = true,
         isRetry: Boolean = false,
+        /** Runs once this work holds a download slot (the worker goes foreground here, S12). */
+        onSlotAcquired: (suspend () -> Unit)? = null,
         onProgressUpdate: ((title: String, sourceLabel: String, percent: Int) -> Unit)? = null
     ): DownloadWorkOutcome {
         val bundle = db.podcastEpisodes().getSyncNullable(episodeId)
             ?: return DownloadWorkOutcome.PermanentFailure
         val episode = bundle.episode
-        val podcastLanguage = runCatching { db.podcasts().getSync(episode.origin)?.languageCode }.getOrNull().orEmpty()
+        val podcastModel = runCatching { db.podcasts().getSync(episode.origin) }.getOrNull()
+        val podcastLanguage = podcastModel?.languageCode.orEmpty()
 
         if (bundle.download == null) {
             return DownloadWorkOutcome.PermanentFailure
@@ -98,6 +74,7 @@ class PodcastEpisodeDownloadWork(
 
         try {
             return transferSemaphore.withPermit {
+                onSlotAcquired?.let { runCatching { it() } }
                 val existingStatus = runCatching {
                     app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
                         .dao()
@@ -122,14 +99,17 @@ class PodcastEpisodeDownloadWork(
                 db.podcastEpisodeDownloads()
                     .setState(episodeId, PodcastEpisodeDownloadState.DOWNLOADING.value)
 
+                // One meaning for the worker switch: switched on AND an address set.
+                val workerActive = app.hushcast.automute.engine.HushCastPrefs.isWorkerActive(context)
                 val workerUrl = app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context)
                 val shouldTryDesktop = when (downloadMethod) {
-                    app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP -> workerUrl.isNotBlank()
-                    app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO ->
-                        app.hushcast.automute.engine.HushCastPrefs.isDesktopWorkerEnabled(context) && workerUrl.isNotBlank()
+                    app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP,
+                    app.hushcast.automute.engine.DownloadAnalysisMethod.AUTO -> workerActive
                     app.hushcast.automute.engine.DownloadAnalysisMethod.ON_DEVICE,
                     app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS -> false
                 }
+                // Set when the worker was asked for but is switched off: the phone does it instead.
+                var workerOffFallback = false
 
                 if (shouldTryDesktop) {
                     app.hushcast.automute.worker.EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
@@ -137,6 +117,7 @@ class PodcastEpisodeDownloadWork(
                         episodeId = episodeId,
                         audioUrl = episode.audioUrl,
                         title = episode.title,
+                        podcastTitle = podcastModel?.title,
                         destFile = file,
                         workerUrl = workerUrl,
                         token = app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerToken(context),
@@ -167,13 +148,113 @@ class PodcastEpisodeDownloadWork(
                     }
                     Log.w("HushCastDesktop", "Desktop worker unavailable or failed (auto=$isAuto); falling back to on-device download")
                 } else if (downloadMethod == app.hushcast.automute.engine.DownloadAnalysisMethod.DESKTOP) {
-                    Log.w("HushCastDesktop", "Desktop method requested but no Desktop Worker URL is configured")
-                    db.podcastEpisodeDownloads().setState(
-                        episodeId,
-                        if (wasAlreadyDownloaded) PodcastEpisodeDownloadState.DOWNLOADED.value
-                        else PodcastEpisodeDownloadState.FAILED.value
+                    Log.w(
+                        "HushCastDesktop",
+                        "Worker requested for $episodeId but it's switched off or has no address; using this phone"
                     )
-                    outcome = DownloadWorkOutcome.PermanentFailure
+                    workerOffFallback = true
+                }
+
+                /** Writes a short note on the episode's status row, unless it's already Ready. */
+                suspend fun noteStatus(note: String) {
+                    runCatching {
+                        val dao = app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context).dao()
+                        val current = dao.getStatus(episodeId)
+                        if (current?.badge == app.hushcast.automute.dsp.ReadinessBadge.READY.name) return@runCatching
+                        dao.upsertStatus(
+                            (current ?: app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(episodeId = episodeId))
+                                .copy(
+                                    badge = if (current?.badge == app.hushcast.automute.dsp.ReadinessBadge.ANALYZING.name) {
+                                        app.hushcast.automute.dsp.ReadinessBadge.NOT_PROCESSED.name
+                                    } else {
+                                        current?.badge ?: app.hushcast.automute.dsp.ReadinessBadge.NOT_PROCESSED.name
+                                    },
+                                    progressPercent = 0,
+                                    stageLabel = note,
+                                    updatedAt = System.currentTimeMillis()
+                                )
+                        )
+                    }
+                }
+
+                /** The audio file is on the phone: register it, read its chapters, start analysis. */
+                suspend fun finishLocalFile(): DownloadWorkOutcome {
+                    val finalSize = withContext(Dispatchers.IO) { file.length() }
+                    db.podcastEpisodeDownloads()
+                        .registerDownload(episodeId, file.absolutePath, finalSize)
+                    runCatching {
+                        app.podiumpodcasts.podium.api.chapters.EpisodeChapterHelper.extractAndStoreId3FromFile(
+                            context = context,
+                            db = db,
+                            episodeId = episodeId,
+                            uri = android.net.Uri.fromFile(file),
+                            durationMs = episode.duration * 1000L
+                        )
+                    }
+
+                    app.podiumpodcasts.podium.background.PlaybackService.notifyEpisodeDownloaded(episodeId)
+
+                    val canAnalyzeOnDevice = app.hushcast.automute.engine.ModelManager(context).areWordMuteModelsReady()
+                    if (downloadMethod == app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS || !canAnalyzeOnDevice) {
+                        app.hushcast.automute.worker.EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
+                        if (workerOffFallback) {
+                            noteStatus("Worker is off. Turn it on in Settings to process this episode")
+                        }
+                    } else {
+                        val sha256 = withContext(Dispatchers.IO) {
+                            app.hushcast.automute.hash.StreamingSha256.hashFile(file)
+                        }
+                        val existingForHash = runCatching {
+                            app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
+                                .dao()
+                                .getStatus(episodeId)
+                        }.getOrNull()
+                        val alreadyAnalyzedAtCurrentVersion = !forceReprocess &&
+                            existingForHash != null &&
+                            existingForHash.fileSha256 == sha256 &&
+                            existingForHash.pipelineVersion >= app.hushcast.automute.pipeline.AutoMuteAnalyzer.CURRENT_PIPELINE_VERSION &&
+                            existingForHash.badge == app.hushcast.automute.dsp.ReadinessBadge.READY.name
+                        if (!alreadyAnalyzedAtCurrentVersion) {
+                            // The publisher's transcript (falling through to the alternates), so the
+                            // analyzer can skip a full Whisper pass.
+                            val feedTranscript = app.podiumpodcasts.podium.api.download.FeedTranscriptFetcher
+                                .fetchBestForAnalysis(episode)
+                            val chargingOnly = app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context)
+                            if (isAuto && chargingOnly) {
+                                if (workerOffFallback) {
+                                    noteStatus("Worker is off. This phone will process it while charging")
+                                }
+                                app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueBackgroundCharging(
+                                    context = context,
+                                    episodeId = episodeId,
+                                    audioPath = file.absolutePath,
+                                    knownSha256 = sha256,
+                                    episodeTitle = episode.title,
+                                    feedTranscriptRaw = feedTranscript?.raw,
+                                    feedTranscriptMime = feedTranscript?.mime ?: episode.transcriptType
+                                )
+                            } else {
+                                if (workerOffFallback) {
+                                    noteStatus("Worker is off. Processing on this phone")
+                                }
+                                app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueAnalyzeNow(
+                                    context = context,
+                                    episodeId = episodeId,
+                                    audioPath = file.absolutePath,
+                                    knownSha256 = sha256,
+                                    episodeTitle = episode.title,
+                                    feedTranscriptRaw = feedTranscript?.raw,
+                                    feedTranscriptMime = feedTranscript?.mime ?: episode.transcriptType
+                                )
+                            }
+                        }
+                    }
+                    return DownloadWorkOutcome.Success
+                }
+
+                if (workerOffFallback && wasAlreadyDownloaded && file.length() > 0L) {
+                    // Already on the phone: no need to download the audio again.
+                    outcome = finishLocalFile()
                     stateHandled = true
                     return@withPermit outcome
                 }
@@ -201,74 +282,14 @@ class PodcastEpisodeDownloadWork(
 
                 when (result) {
                     is HttpDownloadClientResult.Success -> {
-                        val finalSize = withContext(Dispatchers.IO) {
+                        withContext(Dispatchers.IO) {
                             if (file.exists()) file.delete()
                             if (!tmpFile.renameTo(file)) {
                                 tmpFile.copyTo(file, overwrite = true)
                                 tmpFile.delete()
                             }
-                            file.length()
                         }
-                        db.podcastEpisodeDownloads()
-                            .registerDownload(episodeId, file.absolutePath, finalSize)
-                        runCatching {
-                            app.podiumpodcasts.podium.api.chapters.EpisodeChapterHelper.extractAndStoreId3FromFile(
-                                context = context,
-                                db = db,
-                                episodeId = episodeId,
-                                uri = android.net.Uri.fromFile(file),
-                                durationMs = episode.duration * 1000L
-                            )
-                        }
-
-                        app.podiumpodcasts.podium.background.PlaybackService.notifyEpisodeDownloaded(episodeId)
-
-                        val canAnalyzeOnDevice = app.hushcast.automute.engine.ModelManager(context).areWordMuteModelsReady()
-                        if (downloadMethod == app.hushcast.automute.engine.DownloadAnalysisMethod.SKIP_ANALYSIS || !canAnalyzeOnDevice) {
-                            app.hushcast.automute.worker.EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
-                        } else {
-                            val sha256 = withContext(Dispatchers.IO) {
-                                app.hushcast.automute.hash.StreamingSha256.hashFile(file)
-                            }
-                            val existingForHash = runCatching {
-                                app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
-                                    .dao()
-                                    .getStatus(episodeId)
-                            }.getOrNull()
-                            val alreadyAnalyzedAtCurrentVersion = !forceReprocess &&
-                                existingForHash != null &&
-                                existingForHash.fileSha256 == sha256 &&
-                                existingForHash.pipelineVersion >= app.hushcast.automute.pipeline.AutoMuteAnalyzer.CURRENT_PIPELINE_VERSION &&
-                                existingForHash.badge == app.hushcast.automute.dsp.ReadinessBadge.READY.name
-                            if (!alreadyAnalyzedAtCurrentVersion) {
-                                val feedTranscriptRaw = if (episode.transcriptUrl.isNotBlank()) {
-                                    fetchFeedTranscriptRaw(episode.transcriptUrl)
-                                } else null
-                                val chargingOnly = app.hushcast.automute.engine.HushCastPrefs.isAnalyzeOnlyWhileCharging(context)
-                                if (isAuto && chargingOnly) {
-                                    app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueBackgroundCharging(
-                                        context = context,
-                                        episodeId = episodeId,
-                                        audioPath = file.absolutePath,
-                                        knownSha256 = sha256,
-                                        episodeTitle = episode.title,
-                                        feedTranscriptRaw = feedTranscriptRaw,
-                                        feedTranscriptMime = episode.transcriptType
-                                    )
-                                } else {
-                                    app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueAnalyzeNow(
-                                        context = context,
-                                        episodeId = episodeId,
-                                        audioPath = file.absolutePath,
-                                        knownSha256 = sha256,
-                                        episodeTitle = episode.title,
-                                        feedTranscriptRaw = feedTranscriptRaw,
-                                        feedTranscriptMime = episode.transcriptType
-                                    )
-                                }
-                            }
-                        }
-                        outcome = DownloadWorkOutcome.Success
+                        outcome = finishLocalFile()
                         stateHandled = true
                         outcome
                     }
@@ -351,6 +372,7 @@ class PodcastEpisodeDownloadWork(
         episodeId: String,
         audioUrl: String,
         title: String,
+        podcastTitle: String? = null,
         destFile: File,
         workerUrl: String,
         token: String,
@@ -391,6 +413,15 @@ class PodcastEpisodeDownloadWork(
             var completedSuccessfully = false
             var earlyAudioDeferred: kotlinx.coroutines.Deferred<Boolean>? = null
             var earlyAudioSha: String? = null
+            var queueTicker: kotlinx.coroutines.Job? = null
+            // V15/V20: the worker's health (version, Modal or Mac, queue).  Read from a 10-minute
+            // cache, started before the job is submitted; detached so a slow answer never holds up
+            // this work's completion.
+            val healthRef = java.util.concurrent.atomic.AtomicReference<app.hushcast.automute.desktop.DesktopHealthResponse?>(null)
+            val healthDeferred = healthScope.async {
+                app.hushcast.automute.desktop.DesktopWorkerClient.cachedHealth(workerUrl, token)
+                    .also { healthRef.set(it) }
+            }
             try {
                 val existing = runCatching { autoMuteDb.dao().getStatus(episodeId) }.getOrNull()
                 val resumeAnalyzing = !forceReprocess &&
@@ -419,13 +450,25 @@ class PodcastEpisodeDownloadWork(
                     feedChaptersType = feedChaptersType,
                     language = language,
                     force = forceReprocess,
-                    reprocessStage = reprocessStage
+                    reprocessStage = reprocessStage,
+                    podcastTitle = podcastTitle
                 )
-                val job = app.hushcast.automute.desktop.DesktopWorkerClient.submitJob(
+                // A retry (constraint stop, process death) re-attaches to the job it started instead
+                // of spawning a second, billed GPU job.
+                val savedJobId = app.hushcast.automute.engine.HushCastPrefs.getWorkerJobId(context, episodeId)
+                val reattached = if (savedJobId != null && reprocessStage == null) {
+                    runCatching {
+                        app.hushcast.automute.desktop.DesktopWorkerClient.getJob(workerUrl, token, savedJobId)
+                    }.getOrNull()?.takeIf { it.state != "FAILED" && it.state != "CANCELLED" }
+                } else {
+                    null
+                }
+                val job = reattached ?: app.hushcast.automute.desktop.DesktopWorkerClient.submitJob(
                     baseUrl = workerUrl,
                     token = token,
                     request = jobReq
                 )
+                app.hushcast.automute.engine.HushCastPrefs.setWorkerJobId(context, episodeId, job.jobId)
                 Log.i(
                     "HushCastDesktop",
                     "submitJob ep=$episodeId job=${job.jobId} state=${job.state} pct=${job.progressPercent} force=$forceReprocess"
@@ -441,12 +484,73 @@ class PodcastEpisodeDownloadWork(
                 var lastPollNotifyMs = 0L
                 var lastPollNotifyPct = -1
                 var lastFriendlyStage = ""
+                val publishLock = kotlinx.coroutines.sync.Mutex()
+                suspend fun publishStage(pct: Int, stage: String) = publishLock.withLock {
+                    val now = System.currentTimeMillis()
+                    if ((pct != lastPollNotifyPct || stage != lastFriendlyStage) &&
+                        (now - lastPollNotifyMs >= 500L || pct >= 70 || stage != lastFriendlyStage)
+                    ) {
+                        lastPollNotifyMs = now
+                        lastPollNotifyPct = pct
+                        lastFriendlyStage = stage
+                        onProgressUpdate?.invoke(title, stage, pct)
+                        DownloadTracker.update(episodeId, pct.toLong(), 100L, stage)
+                        statusChannel.trySend(pct to stage)
+                    }
+                }
+
+                fun knownHealth(): app.hushcast.automute.desktop.DesktopHealthResponse? = healthRef.get()
+
+                var outdatedNoted = false
+                suspend fun noteIfOutdated() {
+                    val health = knownHealth() ?: return
+                    if (outdatedNoted || !health.isOutdated()) return
+                    outdatedNoted = true
+                    Log.w(
+                        "HushCastDesktop",
+                        "Worker is out of date (pipeline=${health.pipelineVersion} api=${health.apiVersion}, " +
+                            "phone wants pipeline=${app.hushcast.automute.pipeline.AutoMuteAnalyzer.CURRENT_PIPELINE_VERSION} " +
+                            "api>=${app.hushcast.automute.desktop.DesktopWorkerClient.MIN_WORKER_API_VERSION}); processing anyway"
+                    )
+                    publishStage(highestPct, app.hushcast.automute.desktop.DesktopWorkerStatusText.OUTDATED_NOTE)
+                }
+
+                // V20: a job sitting in QUEUED (cold GPU start, busy Mac) gets an explanation.
+                var lastJobState = job.state
+                var lastJobQueuePosition = job.queuePosition
+                var queuedSinceMs: Long? = if (job.state == "QUEUED") System.currentTimeMillis() else null
+                fun queuedLabel(): String? {
+                    val since = queuedSinceMs ?: return null
+                    if (lastJobState != "QUEUED") return null
+                    val health = knownHealth()
+                    return app.hushcast.automute.desktop.DesktopWorkerStatusText.queuedLabel(
+                        queuedForMs = System.currentTimeMillis() - since,
+                        isCloud = health?.isCloud ?: workerUrl.contains("modal.run", ignoreCase = true),
+                        jobQueuePosition = lastJobQueuePosition,
+                        healthQueuePosition = health?.queuePosition
+                    )
+                }
+                runCatching { kotlinx.coroutines.withTimeoutOrNull(3_000L) { healthDeferred.await() } }
+                noteIfOutdated()
+                queueTicker = launch {
+                    while (true) {
+                        kotlinx.coroutines.delay(1_000L)
+                        noteIfOutdated()
+                        queuedLabel()?.let { label ->
+                            if (label != lastFriendlyStage) publishStage(highestPct, label)
+                        }
+                    }
+                }
+
                 val ready = app.hushcast.automute.desktop.DesktopWorkerClient.pollJobUntilReady(
                     baseUrl = workerUrl,
                     token = token,
                     jobId = job.jobId,
                     resubmitRequest = jobReq,
-                    onResubmitted = { newJobId -> trackedJobId = newJobId }
+                    onResubmitted = { newJobId ->
+                        trackedJobId = newJobId
+                        app.hushcast.automute.engine.HushCastPrefs.setWorkerJobId(context, episodeId, newJobId)
+                    }
                 ) { status ->
                     // V5: Start early Range audio pull as soon as fileSha256 is known
                     val shaEarly = status.fileSha256?.takeIf { it.isNotBlank() }
@@ -472,19 +576,18 @@ class PodcastEpisodeDownloadWork(
                     val rawPct = (5 + ((status.progressPercent * 65) / 100)).coerceIn(5, 70)
                     val unifiedPct = maxOf(highestPct, rawPct)
                     highestPct = unifiedPct
-                    val friendlyStage = friendlyWorkerStage(status.stageLabel.ifBlank { status.state }, status.stage)
-                    val now = System.currentTimeMillis()
-                    if ((unifiedPct != lastPollNotifyPct || friendlyStage != lastFriendlyStage) &&
-                        (now - lastPollNotifyMs >= 500L || unifiedPct >= 70 || friendlyStage != lastFriendlyStage)
-                    ) {
-                        lastPollNotifyMs = now
-                        lastPollNotifyPct = unifiedPct
-                        lastFriendlyStage = friendlyStage
-                        onProgressUpdate?.invoke(title, friendlyStage, unifiedPct)
-                        DownloadTracker.update(episodeId, unifiedPct.toLong(), 100L, friendlyStage)
-                        statusChannel.trySend(unifiedPct to friendlyStage)
+                    if (status.state == "QUEUED") {
+                        if (queuedSinceMs == null || lastJobState != "QUEUED") queuedSinceMs = System.currentTimeMillis()
+                    } else {
+                        queuedSinceMs = null
                     }
+                    lastJobState = status.state
+                    lastJobQueuePosition = status.queuePosition
+                    val friendlyStage = queuedLabel()
+                        ?: friendlyWorkerStage(status.stageLabel.ifBlank { status.state }, status.stage)
+                    publishStage(unifiedPct, friendlyStage)
                 }
+                queueTicker?.cancel()
                 val sha256 = ready.fileSha256 ?: return@coroutineScope false
                 Log.i("HushCastDesktop", "Job ${trackedJobId ?: job.jobId} READY ep=$episodeId sha=${sha256.take(12)}")
 
@@ -551,6 +654,16 @@ class PodcastEpisodeDownloadWork(
                     postPadMs = mutePrecision.postPadMs,
                     defaultActionMode = app.podiumpodcasts.podium.background.HushCastEngineBridge.defaultActionMode
                 )
+                if (outdatedNoted || knownHealth()?.isOutdated() == true) {
+                    // Keep the note on the finished row ("Ready (…). Worker is out of date…").
+                    runCatching {
+                        val dao = autoMuteDb.dao()
+                        dao.getStatus(episodeId)?.let { st ->
+                            val note = app.hushcast.automute.desktop.DesktopWorkerStatusText.OUTDATED_NOTE
+                            dao.upsertStatus(st.copy(stageLabel = "${st.stageLabel}. $note", errorMessage = note))
+                        }
+                    }
+                }
                 app.hushcast.automute.worker.EpisodeAnalysisWorker.analysisCompletedEvents.tryEmit(episodeId)
 
                 db.podcastEpisodeDownloads().registerDownload(episodeId, destFile.absolutePath, destFile.length())
@@ -564,28 +677,59 @@ class PodcastEpisodeDownloadWork(
                 }
                 app.podiumpodcasts.podium.background.PlaybackService.notifyEpisodeDownloaded(episodeId)
                 completedSuccessfully = true
+                app.hushcast.automute.engine.HushCastPrefs.setWorkerJobId(context, episodeId, null)
+                // V17: the phone's copy matches the worker's SHA-256, so the worker can drop its
+                // copy.  Best-effort; never fails the download.
+                withContext(kotlinx.coroutines.NonCancellable) {
+                    val deleted = runCatching {
+                        app.hushcast.automute.desktop.DesktopWorkerClient.deleteWorkerAudio(workerUrl, token, sha256)
+                    }.getOrDefault(false)
+                    Log.i("HushCastDesktop", "Worker audio delete sha=${sha256.take(12)} ok=$deleted")
+                }
                 true
             } catch (c: CancellationException) {
+                queueTicker?.cancel()
                 statusChannel.close()
                 statusWriter.cancel()
                 earlyAudioDeferred?.cancel()
                 // Do not cancel the remote job on WorkManager constraint stops so retries can re-attach
                 throw c
             } catch (t: Throwable) {
+                queueTicker?.cancel()
                 statusChannel.close()
                 statusWriter.cancel()
                 earlyAudioDeferred?.cancel()
                 val errMsg = t.message ?: t.javaClass.simpleName
                 val isPermanent = (t as? app.hushcast.automute.desktop.DesktopWorkerClient.DesktopWorkerJobException)?.retryable == false
+                val gaveUp = t is IllegalStateException && t.message.orEmpty().startsWith("Timed out")
+                if (gaveUp) {
+                    // The phone stopped waiting, so stop the worker too (it would keep billing GPU time).
+                    trackedJobId?.let { jobId ->
+                        withContext(kotlinx.coroutines.NonCancellable) {
+                            runCatching { app.hushcast.automute.desktop.DesktopWorkerClient.cancelJob(workerUrl, token, jobId) }
+                        }
+                    }
+                }
+                if (isPermanent || gaveUp) {
+                    app.hushcast.automute.engine.HushCastPrefs.setWorkerJobId(context, episodeId, null)
+                }
                 Log.w("HushCastDesktop", "Desktop worker offload failed for $episodeId (permanent=$isPermanent): $errMsg", t)
                 if (resetStatusOnError || isPermanent) {
+                    // V10: the worker's own reason on the row, shortened.
+                    val jobFailure = t as? app.hushcast.automute.desktop.DesktopWorkerClient.DesktopWorkerJobException
+                    val rowLabel = if (jobFailure != null) {
+                        app.hushcast.automute.desktop.DesktopWorkerStatusText.shortReason(jobFailure.reason)
+                            ?: "Worker failed"
+                    } else {
+                        "Desktop/Cloud failed"
+                    }
                     runCatching {
                         autoMuteDb.dao().upsertStatus(
                             app.hushcast.automute.storage.EpisodeAnalysisStatusEntity(
                                 episodeId = episodeId,
                                 badge = app.hushcast.automute.dsp.ReadinessBadge.NOT_PROCESSED.name,
                                 progressPercent = 0,
-                                stageLabel = if (isPermanent) "Worker error (permanent)" else "Desktop/Cloud failed",
+                                stageLabel = rowLabel,
                                 errorMessage = errMsg
                             )
                         )
@@ -607,12 +751,9 @@ class PodcastEpisodeDownloadWork(
                 }
                 false
             } finally {
+                queueTicker?.cancel()
                 trackedJobId?.let {
-                    if (!completedSuccessfully) {
-                        app.hushcast.automute.desktop.DesktopWorkerClient.clearActiveJob(episodeId, it)
-                    } else {
-                        app.hushcast.automute.desktop.DesktopWorkerClient.clearActiveJob(episodeId, it)
-                    }
+                    app.hushcast.automute.desktop.DesktopWorkerClient.clearActiveJob(episodeId, it)
                 }
             }
         }

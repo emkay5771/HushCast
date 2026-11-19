@@ -16,7 +16,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
 
 private data class NewEpisodesFilterState(
-    val excludeListened: Boolean,
+    val excludePlayed: Boolean,
     val onlyInProgress: Boolean,
     val onlyDownloaded: Boolean
 )
@@ -27,14 +27,14 @@ class NewEpisodesViewModel(
 
     val lazyListState = LazyListState()
 
-    val excludeListened = mutableStateOf(true)
+    val excludePlayed = mutableStateOf(true)
     val onlyInProgress = mutableStateOf(false)
     val onlyDownloaded = mutableStateOf(false)
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val newEpisodes = snapshotFlow {
         NewEpisodesFilterState(
-            excludeListened = excludeListened.value,
+            excludePlayed = excludePlayed.value,
             onlyInProgress = onlyInProgress.value,
             onlyDownloaded = onlyDownloaded.value
         )
@@ -43,7 +43,7 @@ class NewEpisodesViewModel(
         .flatMapLatest { filter ->
             Pager(PagingConfig(pageSize = 15)) {
                 val query = db.podcastEpisodes().buildNewEpisodesQuery(
-                    excludePlayed = filter.excludeListened,
+                    excludePlayed = filter.excludePlayed,
                     onlyInProgress = filter.onlyInProgress,
                     onlyDownloaded = filter.onlyDownloaded
                 )

@@ -236,11 +236,18 @@ interface PodcastEpisodeDao {
     @Query("UPDATE podcastEpisode SET duration = :durationSec WHERE id = :id AND (duration <= 0 OR duration != :durationSec)")
     suspend fun updateDuration(id: String, durationSec: Int)
 
+    /**
+     * Applies a feed item's transcript/chapters extras.  Blank values keep what's stored.  A new
+     * chapters URL clears the chapter-fetch backoff (SQLite evaluates every SET against the old row).
+     */
     @Query(
         """
         UPDATE podcastEpisode
         SET transcriptUrl = CASE WHEN :transcriptUrl != '' THEN :transcriptUrl ELSE transcriptUrl END,
             transcriptType = CASE WHEN :transcriptUrl != '' THEN :transcriptType ELSE transcriptType END,
+            transcriptAlternatesJson = CASE WHEN :transcriptUrl != '' THEN :transcriptAlternatesJson ELSE transcriptAlternatesJson END,
+            chaptersFetchFailures = CASE WHEN :chaptersUrl != '' AND :chaptersUrl != chaptersUrl THEN 0 ELSE chaptersFetchFailures END,
+            chaptersRetryAfter = CASE WHEN :chaptersUrl != '' AND :chaptersUrl != chaptersUrl THEN 0 ELSE chaptersRetryAfter END,
             chaptersUrl = CASE WHEN :chaptersUrl != '' THEN :chaptersUrl ELSE chaptersUrl END,
             chaptersType = CASE WHEN :chaptersUrl != '' THEN :chaptersType ELSE chaptersType END
         WHERE id = :id
@@ -250,9 +257,22 @@ interface PodcastEpisodeDao {
         id: String,
         transcriptUrl: String,
         transcriptType: String,
+        transcriptAlternatesJson: String,
         chaptersUrl: String,
         chaptersType: String
     )
+
+    @Query(
+        """
+        SELECT id, transcriptUrl, transcriptType, transcriptAlternatesJson, chaptersUrl, chaptersType,
+               chaptersFetchFailures, chaptersRetryAfter
+        FROM podcastEpisode WHERE origin = :origin
+        """
+    )
+    suspend fun getFeedExtrasStates(origin: String): List<app.podiumpodcasts.podium.api.db.model.EpisodeFeedExtrasState>
+
+    @Query("UPDATE podcastEpisode SET chaptersFetchFailures = :failures, chaptersRetryAfter = :retryAfter WHERE id = :id")
+    suspend fun setChaptersFetchBackoff(id: String, failures: Int, retryAfter: Long)
 
     @Query("DELETE FROM podcastEpisode WHERE id=:id")
     suspend fun delete(id: String)

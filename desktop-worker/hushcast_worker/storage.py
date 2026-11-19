@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
+import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from .models import (
     PIPELINE_VERSION,
@@ -15,9 +18,176 @@ from .models import (
     JobState,
 )
 
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def normalize_sha256(value: str) -> Optional[str]:
+    """Returns the lowercase hex digest, or None when `value` isn't a SHA-256 hex string."""
+    if not isinstance(value, str) or not _SHA256_RE.match(value):
+        return None
+    return value.lower()
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        while True:
+            chunk = f.read(1024 * 1024)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+class ModelVerifier:
+    """Remembers which model files already passed their SHA-256 check (V19 / V21).
+
+    Hashing ~6 GB of models on every Modal cold start would add many seconds, so a file
+    is hashed once and then trusted while its size is unchanged. Downloads always land
+    through a `.part` file plus an atomic rename, so a same-size corrupt file is not a
+    realistic failure. The manifest lives at `<root>/.verified.json`.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self.root = Path(root)
+        self.manifest_path = self.root / ".verified.json"
+        self._lock = threading.Lock()
+        try:
+            data = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        self._data: dict[str, dict] = data if isinstance(data, dict) else {}
+
+    def _key(self, path: Path) -> str:
+        # abspath, not resolve(): a Hugging Face cache snapshot may hold symlinks into blobs/.
+        abs_path = os.path.abspath(path)
+        root = os.path.abspath(self.root)
+        rel = os.path.relpath(abs_path, root)
+        return abs_path if rel.startswith("..") else rel
+
+    def is_verified(self, path: Path, sha256: str) -> bool:
+        try:
+            size = Path(path).stat().st_size
+        except OSError:
+            return False
+        rec = self._data.get(self._key(path))
+        return (
+            isinstance(rec, dict)
+            and rec.get("sha256") == sha256.lower()
+            and rec.get("size") == size
+        )
+
+    def verify(self, path: Path, sha256: str) -> bool:
+        """True when `path` holds the file with this digest (hashing it if not checked before)."""
+        path = Path(path)
+        if not path.is_file():
+            return False
+        if self.is_verified(path, sha256):
+            return True
+        if sha256_file(path) != sha256.lower():
+            return False
+        self.mark(path, sha256)
+        return True
+
+    def mark(self, path: Path, sha256: str) -> None:
+        path = Path(path)
+        with self._lock:
+            self._data[self._key(path)] = {
+                "sha256": sha256.lower(),
+                "size": path.stat().st_size,
+                "verifiedAt": int(time.time()),
+            }
+            try:
+                self.root.mkdir(parents=True, exist_ok=True)
+                tmp = self.manifest_path.with_name(self.manifest_path.name + ".tmp")
+                tmp.write_text(json.dumps(self._data, indent=1, sort_keys=True), encoding="utf-8")
+                os.replace(tmp, self.manifest_path)
+            except OSError:
+                pass
+
+
+def download_verified(
+    url: str,
+    dest: Path,
+    *,
+    sha256: str,
+    size: Optional[int] = None,
+    verifier: Optional[ModelVerifier] = None,
+    timeout: float = 600.0,
+    on_progress: Optional[Callable[[int, int], None]] = None,
+) -> bool:
+    """Makes sure `dest` holds the file with this SHA-256, downloading it when needed.
+
+    Returns True when it downloaded the file and False when a verified copy was already
+    there. A partial `<dest>.part` is resumed with a Range request and hashed while it
+    streams. A file that fails the check never lands at `dest`: this raises ValueError.
+    """
+    import httpx
+
+    dest = Path(dest)
+    expected = sha256.lower()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    if dest.exists():
+        size_ok = size is None or dest.stat().st_size == size
+        if size_ok and (verifier.verify(dest, expected) if verifier else sha256_file(dest) == expected):
+            return False
+        dest.unlink(missing_ok=True)
+
+    part = dest.with_name(dest.name + ".part")
+    for attempt in range(2):
+        offset = part.stat().st_size if part.exists() else 0
+        if size is not None and offset > size:
+            part.unlink(missing_ok=True)
+            offset = 0
+        h = hashlib.sha256()
+        if offset:
+            with part.open("rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    h.update(chunk)
+        headers = {"Range": f"bytes={offset}-"} if offset else {}
+        with httpx.stream("GET", url, headers=headers, follow_redirects=True, timeout=timeout) as resp:
+            if resp.status_code != 416:  # 416: the partial file is already complete
+                resp.raise_for_status()
+                if offset and resp.status_code != 206:
+                    offset = 0  # the server ignored the Range header; start over
+                    h = hashlib.sha256()
+                total = int(resp.headers.get("content-length") or 0) + offset
+                if size is not None:
+                    total = size
+                received = offset
+                with part.open("ab" if offset else "wb") as f:
+                    for chunk in resp.iter_bytes(chunk_size=1024 * 1024):
+                        f.write(chunk)
+                        h.update(chunk)
+                        received += len(chunk)
+                        if on_progress is not None:
+                            on_progress(received, total)
+        actual = h.hexdigest()
+        part_size = part.stat().st_size if part.exists() else -1
+        if actual == expected and (size is None or part_size == size):
+            os.replace(part, dest)
+            if verifier is not None:
+                verifier.mark(dest, expected)
+            return True
+        part.unlink(missing_ok=True)
+        if attempt == 0 and offset:
+            continue  # a stale partial file from an older revision: retry once from zero
+        raise ValueError(
+            f"Checksum mismatch for {dest.name}: expected sha256 {expected}"
+            + (f" ({size} bytes)" if size is not None else "")
+            + f", got {actual} ({part_size} bytes)"
+        )
+    return False  # pragma: no cover - the loop always returns or raises
+
 
 class WorkerCache:
-    """Content-addressed disk cache keyed by fileSha256, plus persisted job states."""
+    """Content-addressed disk cache keyed by fileSha256, plus persisted job states.
+
+    V24: the Mac server calls this from the event loop and from worker threads, so index
+    reads and writes go through one re-entrant lock. Large file writes (bundles,
+    embeddings) happen outside it, so a short index read never waits on them.
+    """
 
     def __init__(self, root_dir: Path, max_cache_bytes: Optional[int] = None) -> None:
         self.root_dir = root_dir
@@ -29,6 +199,7 @@ class WorkerCache:
         self.episodes_dir.mkdir(parents=True, exist_ok=True)
         self.tmp_dir.mkdir(parents=True, exist_ok=True)
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
         self._index_mtime: Optional[float] = None
         self._index: dict[str, dict] = self._load_index()
         # sha -> (embeddings_matrix, episodeId, list[(startSec, endSec, text)])
@@ -53,16 +224,27 @@ class WorkerCache:
         except OSError:
             return
         if mtime != self._index_mtime:
+            with self._lock:
+                self._index = self._load_index()
+
+    def force_reload_index(self) -> None:
+        """Re-reads index.json even if its mtime looks unchanged (e.g. after a Volume reload)."""
+        with self._lock:
             self._index = self._load_index()
 
     def _save_index(self) -> None:
-        tmp = self.index_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self._index, separators=(",", ":")), encoding="utf-8")
-        os.replace(tmp, self.index_path)
-        try:
-            self._index_mtime = self.index_path.stat().st_mtime
-        except OSError:
-            pass
+        with self._lock:
+            tmp = self.index_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self._index, separators=(",", ":")), encoding="utf-8")
+            os.replace(tmp, self.index_path)
+            try:
+                self._index_mtime = self.index_path.stat().st_mtime
+            except OSError:
+                pass
+
+    def _sha_items(self) -> list[tuple[str, dict]]:
+        with self._lock:
+            return list(self._index["by_sha"].items())
 
     def audio_path(self, sha256: str) -> Path:
         return self.episodes_dir / f"{sha256}.audio"
@@ -80,8 +262,10 @@ class WorkerCache:
         if not self.bundle_path(sha256).exists():
             return False
         if require_current_pipeline:
-            meta = self._index["by_sha"].get(sha256, {})
-            if int(meta.get("pipelineVersion", 1)) < PIPELINE_VERSION:
+            with self._lock:
+                meta = self._index["by_sha"].get(sha256, {})
+                pipeline_version = int(meta.get("pipelineVersion", 1))
+            if pipeline_version < PIPELINE_VERSION:
                 return False
         return True
 
@@ -99,19 +283,21 @@ class WorkerCache:
         return True
 
     def lookup_by_url(self, audio_url: str, *, require_audio: bool = True) -> Optional[str]:
-        sha = self._index["by_url"].get(audio_url)
+        with self._lock:
+            sha = self._index["by_url"].get(audio_url)
         if sha and self.has_complete(sha, require_current_pipeline=True, require_audio=require_audio):
             return sha
         return None
 
     def lookup_by_episode_id(self, episode_id: str, audio_url: Optional[str] = "") -> Optional[str]:
         if audio_url:
-            sha = self._index["by_url"].get(audio_url)
+            with self._lock:
+                sha = self._index["by_url"].get(audio_url)
             if sha and self.has_bundle(sha):
                 return sha
         best_sha: Optional[str] = None
         best_ts: float = -1.0
-        for sha, meta in self._index["by_sha"].items():
+        for sha, meta in self._sha_items():
             if meta.get("episodeId") == episode_id and self.has_bundle(sha):
                 ts = float(meta.get("createdAtMs") or 0)
                 if ts <= 0:
@@ -129,6 +315,18 @@ class WorkerCache:
         if not path.exists():
             return None
         return DesktopAnalysisBundle.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def load_embeddings(self, sha256: str):
+        """Returns the stored segment embeddings matrix, or None when missing or unreadable."""
+        path = self.embeddings_path(sha256)
+        if not path.exists():
+            return None
+        try:
+            import numpy as np
+
+            return np.load(path, allow_pickle=False)
+        except Exception:
+            return None
 
     def stage_audio(
         self,
@@ -148,21 +346,45 @@ class WorkerCache:
             audio_tmp_path.unlink(missing_ok=True)
 
         now_ms = int(time.time() * 1000)
-        meta = self._index["by_sha"].get(sha256)
-        if meta is not None:
-            meta["hasAudio"] = dest_audio.exists()
-            meta["audioBytes"] = dest_audio.stat().st_size if dest_audio.exists() else 0
-            meta["contentType"] = content_type or meta.get("contentType", "audio/mpeg")
-            meta["lastAccessedAtMs"] = now_ms
-            if audio_url:
-                self._index["by_url"][audio_url] = sha256
-            self._save_index()
+        with self._lock:
+            meta = self._index["by_sha"].get(sha256)
+            if meta is not None:
+                meta["hasAudio"] = dest_audio.exists()
+                meta["audioBytes"] = dest_audio.stat().st_size if dest_audio.exists() else 0
+                meta["contentType"] = content_type or meta.get("contentType", "audio/mpeg")
+                meta["lastAccessedAtMs"] = now_ms
+                if audio_url:
+                    self._index["by_url"][audio_url] = sha256
+                self._save_index()
         return dest_audio
 
     def touch_audio(self, sha256: str) -> None:
-        meta = self._index["by_sha"].get(sha256)
-        if meta is not None:
-            meta["lastAccessedAtMs"] = int(time.time() * 1000)
+        with self._lock:
+            meta = self._index["by_sha"].get(sha256)
+            if meta is not None:
+                meta["lastAccessedAtMs"] = int(time.time() * 1000)
+
+    def delete_audio(self, sha256: str, *, update_index: bool = True) -> bool:
+        """V17: deletes the cached audio for `sha256` but keeps its bundle and embeddings.
+
+        Returns True when a file was removed and False when there was none. Set
+        `update_index=False` where another process also writes index.json (Modal's GPU
+        container): `hasAudio` is informational, and every reader checks the file itself.
+        """
+        removed = False
+        try:
+            self.audio_path(sha256).unlink()
+            removed = True
+        except FileNotFoundError:
+            pass
+        if update_index:
+            with self._lock:
+                meta = self._index["by_sha"].get(sha256)
+                if meta is not None and (meta.get("hasAudio") or meta.get("audioBytes")):
+                    meta["hasAudio"] = False
+                    meta["audioBytes"] = 0
+                    self._save_index()
+        return removed
 
     def evict_audio_if_needed(self, protected_shas: Optional[set[str]] = None) -> int:
         if not self.max_cache_bytes or self.max_cache_bytes <= 0:
@@ -170,7 +392,7 @@ class WorkerCache:
         protected = protected_shas or set()
         audio_files: list[tuple[int, str, Path, int]] = []
         total_bytes = 0
-        for sha, meta in self._index["by_sha"].items():
+        for sha, meta in self._sha_items():
             p = self.audio_path(sha)
             if p.exists():
                 sz = p.stat().st_size
@@ -181,20 +403,21 @@ class WorkerCache:
             return 0
         audio_files.sort(key=lambda item: item[0])
         removed = 0
-        for _, sha, p, sz in audio_files:
-            if total_bytes <= self.max_cache_bytes:
-                break
-            if sha in protected:
-                continue
-            p.unlink(missing_ok=True)
-            total_bytes -= sz
-            removed += 1
-            meta = self._index["by_sha"].get(sha)
-            if meta is not None:
-                meta["hasAudio"] = False
-                meta["audioBytes"] = 0
-        if removed:
-            self._save_index()
+        with self._lock:
+            for _, sha, p, sz in audio_files:
+                if total_bytes <= self.max_cache_bytes:
+                    break
+                if sha in protected:
+                    continue
+                p.unlink(missing_ok=True)
+                total_bytes -= sz
+                removed += 1
+                meta = self._index["by_sha"].get(sha)
+                if meta is not None:
+                    meta["hasAudio"] = False
+                    meta["audioBytes"] = 0
+            if removed:
+                self._save_index()
         return removed
 
     def cache_stats(self) -> tuple[int, int]:
@@ -214,6 +437,20 @@ class WorkerCache:
             free = 0
         return total, free
 
+    def _write_bundle_and_embeddings(self, sha256: str, bundle: DesktopAnalysisBundle, embeddings) -> None:
+        dest_bundle = self.bundle_path(sha256)
+        tmp_bundle = dest_bundle.with_suffix(".bundle.tmp")
+        tmp_bundle.write_text(bundle.model_dump_json(), encoding="utf-8")
+        os.replace(tmp_bundle, dest_bundle)
+
+        if embeddings is not None:
+            import numpy as np
+
+            emb_path = self.embeddings_path(sha256)
+            tmp_emb = emb_path.with_suffix(".emb.tmp.npy")
+            np.save(tmp_emb, np.asarray(embeddings, dtype=np.float32))
+            os.replace(tmp_emb, emb_path)
+
     def save_episode(
         self,
         *,
@@ -232,38 +469,28 @@ class WorkerCache:
             elif audio_tmp_path.exists():
                 audio_tmp_path.unlink(missing_ok=True)
 
-        dest_bundle = self.bundle_path(sha256)
-        tmp_bundle = dest_bundle.with_suffix(".bundle.tmp")
-        tmp_bundle.write_text(bundle.model_dump_json(), encoding="utf-8")
-        os.replace(tmp_bundle, dest_bundle)
-
-        if embeddings is not None:
-            import numpy as np
-
-            emb_path = self.embeddings_path(sha256)
-            tmp_emb = emb_path.with_suffix(".emb.tmp.npy")
-            np.save(tmp_emb, np.asarray(embeddings, dtype=np.float32))
-            os.replace(tmp_emb, emb_path)
+        self._write_bundle_and_embeddings(sha256, bundle, embeddings)
 
         now_ms = int(time.time() * 1000)
-        self._search_cache.pop(sha256, None)
-        self._index["by_url"][audio_url] = sha256
-        self._index["by_sha"][sha256] = {
-            "fileSha256": sha256,
-            "episodeId": bundle.episodeId,
-            "title": title,
-            "audioUrl": audio_url,
-            "contentType": content_type,
-            "durationSec": bundle.durationSec,
-            "audioBytes": dest_audio.stat().st_size if dest_audio.exists() else 0,
-            "hasAudio": dest_audio.exists(),
-            "wordCount": len(bundle.wordIndexBlob.words),
-            "adCount": len(bundle.adSegments),
-            "pipelineVersion": bundle.pipelineVersion,
-            "createdAtMs": now_ms,
-            "lastAccessedAtMs": now_ms,
-        }
-        self._save_index()
+        with self._lock:
+            self._search_cache.pop(sha256, None)
+            self._index["by_url"][audio_url] = sha256
+            self._index["by_sha"][sha256] = {
+                "fileSha256": sha256,
+                "episodeId": bundle.episodeId,
+                "title": title,
+                "audioUrl": audio_url,
+                "contentType": content_type,
+                "durationSec": bundle.durationSec,
+                "audioBytes": dest_audio.stat().st_size if dest_audio.exists() else 0,
+                "hasAudio": dest_audio.exists(),
+                "wordCount": len(bundle.wordIndexBlob.words),
+                "adCount": len(bundle.adSegments),
+                "pipelineVersion": bundle.pipelineVersion,
+                "createdAtMs": now_ms,
+                "lastAccessedAtMs": now_ms,
+            }
+            self._save_index()
         self.evict_audio_if_needed(protected_shas={sha256})
 
     def save_reprocessed(
@@ -273,27 +500,17 @@ class WorkerCache:
         bundle: DesktopAnalysisBundle,
         embeddings=None,
     ) -> None:
-        dest_bundle = self.bundle_path(sha256)
-        tmp_bundle = dest_bundle.with_suffix(".bundle.tmp")
-        tmp_bundle.write_text(bundle.model_dump_json(), encoding="utf-8")
-        os.replace(tmp_bundle, dest_bundle)
+        self._write_bundle_and_embeddings(sha256, bundle, embeddings)
 
-        if embeddings is not None:
-            import numpy as np
-
-            emb_path = self.embeddings_path(sha256)
-            tmp_emb = emb_path.with_suffix(".emb.tmp.npy")
-            np.save(tmp_emb, np.asarray(embeddings, dtype=np.float32))
-            os.replace(tmp_emb, emb_path)
-
-        self._search_cache.pop(sha256, None)
-        meta = self._index["by_sha"].get(sha256)
-        if meta is not None:
-            meta["wordCount"] = len(bundle.wordIndexBlob.words)
-            meta["adCount"] = len(bundle.adSegments)
-            meta["pipelineVersion"] = bundle.pipelineVersion
-            meta["durationSec"] = bundle.durationSec
-            self._save_index()
+        with self._lock:
+            self._search_cache.pop(sha256, None)
+            meta = self._index["by_sha"].get(sha256)
+            if meta is not None:
+                meta["wordCount"] = len(bundle.wordIndexBlob.words)
+                meta["adCount"] = len(bundle.adSegments)
+                meta["pipelineVersion"] = bundle.pipelineVersion
+                meta["durationSec"] = bundle.durationSec
+                self._save_index()
 
     def semantic_search(self, query_vec, top_k: int = 15) -> list[DesktopSearchHit]:
         import numpy as np
@@ -304,7 +521,7 @@ class WorkerCache:
             q = q / q_norm
 
         hits: list[DesktopSearchHit] = []
-        for sha, meta in list(self._index["by_sha"].items()):
+        for sha, meta in self._sha_items():
             cached = self._search_cache.get(sha)
             if cached is None:
                 emb_file = self.embeddings_path(sha)
@@ -348,12 +565,13 @@ class WorkerCache:
         return hits[:top_k]
 
     def get_content_type(self, sha256: str) -> str:
-        meta = self._index["by_sha"].get(sha256, {})
-        return meta.get("contentType", "audio/mpeg")
+        with self._lock:
+            meta = self._index["by_sha"].get(sha256, {})
+            return meta.get("contentType", "audio/mpeg")
 
     def list_ready(self) -> list[DesktopReadyEpisode]:
         out: list[DesktopReadyEpisode] = []
-        for sha, meta in self._index["by_sha"].items():
+        for sha, meta in self._sha_items():
             if not self.has_bundle(sha):
                 continue
             audio_p = self.audio_path(sha)
@@ -431,14 +649,15 @@ class WorkerCache:
                 removed_files += 1
                 freed_bytes += size
 
-        if audio_only:
-            for meta in self._index["by_sha"].values():
-                meta["hasAudio"] = False
-                meta["audioBytes"] = 0
-            self._save_index()
-        else:
-            self._search_cache.clear()
-            self._index = {"by_url": {}, "by_sha": {}}
-            self._save_index()
+        with self._lock:
+            if audio_only:
+                for meta in self._index["by_sha"].values():
+                    meta["hasAudio"] = False
+                    meta["audioBytes"] = 0
+                self._save_index()
+            else:
+                self._search_cache.clear()
+                self._index = {"by_url": {}, "by_sha": {}}
+                self._save_index()
 
         return {"removedFiles": removed_files, "freedBytes": freed_bytes}

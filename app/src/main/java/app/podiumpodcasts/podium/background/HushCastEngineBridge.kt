@@ -41,6 +41,17 @@ object HushCastEngineBridge {
             autoMuteProcessor.isEnabled = value
         }
 
+    /** Built-in tone for the BEEP mute mode. */
+    var bleepStyle: app.hushcast.automute.dsp.BleepStyle
+        get() = autoMuteProcessor.bleepStyle
+        set(value) {
+            autoMuteProcessor.bleepStyle = value
+        }
+
+    /** Built-in sound for skipped ads, used when no custom skip sound is chosen. */
+    @Volatile
+    var skipSound: app.podiumpodcasts.podium.SkipSound = app.podiumpodcasts.podium.SkipSound.WHOOSH
+
     var volumeBoostEnabled: Boolean
         get() = autoMuteProcessor.volumeBoostEnabled
         set(value) {
@@ -169,6 +180,8 @@ object HushCastEngineBridge {
         volumeBoostEnabled = settingsRepository.behavior.volumeBoost.firstOrNull() ?: false
         sponsorSkipSoundEnabled = settingsRepository.hushCast.sponsorSkipSoundEnabled.firstOrNull() ?: false
         sponsorSkipSoundUri = settingsRepository.hushCast.sponsorSkipSoundUri.firstOrNull()
+        bleepStyle = settingsRepository.hushCast.bleepStyle.firstOrNull() ?: app.hushcast.automute.dsp.BleepStyle.DEFAULT
+        skipSound = settingsRepository.hushCast.skipSound.firstOrNull() ?: app.podiumpodcasts.podium.SkipSound.WHOOSH
         val muteUri = settingsRepository.hushCast.muteCustomSoundUri.firstOrNull()
         if (context != null) {
             loadCustomMuteSound(context, muteUri)
@@ -214,47 +227,112 @@ object HushCastEngineBridge {
                 }.getOrDefault(false)
                 if (played) return@launch
             }
-            playDefaultSkipChime()
+            playBuiltInSkipSound(context, skipSound)
         }
     }
 
-    private fun playDefaultSkipChime() {
+    /** Plays one built-in skip sound (a short clip in res/raw, mastered below speech level). */
+    fun playBuiltInSkipSound(context: android.content.Context, sound: app.podiumpodcasts.podium.SkipSound) {
+        val resId = when (sound) {
+            app.podiumpodcasts.podium.SkipSound.WHOOSH -> app.podiumpodcasts.podium.R.raw.skip_whoosh
+            app.podiumpodcasts.podium.SkipSound.TWO_NOTE -> app.podiumpodcasts.podium.R.raw.skip_two_note
+        }
         runCatching {
-            val sampleRate = 44100
-            val durationMs = 220
-            val numSamples = (sampleRate * durationMs) / 1000
-            val samples = ShortArray(numSamples)
-            val half = numSamples / 2
-            for (i in 0 until numSamples) {
-                val freq = if (i < half) 880.0 else 1318.5
-                val localIdx = if (i < half) i else (i - half)
-                val localLen = if (i < half) half else (numSamples - half)
-                val env = kotlin.math.sin(kotlin.math.PI * localIdx / localLen.coerceAtLeast(1))
-                val s = kotlin.math.sin(2.0 * kotlin.math.PI * freq * i / sampleRate) * env * 0.55
-                samples[i] = (s * Short.MAX_VALUE).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
-            }
-            val track = android.media.AudioTrack.Builder()
-                .setAudioAttributes(
+            val afd = context.resources.openRawResourceFd(resId) ?: return
+            android.media.MediaPlayer().apply {
+                setAudioAttributes(
                     android.media.AudioAttributes.Builder()
                         .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
-                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
                         .build()
                 )
-                .setAudioFormat(
-                    android.media.AudioFormat.Builder()
-                        .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(sampleRate)
-                        .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO)
-                        .build()
-                )
-                .setBufferSizeInBytes(samples.size * 2)
-                .setTransferMode(android.media.AudioTrack.MODE_STATIC)
-                .build()
-            track.write(samples, 0, samples.size)
-            track.play()
-            Thread.sleep(durationMs.toLong() + 400L)
-            runCatching { track.stop() }
-            track.release()
+                afd.use { setDataSource(it.fileDescriptor, it.startOffset, it.length) }
+                setOnCompletionListener { it.release() }
+                setOnErrorListener { player, _, _ -> player.release(); true }
+                prepare()
+                start()
+            }
+        }
+    }
+
+    /** "Test" button for a custom sound. */
+    private var customPreviewPlayer: android.media.MediaPlayer? = null
+    private val previewHandler by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
+    private val stopCustomPreview = Runnable { releaseCustomPreview() }
+
+    @Synchronized
+    private fun releaseCustomPreview() {
+        customPreviewPlayer?.let { runCatching { it.stop() }; runCatching { it.release() } }
+        customPreviewPlayer = null
+    }
+
+    /**
+     * Settings "Test" button for a custom mute sound.  A long file (someone picked a song) is cut off
+     * after 5 seconds, and a second tap replaces the first preview instead of playing over it.
+     */
+    fun previewCustomSound(context: android.content.Context, uri: String) {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            previewHandler.removeCallbacks(stopCustomPreview)
+            releaseCustomPreview()
+            runCatching {
+                val player = android.media.MediaPlayer().apply {
+                    setAudioAttributes(
+                        android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    setDataSource(context.applicationContext, android.net.Uri.parse(uri))
+                    setOnCompletionListener { releaseCustomPreview() }
+                    setOnErrorListener { _, _, _ -> releaseCustomPreview(); true }
+                    prepare()
+                }
+                synchronized(this@HushCastEngineBridge) { customPreviewPlayer = player }
+                player.start()
+                previewHandler.postDelayed(stopCustomPreview, 5_000L)
+            }.onFailure { releaseCustomPreview() }
+        }
+    }
+
+    /** Settings "Test" button for a skip sound. */
+    fun previewSkipSound(context: android.content.Context, sound: app.podiumpodcasts.podium.SkipSound) {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            playBuiltInSkipSound(context.applicationContext, sound)
+        }
+    }
+
+    /**
+     * Settings "Test" button for a mute tone.  Uses the same generator as playback
+     * ([app.hushcast.automute.dsp.BleepTone]), so it sounds exactly like a muted word.
+     */
+    fun previewBleep(style: app.hushcast.automute.dsp.BleepStyle) {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching {
+                val sampleRate = 44100
+                val samples = app.hushcast.automute.dsp.BleepTone.renderPreview(style, sampleRate, durationMs = 600)
+                val track = android.media.AudioTrack.Builder()
+                    .setAudioAttributes(
+                        android.media.AudioAttributes.Builder()
+                            .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    .setAudioFormat(
+                        android.media.AudioFormat.Builder()
+                            .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                            .setSampleRate(sampleRate)
+                            .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(samples.size * 2)
+                    .setTransferMode(android.media.AudioTrack.MODE_STATIC)
+                    .build()
+                track.write(samples, 0, samples.size)
+                track.play()
+                kotlinx.coroutines.delay(600L + 300L)
+                runCatching { track.stop() }
+                track.release()
+            }
         }
     }
 

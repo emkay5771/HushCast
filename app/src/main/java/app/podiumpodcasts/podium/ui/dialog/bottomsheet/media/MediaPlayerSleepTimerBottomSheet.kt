@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +55,7 @@ import app.podiumpodcasts.podium.api.db.AppDatabase
 import app.podiumpodcasts.podium.background.HushCastEngineBridge
 import app.podiumpodcasts.podium.ui.theme.Typography
 import app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 private fun formatTimerDuration(wallMs: Long): String {
@@ -122,10 +124,19 @@ fun MediaPlayerSleepTimerBottomSheet(
     var showCustom by remember { mutableStateOf(false) }
     var customMinutes by remember { mutableFloatStateOf(20f) }
 
+    // M3: picking a timer closes the sheet with its slide-down animation.
+    val scope = rememberCoroutineScope()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    fun close() {
+        scope.launch { sheetState.hide() }.invokeOnCompletion { onDismiss() }
+    }
+    val heldByPause = vm.isSleepTimerHeldByPause
+
     ModalBottomSheet(
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
         onDismissRequest = onDismiss
     ) {
+        PlayerSheetBlur()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -146,15 +157,25 @@ fun MediaPlayerSleepTimerBottomSheet(
                         tint = if (isSleepTimerEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(Modifier.width(12.dp))
-                    Text(
-                        text = if (isSleepTimerEnabled) {
-                            stringResource(R.string.template_min, sleepTimerMinutes ?: 1)
-                        } else {
-                            stringResource(R.string.common_sleep_timer_off)
-                        },
-                        color = if (isSleepTimerEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                        style = Typography.headlineSmallEmphasized.copy(fontFeatureSettings = "tnum")
-                    )
+                    Column {
+                        Text(
+                            text = if (isSleepTimerEnabled) {
+                                stringResource(R.string.template_min, sleepTimerMinutes ?: 1)
+                            } else {
+                                stringResource(R.string.common_sleep_timer_off)
+                            },
+                            color = if (isSleepTimerEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                            style = Typography.headlineSmallEmphasized.copy(fontFeatureSettings = "tnum")
+                        )
+                        // Item 6: end of chapter/episode waits while paused instead of running down.
+                        if (isSleepTimerEnabled && heldByPause) {
+                            Text(
+                                text = "Paused · counts down while playing",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
 
                 if (isSleepTimerEnabled) {
@@ -173,10 +194,10 @@ fun MediaPlayerSleepTimerBottomSheet(
                         OutlinedButton(
                             onClick = {
                                 vm.setSleepTimer(null)
-                                onDismiss()
+                                close()
                             }
                         ) {
-                            Icon(Icons.Rounded.Close, contentDescription = "Turn off", modifier = Modifier.size(18.dp))
+                            Icon(Icons.Rounded.Close, contentDescription = "Turn off sleep timer", modifier = Modifier.size(18.dp))
                         }
                     }
                 }
@@ -207,7 +228,7 @@ fun MediaPlayerSleepTimerBottomSheet(
                     modifier = Modifier.clickable {
                         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                         vm.setSleepTimer(System.currentTimeMillis() + mins * 60_000L, presetKey = key)
-                        onDismiss()
+                        close()
                     }
                 )
             }
@@ -231,7 +252,7 @@ fun MediaPlayerSleepTimerBottomSheet(
                     modifier = Modifier.clickable {
                         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                         vm.setSleepTimerEndOfChapter(currentOrNextChapterEndMs, endOfChapterWallMs)
-                        onDismiss()
+                        close()
                     }
                 )
             }
@@ -255,7 +276,7 @@ fun MediaPlayerSleepTimerBottomSheet(
                     modifier = Modifier.clickable {
                         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                         vm.setSleepTimerEndOfEpisode(endOfEpisodeWallMs)
-                        onDismiss()
+                        close()
                     }
                 )
             }
@@ -295,7 +316,7 @@ fun MediaPlayerSleepTimerBottomSheet(
                             onClick = {
                                 haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                 vm.setSleepTimer(System.currentTimeMillis() + customMinutes.roundToInt() * 60_000L)
-                                onDismiss()
+                                close()
                             }
                         ) {
                             Text("Start timer")

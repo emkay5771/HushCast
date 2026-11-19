@@ -32,6 +32,7 @@ import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.ui.component.settings.SettingsSliderListItem
 import app.podiumpodcasts.podium.ui.component.settings.SettingsSwitchListItem
 import app.podiumpodcasts.podium.ui.formatFileSize
+import app.podiumpodcasts.podium.ui.component.settings.settingsGroup
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 import app.podiumpodcasts.podium.ui.route.settings.RoamingWarningDialog
@@ -78,152 +79,152 @@ fun SettingsBackgroundActivityPane(
 
             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
         ) {
-            item {
-                val updatePodcastsInRoaming =
-                    vm.repository.behavior.updatePodcastsInRoaming.collectAsState(false)
+            settingsGroup(spaceAbove = 0.dp) {
+                row { pos ->
+                    val updatePodcastsInRoaming =
+                        vm.repository.behavior.updatePodcastsInRoaming.collectAsState(false)
 
-                SettingsSwitchListItem(
-                    checked = updatePodcastsInRoaming.value,
-                    onCheckedChange = {
-                        if(it) {
-                            vm.roamingWarningDialogState.value =
-                                RoamingWarningDialogState.ShowUpdate
-                        } else {
+                    SettingsSwitchListItem(
+                        checked = updatePodcastsInRoaming.value,
+                        onCheckedChange = {
+                            if(it) {
+                                vm.roamingWarningDialogState.value =
+                                    RoamingWarningDialogState.ShowUpdate
+                            } else {
+                                scope.launch {
+                                    vm.repository.behavior.setUpdatePodcastsInRoaming(false)
+                                    vm.requeueUpdates(context)
+                                }
+                            }
+                        },
+
+                        icon = {
+                            Icon(
+                                Icons.Rounded.Public,
+                                stringResource(R.string.route_settings_background_activity_allow_update_while_roaming)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_background_activity_allow_update_while_roaming),
+                        description = stringResource(R.string.route_settings_background_activity_allow_update_while_roaming_description),
+
+                        index = pos.index,
+                        count = pos.count
+                    )
+                }
+                row { pos ->
+                    SettingsSliderListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.SignalCellularAlt,
+                                stringResource(R.string.route_settings_background_activity_update_frequency)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_background_activity_update_frequency),
+
+                        value = vm.updatePodcastsIntervalMinutesSliderState.floatValue,
+                        onValueChange = { vm.updateUpdatePodcastsIntervalMinutesSlider(it) },
+                        valueRange = 0f..(UPDATE_PODCASTS_INTERVAL_VALUES.size - 1).toFloat(),
+                        steps = UPDATE_PODCASTS_INTERVAL_VALUES.size - 1,
+
+                        onValueChangeFinished = {
                             scope.launch {
-                                vm.repository.behavior.setUpdatePodcastsInRoaming(false)
+                                vm.repository.behavior.setUpdatePodcastsIntervalMinutes(
+                                    vm.updatePodcastsIntervalMinutesTranslatedSliderState.intValue
+                                )
                                 vm.requeueUpdates(context)
                             }
-                        }
-                    },
+                        },
 
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Public,
-                            stringResource(R.string.route_settings_background_activity_allow_update_while_roaming)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_background_activity_allow_update_while_roaming),
-                    description = stringResource(R.string.route_settings_background_activity_allow_update_while_roaming_description),
+                        supportingContent = {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Absolute.SpaceBetween
+                            ) {
+                                vm.updatePodcastsIntervalMinutesTranslatedSliderState.intValue.let { state ->
+                                    val hours = state / 60
+                                    val minutes = state % 60
 
-                    index = 0,
-                    count = 3
-                )
-            }
-
-            item {
-                SettingsSliderListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.SignalCellularAlt,
-                            stringResource(R.string.route_settings_background_activity_update_frequency)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_background_activity_update_frequency),
-
-                    value = vm.updatePodcastsIntervalMinutesSliderState.floatValue,
-                    onValueChange = { vm.updateUpdatePodcastsIntervalMinutesSlider(it) },
-                    valueRange = 0f..(UPDATE_PODCASTS_INTERVAL_VALUES.size - 1).toFloat(),
-                    steps = UPDATE_PODCASTS_INTERVAL_VALUES.size - 1,
-
-                    onValueChangeFinished = {
-                        scope.launch {
-                            vm.repository.behavior.setUpdatePodcastsIntervalMinutes(
-                                vm.updatePodcastsIntervalMinutesTranslatedSliderState.intValue
-                            )
-                            vm.requeueUpdates(context)
-                        }
-                    },
-
-                    supportingContent = {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Absolute.SpaceBetween
-                        ) {
-                            vm.updatePodcastsIntervalMinutesTranslatedSliderState.intValue.let { state ->
-                                val hours = state / 60
-                                val minutes = state % 60
-
-                                Text(
-                                    text = if(hours > 0)
-                                        if(minutes > 0)
-                                            stringResource(
-                                                R.string.route_settings_background_activity_update_frequency_every_hours_mins,
-                                                hours,
-                                                minutes
-                                            )
+                                    Text(
+                                        text = if(hours > 0)
+                                            if(minutes > 0)
+                                                stringResource(
+                                                    R.string.route_settings_background_activity_update_frequency_every_hours_mins,
+                                                    hours,
+                                                    minutes
+                                                )
+                                            else
+                                                stringResource(
+                                                    R.string.route_settings_background_activity_update_frequency_every_hours,
+                                                    hours
+                                                )
                                         else
                                             stringResource(
-                                                R.string.route_settings_background_activity_update_frequency_every_hours,
-                                                hours
+                                                R.string.route_settings_background_activity_update_frequency_every_min,
+                                                minutes
                                             )
-                                    else
-                                        stringResource(
-                                            R.string.route_settings_background_activity_update_frequency_every_min,
-                                            minutes
-                                        )
-                                )
+                                    )
 
-                                vm.avgUpdateRunDataUsage.value?.let { avg ->
-                                    val updatesPerMonth = (1440 * 30) / state
+                                    vm.avgUpdateRunDataUsage.value?.let { avg ->
+                                        val updatesPerMonth = (1440 * 30) / state
 
-                                    Badge {
-                                        Text(
-                                            text = stringResource(
-                                                R.string.route_settings_background_activity_update_frequency_usage,
-                                                formatFileSize(updatesPerMonth.toLong() * avg)
+                                        Badge {
+                                            Text(
+                                                text = stringResource(
+                                                    R.string.route_settings_background_activity_update_frequency_usage,
+                                                    formatFileSize(updatesPerMonth.toLong() * avg)
+                                                )
                                             )
-                                        )
+                                        }
                                     }
                                 }
                             }
-                        }
-                    },
+                        },
 
-                    index = 1,
-                    count = 3
-                )
-            }
-
-            item {
-                val notifyEnabled = vm.repository.behavior.enableNewEpisodeNotifications.collectAsState(false)
-                val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
-                    androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
-                ) { granted ->
-                    if (granted) {
-                        scope.launch {
-                            vm.repository.behavior.setEnableNewEpisodeNotifications(true)
-                        }
-                    }
+                        index = pos.index,
+                        count = pos.count
+                    )
                 }
-
-                SettingsSwitchListItem(
-                    checked = notifyEnabled.value,
-                    onCheckedChange = { enable ->
-                        if (enable && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                            val hasPerm = androidx.core.content.ContextCompat.checkSelfPermission(
-                                context,
-                                android.Manifest.permission.POST_NOTIFICATIONS
-                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                            if (!hasPerm) {
-                                permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-                                return@SettingsSwitchListItem
+                row { pos ->
+                    val notifyEnabled = vm.repository.behavior.enableNewEpisodeNotifications.collectAsState(false)
+                    val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+                    ) { granted ->
+                        if (granted) {
+                            scope.launch {
+                                vm.repository.behavior.setEnableNewEpisodeNotifications(true)
                             }
                         }
-                        scope.launch {
-                            vm.repository.behavior.setEnableNewEpisodeNotifications(enable)
-                        }
-                    },
-                    icon = {
-                        Icon(
-                            androidx.compose.material.icons.Icons.Rounded.Notifications,
-                            "New episode notifications"
-                        )
-                    },
-                    label = "New episode notifications",
-                    description = "Notify when subscribed podcasts publish new episodes",
-                    index = 2,
-                    count = 3
-                )
+                    }
+
+                    SettingsSwitchListItem(
+                        checked = notifyEnabled.value,
+                        onCheckedChange = { enable ->
+                            if (enable && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                                val hasPerm = androidx.core.content.ContextCompat.checkSelfPermission(
+                                    context,
+                                    android.Manifest.permission.POST_NOTIFICATIONS
+                                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                if (!hasPerm) {
+                                    permissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                                    return@SettingsSwitchListItem
+                                }
+                            }
+                            scope.launch {
+                                vm.repository.behavior.setEnableNewEpisodeNotifications(enable)
+                            }
+                        },
+                        icon = {
+                            Icon(
+                                androidx.compose.material.icons.Icons.Rounded.Notifications,
+                                "New episode notifications"
+                            )
+                        },
+                        label = "New episode notifications",
+                        description = "Notify when subscribed podcasts publish new episodes",
+                        index = pos.index,
+                        count = pos.count
+                    )
+                }
             }
         }
     }

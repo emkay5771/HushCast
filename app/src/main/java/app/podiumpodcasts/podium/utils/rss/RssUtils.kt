@@ -67,6 +67,7 @@ fun RssItem.toPodcastEpisode(
         transcriptUrl = epExtras?.transcriptUrl ?: "",
         transcriptType = epExtras?.transcriptType ?: "",
         chaptersUrl = epExtras?.chaptersUrl ?: "",
-        chaptersType = epExtras?.chaptersType ?: ""
+        chaptersType = epExtras?.chaptersType ?: "",
+        transcriptAlternatesJson = epExtras?.transcriptAlternatesJson ?: ""
     )
 }

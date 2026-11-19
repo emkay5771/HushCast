@@ -3,6 +3,7 @@ package app.podiumpodcasts.podium.ui.route.settings.pane
 import android.annotation.SuppressLint
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,6 +62,7 @@ import app.podiumpodcasts.podium.manager.SyncManager
 import app.podiumpodcasts.podium.ui.component.common.ExperimentalBadge
 import app.podiumpodcasts.podium.ui.component.settings.SettingsListItem
 import app.podiumpodcasts.podium.ui.component.settings.SettingsSwitchListItem
+import app.podiumpodcasts.podium.ui.component.settings.settingsGroup
 import app.podiumpodcasts.podium.ui.formatPubDate
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
@@ -154,140 +156,140 @@ fun SettingsSynchronizationPane(
 
                 verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
             ) {
-                item {
-                    SettingsSwitchListItem(
-                        checked = enable.value,
-                        onCheckedChange = { enable ->
-                            scope.launch {
-                                vm.repository.sync.setEnable(enable)
+                settingsGroup(key = "enable", spaceAbove = 0.dp) {
+                    row { pos ->
+                        SettingsSwitchListItem(
+                            checked = enable.value,
+                            onCheckedChange = { enable ->
+                                scope.launch {
+                                    vm.repository.sync.setEnable(enable)
 
-                                if(deviceId.value.isEmpty()) {
-                                    val deviceCaption = SyncManager.generateDeviceCaption(context)
-                                    val deviceId = SyncManager.generateDeviceId(deviceCaption)
-                                    vm.repository.sync.setDeviceCaption(deviceCaption)
-                                    vm.repository.sync.setDeviceId(deviceId)
+                                    if(deviceId.value.isEmpty()) {
+                                        val deviceCaption = SyncManager.generateDeviceCaption(context)
+                                        val deviceId = SyncManager.generateDeviceId(deviceCaption)
+                                        vm.repository.sync.setDeviceCaption(deviceCaption)
+                                        vm.repository.sync.setDeviceId(deviceId)
+                                    }
                                 }
-                            }
-                        },
+                            },
 
-                        label = stringResource(R.string.route_settings_synchronization_enable),
+                            label = stringResource(R.string.route_settings_synchronization_enable),
 
-                        index = 0,
-                        count = 1
-                    )
+                            index = pos.index,
+                            count = pos.count
+                        )
+                    }
                 }
 
                 if(enable.value) {
 
-                    item {
-                        Spacer(
-                            Modifier
-                                .height(32.dp)
-                                .animateItem()
-                        )
-                    }
+                    settingsGroup(key = "sync", spaceAbove = 32.dp) {
+                        row { pos ->
+                            SettingsListItem(
+                                modifier = Modifier.animateItem(),
 
-                    item {
-                        SettingsListItem(
-                            modifier = Modifier.animateItem(),
+                                label = stringResource(R.string.route_settings_synchronization_synchronize_now),
 
-                            label = stringResource(R.string.route_settings_synchronization_synchronize_now),
+                                index = pos.index,
+                                count = pos.count,
 
-                            index = 0,
-                            count = 3,
-
-                            onClick = {
-                                scope.launch {
-                                    PartialSynchronizationWorker.enqueue(context)
+                                onClick = {
+                                    scope.launch {
+                                        PartialSynchronizationWorker.enqueue(context)
+                                    }
                                 }
-                            }
-                        )
-                    }
-
-                    item {
-                        SettingsListItem(
-                            modifier = Modifier.animateItem(),
-
-                            label = stringResource(R.string.route_settings_synchronization_full_synchronize),
-
-                            index = 1,
-                            count = 3,
-
-                            onClick = {
-                                scope.launch {
-                                    FullSynchronizationWorker.enqueue(context)
-                                }
-                            }
-                        )
-                    }
-
-                    item {
-                        val intervalMinutes = vm.repository.sync.intervalMinutes.collectAsState(60)
-                        val showIntervalPicker = remember { mutableStateOf(false) }
-                        val intervalLabel = when (intervalMinutes.value) {
-                            0 -> "Manual only"
-                            15 -> "Every 15 minutes"
-                            60 -> "Every hour"
-                            360 -> "Every 6 hours"
-                            1440 -> "Every 24 hours"
-                            else -> "Every ${intervalMinutes.value} minutes"
-                        }
-
-                        SettingsListItem(
-                            modifier = Modifier.animateItem(),
-                            label = "Sync interval",
-                            description = intervalLabel,
-                            index = 2,
-                            count = 3,
-                            onClick = { showIntervalPicker.value = true }
-                        )
-
-                        if (showIntervalPicker.value) {
-                            val options = listOf(
-                                0 to "Manual only",
-                                15 to "Every 15 minutes",
-                                60 to "Every hour",
-                                360 to "Every 6 hours",
-                                1440 to "Every 24 hours"
                             )
-                            androidx.compose.material3.AlertDialog(
-                                onDismissRequest = { showIntervalPicker.value = false },
-                                title = { Text("Sync interval") },
-                                text = {
-                                    Column {
-                                        options.forEach { (mins, label) ->
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(vertical = 4.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                androidx.compose.material3.RadioButton(
-                                                    selected = intervalMinutes.value == mins,
-                                                    onClick = {
-                                                        showIntervalPicker.value = false
-                                                        scope.launch {
-                                                            vm.repository.sync.setIntervalMinutes(mins)
-                                                            PartialSynchronizationWorker.schedule(
-                                                                context = context,
-                                                                repeatIntervalMinutes = mins.toLong(),
-                                                                replace = true
-                                                            )
+                        }
+                        row { pos ->
+                            SettingsListItem(
+                                modifier = Modifier.animateItem(),
+
+                                label = stringResource(R.string.route_settings_synchronization_full_synchronize),
+
+                                index = pos.index,
+                                count = pos.count,
+
+                                onClick = {
+                                    scope.launch {
+                                        FullSynchronizationWorker.enqueue(context)
+                                    }
+                                }
+                            )
+                        }
+                        row { pos ->
+                            val intervalMinutes = vm.repository.sync.intervalMinutes.collectAsState(60)
+                            val showIntervalPicker = remember { mutableStateOf(false) }
+                            val intervalLabel = when (intervalMinutes.value) {
+                                0 -> "Manual only"
+                                15 -> "Every 15 minutes"
+                                60 -> "Every hour"
+                                360 -> "Every 6 hours"
+                                1440 -> "Every 24 hours"
+                                else -> "Every ${intervalMinutes.value} minutes"
+                            }
+
+                            SettingsListItem(
+                                modifier = Modifier.animateItem(),
+                                label = "Sync interval",
+                                description = intervalLabel,
+                                index = pos.index,
+                                count = pos.count,
+                                onClick = { showIntervalPicker.value = true }
+                            )
+
+                            if (showIntervalPicker.value) {
+                                val options = listOf(
+                                    0 to "Manual only",
+                                    15 to "Every 15 minutes",
+                                    60 to "Every hour",
+                                    360 to "Every 6 hours",
+                                    1440 to "Every 24 hours"
+                                )
+                                androidx.compose.material3.AlertDialog(
+                                    onDismissRequest = { showIntervalPicker.value = false },
+                                    title = { Text("Sync interval") },
+                                    text = {
+                                        Column {
+                                            options.forEach { (mins, label) ->
+                                                // The whole row is the radio button.
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .selectable(
+                                                            selected = intervalMinutes.value == mins,
+                                                            role = androidx.compose.ui.semantics.Role.RadioButton
+                                                        ) {
+                                                            showIntervalPicker.value = false
+                                                            scope.launch {
+                                                                vm.repository.sync.setIntervalMinutes(mins)
+                                                                PartialSynchronizationWorker.schedule(
+                                                                    context = context,
+                                                                    repeatIntervalMinutes = mins.toLong(),
+                                                                    replace = true
+                                                                )
+                                                            }
                                                         }
-                                                    }
-                                                )
-                                                Text(label, style = MaterialTheme.typography.bodyMedium)
+                                                        .padding(vertical = 4.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    androidx.compose.material3.RadioButton(
+                                                        selected = intervalMinutes.value == mins,
+                                                        onClick = null,
+                                                        modifier = Modifier.padding(14.dp)
+                                                    )
+                                                    Text(label, style = MaterialTheme.typography.bodyMedium)
+                                                }
                                             }
                                         }
+                                    },
+                                    confirmButton = {},
+                                    dismissButton = {
+                                        androidx.compose.material3.TextButton(onClick = { showIntervalPicker.value = false }) {
+                                            Text("Cancel")
+                                        }
                                     }
-                                },
-                                confirmButton = {},
-                                dismissButton = {
-                                    androidx.compose.material3.TextButton(onClick = { showIntervalPicker.value = false }) {
-                                        Text("Cancel")
-                                    }
-                                }
-                            )
+                                )
+                            }
                         }
                     }
 

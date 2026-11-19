@@ -56,19 +56,12 @@ import app.podiumpodcasts.podium.SettingsRepository
 import app.podiumpodcasts.podium.ui.theme.Typography
 import app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel
 import kotlinx.coroutines.launch
-import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-fun formatPlaybackSpeed(speed: Float): String {
-    val rounded = (speed * 20f).roundToInt() / 20f
-    return when {
-        abs(rounded * 10f - (rounded * 10f).roundToInt()) < 0.01f ->
-            String.format(Locale.getDefault(), "%.1fx", rounded)
-        else ->
-            String.format(Locale.getDefault(), "%.2fx", rounded)
-    }
-}
+/** One formatter for the player and Settings ("1.0x", "1.25x"). */
+fun formatPlaybackSpeed(speed: Float): String =
+    app.podiumpodcasts.podium.ui.component.settings.formatSettingsPlaybackSpeed(speed)
 
 @OptIn(
     ExperimentalMaterial3Api::class,
@@ -92,18 +85,16 @@ fun MediaPlayerSpeedBottomSheet(
     )
 
     val origin = vm.metadataOrigin
+    // null until loaded, so the scope toggle doesn't flash "All podcasts" first (I7).
     val savedPodcastSpeed by remember(origin) {
         if (!origin.isNullOrBlank()) settingsRepository.behavior.podcastPlaybackSpeed(origin)
         else kotlinx.coroutines.flow.flowOf(0f)
-    }.collectAsStateWithLifecycle(initialValue = 0f)
-    var perPodcastScope by remember(origin) { mutableStateOf(false) }
-    var initializedScope by remember(origin) { mutableStateOf(false) }
-    LaunchedEffect(origin, savedPodcastSpeed) {
-        if (!initializedScope && !origin.isNullOrBlank() && savedPodcastSpeed > 0f) {
-            perPodcastScope = true
-            initializedScope = true
-        }
-    }
+    }.collectAsStateWithLifecycle(initialValue = null)
+    val globalSpeed by settingsRepository.behavior.playerPlaybackSpeed.collectAsStateWithLifecycle(initialValue = null)
+    // The user's explicit pick in this sheet; otherwise the scope follows whether the podcast has its own speed.
+    var scopeChoice by remember(origin) { mutableStateOf<Boolean?>(null) }
+    val perPodcastScope = !origin.isNullOrBlank() &&
+        (scopeChoice ?: app.podiumpodcasts.podium.background.PlaybackSpeedResolver.hasOverride(savedPodcastSpeed))
 
     var speed by remember { mutableFloatStateOf(1f) }
     LaunchedEffect(vm.speed) { speed = vm.speed }
@@ -111,6 +102,7 @@ fun MediaPlayerSpeedBottomSheet(
     fun clampSpeed(value: Float): Float =
         ((value.coerceIn(0.5f, 3.0f) * 20f).roundToInt() / 20f)
 
+    /** Applies at once and saves to the chosen scope only (I7). */
     fun applyAndSaveSpeed(newSpeed: Float) {
         val clamped = clampSpeed(newSpeed)
         speed = clamped
@@ -124,17 +116,38 @@ fun MediaPlayerSpeedBottomSheet(
         }
     }
 
+    /** "This podcast" keeps the current speed as its own; "All podcasts" drops it and plays at the global speed. */
+    fun chooseScope(podcast: Boolean) {
+        if (origin.isNullOrBlank() || podcast == perPodcastScope) return
+        scopeChoice = podcast
+        haptic.performHapticFeedback(HapticFeedbackType.SegmentTick)
+        scope.launch {
+            if (podcast) {
+                settingsRepository.behavior.setPodcastPlaybackSpeed(origin, clampSpeed(speed))
+            } else {
+                settingsRepository.behavior.setPodcastPlaybackSpeed(origin, 0f)
+                val global = app.podiumpodcasts.podium.background.PlaybackSpeedResolver.resolve(null, globalSpeed)
+                speed = global
+                vm.setPlaybackSpeed(global)
+            }
+        }
+    }
+
+    // M3: closes with the slide-down animation.
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     ModalBottomSheet(
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetState = sheetState,
         onDismissRequest = onDismiss
     ) {
+        PlayerSheetBlur()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 20.dp, vertical = 12.dp)
         ) {
             Text(
-                text = "Playback Effects",
+                text = "Playback effects",
                 style = Typography.titleLarge,
                 fontWeight = FontWeight.SemiBold
             )
@@ -148,7 +161,7 @@ fun MediaPlayerSpeedBottomSheet(
                 ) {
                     ToggleButton(
                         checked = !perPodcastScope,
-                        onCheckedChange = { if (it) perPodcastScope = false },
+                        onCheckedChange = { if (it) chooseScope(podcast = false) },
                         shapes = ButtonGroupDefaults.connectedLeadingButtonShapes(),
                         modifier = Modifier.weight(1f)
                     ) {
@@ -156,13 +169,20 @@ fun MediaPlayerSpeedBottomSheet(
                     }
                     ToggleButton(
                         checked = perPodcastScope,
-                        onCheckedChange = { if (it) perPodcastScope = true },
+                        onCheckedChange = { if (it) chooseScope(podcast = true) },
                         shapes = ButtonGroupDefaults.connectedTrailingButtonShapes(),
                         modifier = Modifier.weight(1f)
                     ) {
                         Text("This podcast")
                     }
                 }
+                Text(
+                    text = if (perPodcastScope) "This podcast plays at its own speed."
+                    else "Used by every podcast without its own speed.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
                 Spacer(Modifier.height(12.dp))
             }
 

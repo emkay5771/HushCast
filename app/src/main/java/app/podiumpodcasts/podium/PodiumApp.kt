@@ -28,6 +28,9 @@ fun PodiumApp(
     val darkThemeStyle by settingsRepository.appearance.darkThemeStyle.collectAsStateWithLifecycle(AppDarkThemeStyle.DEFAULT)
     val colorPalette by settingsRepository.appearance.colorPalette.collectAsStateWithLifecycle(AppColorPalette.DEFAULT)
     val dynamicColors by settingsRepository.appearance.enableDynamicColors.collectAsStateWithLifecycle(true)
+    val customSeedColor by settingsRepository.appearance.customSeedColor.collectAsStateWithLifecycle(AppColorPalette.CUSTOM.seedColorHex)
+    val paletteStyle by settingsRepository.appearance.paletteStyle.collectAsStateWithLifecycle(AppPaletteStyle.TONAL)
+    val contrast by settingsRepository.appearance.contrast.collectAsStateWithLifecycle(AppContrast.STANDARD)
 
     val darkTheme = when (themeMode) {
         AppThemeMode.AUTO -> isSystemInDarkTheme()
@@ -48,7 +51,10 @@ fun PodiumApp(
         darkTheme = darkTheme,
         dynamicColor = dynamicColors,
         darkThemeStyle = darkThemeStyle,
-        colorPalette = colorPalette
+        colorPalette = colorPalette,
+        customSeedColor = customSeedColor,
+        paletteStyle = paletteStyle,
+        contrast = contrast
     ) {
         Box(
             Modifier

@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Process
 import app.hushcast.automute.dsp.MuteActionMode
 import app.hushcast.automute.dsp.ReadinessBadge
+import app.hushcast.automute.engine.AnalysisThrottle
 import app.hushcast.automute.engine.AudioDecoder
 import app.hushcast.automute.engine.CpuTopology
 import app.hushcast.automute.engine.Decoder
@@ -19,6 +20,7 @@ import app.hushcast.automute.engine.Tagger
 import app.hushcast.automute.engine.Transcriber
 import app.hushcast.automute.engine.Word
 import app.hushcast.automute.hash.StreamingSha256
+import app.hushcast.automute.matcher.MuteRule
 import app.hushcast.automute.matcher.WordMatcher
 import app.hushcast.automute.storage.AdSegmentEntity
 import app.hushcast.automute.storage.AutoMuteDatabase
@@ -30,6 +32,8 @@ import app.hushcast.automute.storage.EpisodeWordIndexEntity
 import app.hushcast.automute.storage.MuteSegmentEntity
 import app.hushcast.automute.storage.WordIndexBlob
 import app.hushcast.automute.storage.toDomain
+import app.hushcast.automute.transcript.ApproxSpan
+import app.hushcast.automute.transcript.CueRealigner
 import app.hushcast.automute.transcript.DaiRetimer
 import app.hushcast.automute.transcript.TranscriptParser
 import kotlinx.coroutines.Job
@@ -143,7 +147,15 @@ class AutoMuteAnalyzer(
                 prev.fileSha256 == currentSha &&
                 prev.pipelineVersion < CURRENT_PIPELINE_VERSION &&
                 badge != ReadinessBadge.READY
-            if (preserveExistingReady) return
+            if (preserveExistingReady) {
+                // A re-run of an already-Ready episode keeps its Ready badge while it works.  When the
+                // re-run ends without ad detection (pct 100), still record the new pipeline version,
+                // or every feed refresh would queue it again.
+                if (pct >= 100) {
+                    dao.upsertStatus(prev!!.copy(pipelineVersion = CURRENT_PIPELINE_VERSION, progressPercent = 100))
+                }
+                return
+            }
             val now = System.currentTimeMillis()
             if (force || now - lastDbWriteMs >= STATUS_WRITE_INTERVAL_MS) {
                 lastDbWriteMs = now
@@ -168,6 +180,7 @@ class AutoMuteAnalyzer(
             error("AI models missing. Download models on Wi-Fi in HushCast setup.")
         }
         val effectiveQuickWordMuteOnly = quickWordMuteOnly || !modelManager.areAdModelsReady()
+        pruneOrphanCheckpointsOnce()
 
         val sha256 = knownSha256?.takeIf { it.isNotBlank() } ?: StreamingSha256.hashFile(audioFile)
         currentSha = sha256
@@ -185,9 +198,13 @@ class AutoMuteAnalyzer(
                 hasAdSegments = hasAdSegments
             )
         ) {
-            val blob = BlobCodec.decompress(existingIndex!!.compressedBlob)
-            val muteCount = applyWordRules(sha256, episodeId, blob.words, prePadMs, postPadMs, defaultActionMode)
-            dao.clearAnalysisForOtherHashes(episodeId, sha256)
+            val blob = realignIfNeeded(
+                existingIndex!!, BlobCodec.decompress(existingIndex.compressedBlob), audioFile, defaultActionMode,
+                shouldAbort = shouldAbort
+            )
+            // applyWordRules also removes other hashes' results (A5), in the same transaction.
+            val muteCount = applyWordRules(sha256, episodeId, blob.words, prePadMs, postPadMs, defaultActionMode, blob.approxSpans)
+            dao.deleteAllCheckpointsForSha(sha256)
             val adCount = dao.getAdSegments(sha256).size
             val elapsed = System.currentTimeMillis() - startTime
             writeStatus(100, "Ready", ReadinessBadge.READY, force = true, durationMs = elapsed)
@@ -198,13 +215,18 @@ class AutoMuteAnalyzer(
 
         var words: List<Word>
         var segments: List<Segment>
+        var approxSpans: List<ApproxSpan> = emptyList()
         var frames: Frames? = null
         val daiCandidateSpans = ArrayList<Pair<Double, Double>>()
 
         if (existingIndex != null && (existingStatus?.pipelineVersion ?: 0) >= CURRENT_PIPELINE_VERSION) {
-            val blob = BlobCodec.decompress(existingIndex.compressedBlob)
+            val blob = realignIfNeeded(
+                existingIndex, BlobCodec.decompress(existingIndex.compressedBlob), audioFile, defaultActionMode,
+                shouldAbort = shouldAbort
+            )
             words = blob.words
             segments = blob.segments
+            approxSpans = blob.approxSpans
             encoderDelayMs = existingIndex.encoderDelayMs
             android.util.Log.i("HushCastPerf", "Reusing cached transcript (words=${words.size}, segs=${segments.size}) quick=$effectiveQuickWordMuteOnly")
 
@@ -237,7 +259,8 @@ class AutoMuteAnalyzer(
             val useFlashAttn = HushCastPrefs.isFastAttentionEnabled(context)
             val whisperModelPath = if (useFastModel) paths.whisperTinyEn.absolutePath else paths.whisperBaseEn.absolutePath
             val vadModelStr = paths.sileroVad.takeIf { it.exists() }?.absolutePath
-            val threads = CpuTopology.recommendedThreads(context)
+            val threads = AnalysisThrottle.threads(context)
+            val threadsNow = { AnalysisThrottle.threads(context) }
 
             var daiSucceeded = false
             var daiWords: List<Word> = emptyList()
@@ -253,7 +276,8 @@ class AutoMuteAnalyzer(
                         threads = threads,
                         useDtw = true,
                         useFlashAttn = useFlashAttn,
-                        isTiny = useFastModel
+                        isTiny = useFastModel,
+                        threadsProvider = threadsNow
                     )
                     val daiResult = try {
                         runCatching {
@@ -279,6 +303,7 @@ class AutoMuteAnalyzer(
                         daiSucceeded = true
                         daiWords = daiResult.words
                         daiSegments = daiResult.segments
+                        approxSpans = daiResult.approximateSpans
                         daiCandidateSpans.addAll(daiResult.adCandidateSpansSec)
                         dao.upsertOffsetMap(
                             EpisodeOffsetMapEntity(
@@ -316,7 +341,7 @@ class AutoMuteAnalyzer(
             } else {
                 // E1 + E5 + R2: Stream 180s+5s overlapping chunks with checkpoint resume
                 val extractor = if (!effectiveQuickWordMuteOnly) FrameExtractor() else null
-                val checkpointKey = "$sha256:${if (useFastModel) "tiny" else "base"}:dtw"
+                val checkpointKey = checkpointKey(sha256, useFastModel)
                 val checkpoints = dao.getCheckpoints(checkpointKey).associateBy { it.chunkIndex }
                 writeStatus(5, "Loading Whisper", ReadinessBadge.ANALYZING)
                 val transcriber = Transcriber(
@@ -324,7 +349,8 @@ class AutoMuteAnalyzer(
                     threads = threads,
                     useDtw = true,
                     useFlashAttn = useFlashAttn,
-                    isTiny = useFastModel
+                    isTiny = useFastModel,
+                    threadsProvider = threadsNow
                 )
                 val allWords = ArrayList<Word>()
                 val allSegments = ArrayList<Segment>()
@@ -390,27 +416,31 @@ class AutoMuteAnalyzer(
                     episodeId = episodeId,
                     durationSec = durationSec,
                     wordCount = words.size,
-                    compressedBlob = BlobCodec.compress(WordIndexBlob(words, segments)),
+                    compressedBlob = BlobCodec.compress(WordIndexBlob(words, segments, approxSpans)),
                     encoderDelayMs = encoderDelayMs
                 )
             )
-            dao.deleteCheckpoints(sha256)
             dao.pruneHashCache()
         }
+        // The transcript for this file is saved: drop every checkpoint row of it (all models,
+        // pipeline versions and the legacy keys that earlier versions leaked).
+        dao.deleteAllCheckpointsForSha(sha256)
 
         writeStatus(60, "Matching muted words", ReadinessBadge.ANALYZING)
+        // A5: the mute segments and the removal of other hashes' results share one transaction,
+        // and run before ad detection, so a failed or stopped ad stage cannot skip the cleanup.
         val muteCount = applyWordRules(
             sha256 = sha256,
             episodeId = episodeId,
             words = words,
             prePadMs = prePadMs,
             postPadMs = postPadMs,
-            defaultActionMode = defaultActionMode
+            defaultActionMode = defaultActionMode,
+            approxSpans = approxSpans
         )
 
         val finalFrames = frames
         if (effectiveQuickWordMuteOnly || segments.isEmpty() || finalFrames == null) {
-            dao.clearAnalysisForOtherHashes(episodeId, sha256)
             val elapsed = System.currentTimeMillis() - startTime
             writeStatus(100, "Word-Mute Ready", ReadinessBadge.WORD_MUTE_READY, force = true, durationMs = elapsed)
             return AnalysisResult(sha256, ReadinessBadge.WORD_MUTE_READY, words.size, muteCount, 0, peakRssMb, elapsed)
@@ -419,7 +449,11 @@ class AutoMuteAnalyzer(
         writeStatus(65, "Embedding sentences for ad detection", ReadinessBadge.WORD_MUTE_READY, force = true)
         val paths = modelManager.getPaths()
         val embeddings: FloatArray
-        val embedder = Embedder(paths.qwenEmbedder.absolutePath, threads = CpuTopology.recommendedThreads(context))
+        val embedder = Embedder(
+            paths.qwenEmbedder.absolutePath,
+            threads = AnalysisThrottle.threads(context),
+            threadsProvider = { AnalysisThrottle.threads(context) }
+        )
         try {
             setStage("Embedding ${segments.size} sentences (Qwen3)")
             check(embedder.dim == Tagger.EMB_DIM) { "embedder dim ${embedder.dim} != ${Tagger.EMB_DIM}" }
@@ -509,9 +543,7 @@ class AutoMuteAnalyzer(
         }
 
         setStage("Saving ad segments")
-        dao.deleteAdSegmentsByEpisode(episodeId)
-        dao.replaceAdSegments(sha256, adEntities)
-        dao.clearAnalysisForOtherHashes(episodeId, sha256)
+        dao.replaceAdSegmentsAndClearOtherHashes(episodeId, sha256, adEntities)
 
         val elapsed = System.currentTimeMillis() - startTime
         writeStatus(100, "Ready", ReadinessBadge.READY, force = true, durationMs = elapsed)
@@ -574,7 +606,7 @@ class AutoMuteAnalyzer(
     ): Int {
         val index = dao.getWordIndex(fileSha256) ?: return 0
         val blob = BlobCodec.decompress(index.compressedBlob)
-        return applyWordRules(fileSha256, episodeId, blob.words, prePadMs, postPadMs, defaultActionMode)
+        return applyWordRules(fileSha256, episodeId, blob.words, prePadMs, postPadMs, defaultActionMode, blob.approxSpans)
     }
 
     suspend fun reevaluateMuteRulesWithCompiled(
@@ -586,7 +618,12 @@ class AutoMuteAnalyzer(
     ): Int {
         val index = dao.getWordIndex(fileSha256) ?: return 0
         val blob = BlobCodec.decompress(index.compressedBlob)
-        val windows = WordMatcher.matchWords(blob.words, compiled, prePadMs, postPadMs)
+        // SRT/VTT words that were never heard only have estimated times: their windows cover the
+        // likely range until the cue is re-aligned (next analysis or play, see realignApproximateMatches).
+        val windows = CueRealigner.widenApproximate(
+            WordMatcher.matchWords(blob.words, compiled, prePadMs, postPadMs),
+            blob.approxSpans
+        )
         dao.replaceMuteSegments(
             fileSha256,
             windows.map { w ->
@@ -611,29 +648,155 @@ class AutoMuteAnalyzer(
         words: List<Word>,
         prePadMs: Long,
         postPadMs: Long,
-        defaultActionMode: MuteActionMode
+        defaultActionMode: MuteActionMode,
+        approxSpans: List<ApproxSpan> = emptyList(),
+        saveIndex: EpisodeWordIndexEntity? = null
     ): Int {
         val rules = dao.getEnabledRules().map { it.toDomain() }
         val rulesById = rules.associateBy { it.id }
-        val windows = WordMatcher.matchWords(words, rules, prePadMs, postPadMs, defaultActionMode)
-        dao.replaceMuteSegments(
-            sha256,
-            windows.map { w ->
-                val isDefaultRule = rulesById[w.ruleId]?.useDefaultMode == true
-                MuteSegmentEntity(
-                    fileSha256 = sha256,
-                    episodeId = episodeId,
-                    startMs = w.startMs,
-                    endMs = w.endMs,
-                    word = w.word,
-                    ruleId = w.ruleId,
-                    actionMode = if (isDefaultRule) "DEFAULT" else w.actionMode.name,
-                    enabled = w.enabled
-                )
-            }
+        val windows = CueRealigner.widenApproximate(
+            WordMatcher.matchWords(words, rules, prePadMs, postPadMs, defaultActionMode),
+            approxSpans
         )
-        dao.clearAnalysisForOtherHashes(episodeId, sha256)
+        val segments = windows.map { w ->
+            val isDefaultRule = rulesById[w.ruleId]?.useDefaultMode == true
+            MuteSegmentEntity(
+                fileSha256 = sha256,
+                episodeId = episodeId,
+                startMs = w.startMs,
+                endMs = w.endMs,
+                word = w.word,
+                ruleId = w.ruleId,
+                actionMode = if (isDefaultRule) "DEFAULT" else w.actionMode.name,
+                enabled = w.enabled
+            )
+        }
+        // A5: written with the removal of other hashes' results, in one transaction.
+        if (saveIndex != null) {
+            dao.saveWordIndexAndMuteSegments(saveIndex, episodeId, segments)
+        } else {
+            dao.replaceMuteSegmentsAndClearOtherHashes(episodeId, sha256, segments)
+        }
         return windows.size
+    }
+
+    /**
+     * SRT/VTT transcripts: words a current rule matches that still have estimated (evenly spread)
+     * times get Whisper run within +-2 s of their cue and take the times it heard.  Rule
+     * re-evaluation can't do this (it has no audio file and runs in the background or on the
+     * player's thread), so it widens those windows instead and this runs the next time the
+     * episode is analyzed or played ([EpisodeAnalysisWorker.enqueueRealignIfNeeded]).
+     *
+     * @return the number of cues re-aligned (failed ones stay approximate); 0 when nothing needed it.
+     */
+    suspend fun realignApproximateMatches(
+        episodeId: String,
+        audioFile: File,
+        defaultActionMode: MuteActionMode = MuteActionMode.HARD_SILENCE,
+        prePadMs: Long? = null,
+        postPadMs: Long? = null
+    ): Int = withContext(CpuTopology.analysisDispatcher) {
+        val sha = dao.getStatus(episodeId)?.fileSha256?.takeIf { it.isNotBlank() } ?: return@withContext 0
+        val index = dao.getWordIndex(sha) ?: return@withContext 0
+        val blob = BlobCodec.decompress(index.compressedBlob)
+        if (blob.approxSpans.isEmpty() || !audioFile.exists()) return@withContext 0
+        val job = currentCoroutineContext()[Job]
+        val updated = realignIfNeeded(index, blob, audioFile, defaultActionMode, persist = false) { job?.isActive == false }
+        if (updated === blob) return@withContext 0
+        val precision = HushCastPrefs.getMuteTimingPrecision(context)
+        // The new word times and the mute segments matched on them are saved in one transaction.
+        applyWordRules(
+            sha, episodeId, updated.words,
+            prePadMs ?: precision.prePadMs, postPadMs ?: precision.postPadMs,
+            defaultActionMode, updated.approxSpans,
+            saveIndex = index.copy(wordCount = updated.words.size, compressedBlob = BlobCodec.compress(updated))
+        )
+        blob.approxSpans.size - updated.approxSpans.size
+    }
+
+    /** Whether [realignApproximateMatches] has work for the episode (cheap: no models loaded). */
+    suspend fun needsRealign(episodeId: String, defaultActionMode: MuteActionMode = MuteActionMode.HARD_SILENCE): Boolean {
+        val sha = dao.getStatus(episodeId)?.fileSha256?.takeIf { it.isNotBlank() } ?: return false
+        val index = dao.getWordIndex(sha) ?: return false
+        val blob = BlobCodec.decompress(index.compressedBlob)
+        if (blob.approxSpans.isEmpty()) return false
+        val compiled = WordMatcher.compileRules(dao.getEnabledRules().map { it.toDomain() }, defaultActionMode)
+        return CueRealigner.spansNeedingRealign(blob.words, blob.approxSpans, compiled).isNotEmpty()
+    }
+
+    /**
+     * Runs [CueRealigner.realign] when a rule matches an approximate cue and returns the updated
+     * blob (saved to the word index when [persist]); returns [blob] itself when nothing changed.
+     */
+    private suspend fun realignIfNeeded(
+        index: EpisodeWordIndexEntity,
+        blob: WordIndexBlob,
+        audioFile: File,
+        defaultActionMode: MuteActionMode,
+        persist: Boolean = true,
+        shouldAbort: () -> Boolean
+    ): WordIndexBlob {
+        if (blob.approxSpans.isEmpty() || !audioFile.exists()) return blob
+        val rules: List<MuteRule> = dao.getEnabledRules().map { it.toDomain() }
+        val compiled = WordMatcher.compileRules(rules, defaultActionMode)
+        if (CueRealigner.spansNeedingRealign(blob.words, blob.approxSpans, compiled).isEmpty()) return blob
+        if (!modelManager.areWordMuteModelsReady()) return blob
+        val paths = modelManager.getPaths()
+        val useFastModel = HushCastPrefs.isFastModelEnabled(context)
+        val transcriber = Transcriber(
+            modelPath = if (useFastModel) paths.whisperTinyEn.absolutePath else paths.whisperBaseEn.absolutePath,
+            threads = AnalysisThrottle.threads(context),
+            useDtw = true,
+            useFlashAttn = HushCastPrefs.isFastAttentionEnabled(context),
+            isTiny = useFastModel,
+            threadsProvider = { AnalysisThrottle.threads(context) }
+        )
+        // A cue only takes new times when at least a third of its words were heard near it, so a
+        // file that no longer matches the transcript just leaves the cue approximate.
+        val result = try {
+            CueRealigner.realign(
+                words = blob.words,
+                spans = blob.approxSpans,
+                compiled = compiled,
+                durationSec = index.durationSec,
+                clips = DaiRetimer.whisperClips(
+                    audioFile.absolutePath, transcriber,
+                    paths.sileroVad.takeIf { it.exists() }?.absolutePath, shouldAbort
+                )
+            )
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            // Re-alignment is a refinement: the widened windows stay, and analysis carries on.
+            android.util.Log.w("HushCastPerf", "Cue re-alignment failed: ${t.javaClass.simpleName}: ${t.message}")
+            return blob
+        } finally {
+            transcriber.close()
+        }
+        if (result.realigned == 0 && result.failed == 0) return blob
+        android.util.Log.i("HushCastPerf", "Re-aligned ${result.realigned} SRT/VTT cue(s) (${result.failed} kept approximate)")
+        val updated = blob.copy(words = result.words, approxSpans = result.spans)
+        if (persist) {
+            dao.upsertWordIndex(index.copy(wordCount = updated.words.size, compressedBlob = BlobCodec.compress(updated)))
+        }
+        return updated
+    }
+
+    /**
+     * One-time cleanup of checkpoint rows that 1.0.30 and earlier leaked (written under
+     * "sha:model:dtw", deleted by bare sha).  Rows whose file finished more than 7 days ago, or
+     * that have no transcript and no recent status, go.
+     */
+    private suspend fun pruneOrphanCheckpointsOnce() {
+        if (HushCastPrefs.isCheckpointPruneDone(context)) return
+        val removed = runCatching {
+            dao.pruneOrphanCheckpoints(System.currentTimeMillis() - CHECKPOINT_ORPHAN_AGE_MS)
+        }.getOrElse { err ->
+            android.util.Log.w("HushCastPerf", "Checkpoint prune failed: ${err.message}")
+            return
+        }
+        HushCastPrefs.setCheckpointPruneDone(context)
+        android.util.Log.i("HushCastPerf", "Pruned $removed orphaned checkpoint row(s)")
     }
 
     private fun currentRssMb(): Int {
@@ -643,11 +806,20 @@ class AutoMuteAnalyzer(
     }
 
     companion object {
-        const val CURRENT_PIPELINE_VERSION = 5
+        const val CURRENT_PIPELINE_VERSION = 6
         private const val OVERLAP_DEDUP_TOLERANCE_SEC = 0.15
         private const val STATUS_WRITE_INTERVAL_MS = 5_000L
         private const val HIGH_CONFIDENCE_THRESHOLD = 0.80
         private const val MIN_FEED_CHECK_DUR_SEC = 90.0
+        private const val CHECKPOINT_ORPHAN_AGE_MS = 7L * 24 * 60 * 60 * 1000
+
+        /**
+         * Chunk checkpoints are only valid for the same file, model, DTW setting and pipeline
+         * version.  Every key starts with "$sha256:", so [AutoMuteDao.deleteAllCheckpointsForSha]
+         * removes them all.
+         */
+        internal fun checkpointKey(sha256: String, tinyModel: Boolean): String =
+            "$sha256:v$CURRENT_PIPELINE_VERSION:${if (tinyModel) "tiny" else "base"}:dtw"
 
         internal fun shouldSkipFullAnalysis(
             existingIndex: EpisodeWordIndexEntity?,

@@ -1,14 +1,19 @@
 package app.hushcast.automute.engine
 
 import app.hushcast.automute.nativebridge.LlamaJni
-import kotlin.math.max
 import kotlin.math.min
 
 /**
  * Text embeddings: Qwen3-Embedding-0.6B (q4_k_m GGUF) through llama.cpp.
+ * [threadsProvider] (S11) is asked before every batch of 64 sentences.
  */
-class Embedder(modelPath: String, threads: Int = defaultThreads()) : AutoCloseable {
+class Embedder(
+    modelPath: String,
+    threads: Int = defaultThreads(),
+    private val threadsProvider: (() -> Int)? = null
+) : AutoCloseable {
     private var handle = LlamaJni.load(modelPath, threads)
+    private var currentThreads = threads
     val dim = LlamaJni.dim(handle)
 
     @Synchronized
@@ -24,6 +29,12 @@ class Embedder(modelPath: String, threads: Int = defaultThreads()) : AutoCloseab
         while (i < texts.size) {
             if (shouldCancel()) {
                 throw java.util.concurrent.CancellationException("Embedding cancelled")
+            }
+            threadsProvider?.invoke()?.coerceAtLeast(1)?.let { t ->
+                if (t != currentThreads) {
+                    LlamaJni.setThreads(handle, t)
+                    currentThreads = t
+                }
             }
             val chunk = texts.subList(i, min(i + 64, texts.size))
             val v = LlamaJni.embed(handle, Array(chunk.size) { input(chunk[it]).toByteArray(Charsets.UTF_8) })

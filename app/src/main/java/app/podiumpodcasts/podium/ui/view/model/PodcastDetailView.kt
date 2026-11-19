@@ -11,6 +11,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -98,6 +101,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.fromHtml
 import androidx.compose.ui.text.style.TextAlign
@@ -171,11 +176,14 @@ fun PodcastDetailView(
     val vm = viewModel(key = podcast.origin) {
         PodcastDetailViewModel(db, podcast)
     }
+    val settingsRepositoryForVm = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
     val subscriptionsVm = viewModel<app.podiumpodcasts.podium.ui.vm.home.SubscriptionsViewModel>(
         viewModelStoreOwner = activity,
         key = "HOME_SUBSCRIPTIONS"
     ) {
-        app.podiumpodcasts.podium.ui.vm.home.SubscriptionsViewModel(db)
+        // Same arguments as Home: whichever screen creates this shared view model first, Home's
+        // grid settings must be there (a deep link can open this page first).
+        app.podiumpodcasts.podium.ui.vm.home.SubscriptionsViewModel(db, settingsRepositoryForVm)
     }
     val cachedSubscriptions by subscriptionsVm.subscriptionsState.collectAsState()
     val cachedSubModel = remember(cachedSubscriptions, podcast.origin) {
@@ -203,6 +211,23 @@ fun PodcastDetailView(
     val subscription = vm.subscription.collectAsStateWithLifecycle(initialValue = cachedSubModel)
     val episodePager = vm.episodePager.collectAsLazyPagingItems()
     val selectedEpisodeIds = remember(podcast.origin) { androidx.compose.runtime.mutableStateListOf<String>() }
+    val inSelectionMode = selectedEpisodeIds.isNotEmpty()
+    // B6: Back leaves multi-select before it leaves the page.
+    androidx.activity.compose.BackHandler(enabled = inSelectionMode) {
+        selectedEpisodeIds.clear()
+    }
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    // M10: a haptic tick when a long-press starts multi-select.
+    val toggleSelection: (String) -> Unit = { id ->
+        if (id in selectedEpisodeIds) {
+            selectedEpisodeIds.remove(id)
+        } else {
+            if (selectedEpisodeIds.isEmpty()) {
+                haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress)
+            }
+            selectedEpisodeIds.add(id)
+        }
+    }
 
     val isSubscribed = subscription.value != null
     var showOverflowMenu by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
@@ -217,19 +242,19 @@ fun PodcastDetailView(
     if (showMarkAllPlayedDialog) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showMarkAllPlayedDialog = false },
-            title = { Text("Mark all as listened?") },
-            text = { Text("All episodes of ${podcast.fetchTitle()} will be marked as listened.") },
+            title = { Text("Mark all as played?") },
+            text = { Text("All episodes of ${podcast.fetchTitle()} will be marked as played.") },
             confirmButton = {
                 androidx.compose.material3.Button(
                     onClick = {
                         showMarkAllPlayedDialog = false
                         scope.launch {
                             db.podcastEpisodePlayStates().markAllPlayedForOrigin(podcast.origin)
-                            vm.snackbarHostState.showSnackbar("Marked all episodes as listened")
+                            vm.snackbarHostState.showSnackbar("Marked all episodes as played")
                         }
                     }
                 ) {
-                    Text("Mark all")
+                    Text("Mark as played")
                 }
             },
             dismissButton = {
@@ -252,6 +277,15 @@ fun PodcastDetailView(
         derivedStateOf { vm.lazyListState.firstVisibleItemIndex > 0 }
     }
 
+    val selectionFadeSpec = MaterialTheme.motionScheme.fastEffectsSpec<Float>()
+
+    // M7: the bar's colour animates as the header collapses, instead of snapping.
+    val collapsedBarColor by androidx.compose.animation.animateColorAsState(
+        targetValue = if (isCollapsed) MaterialTheme.colorScheme.surfaceContainer else Color.Transparent,
+        animationSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+        label = "podcastHeaderBar"
+    )
+
     val showScrollUpButton by remember {
         derivedStateOf { vm.lazyListState.firstVisibleItemIndex > 7 && vm.selectedDestination == Destinations.EPISODES }
     }
@@ -266,7 +300,15 @@ fun PodcastDetailView(
                     PodiumSnackbarHost(vm.snackbarHostState)
                 },
                 topBar = {
-                    if(selectedEpisodeIds.isNotEmpty()) {
+                    // M7: the selection bar cross-fades in and out instead of swapping instantly.
+                    AnimatedContent(
+                        targetState = inSelectionMode,
+                        transitionSpec = {
+                            fadeIn(selectionFadeSpec) togetherWith fadeOut(selectionFadeSpec)
+                        },
+                        label = "selectionTopBar"
+                    ) { selecting ->
+                    if(selecting) {
                         TopAppBar(
                             colors = TopAppBarDefaults.topAppBarColors(
                                 containerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -295,7 +337,7 @@ fun PodcastDetailView(
                                         }
                                     }
                                 ) {
-                                    Icon(Icons.Rounded.SelectAll, "Select All")
+                                    Icon(Icons.Rounded.SelectAll, "Select all")
                                 }
                             }
                         )
@@ -307,11 +349,16 @@ fun PodcastDetailView(
                                 }
                             },
                             colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = if (isCollapsed) MaterialTheme.colorScheme.surfaceContainer else Color.Transparent,
+                                containerColor = collapsedBarColor,
                                 scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
                             ),
                             title = {
-                                if (isCollapsed) {
+                                // M7: the title fades in as the header scrolls away.
+                                AnimatedVisibility(
+                                    visible = isCollapsed,
+                                    enter = fadeIn(MaterialTheme.motionScheme.defaultEffectsSpec()),
+                                    exit = fadeOut(MaterialTheme.motionScheme.fastEffectsSpec())
+                                ) {
                                     Text(
                                         text = podcast.fetchTitle(),
                                         maxLines = 1,
@@ -338,7 +385,7 @@ fun PodcastDetailView(
                                         onDismissRequest = { showOverflowMenu = false }
                                     ) {
                                             androidx.compose.material3.DropdownMenuItem(
-                                                text = { Text("Mark all as listened") },
+                                                text = { Text("Mark all as played") },
                                                 leadingIcon = {
                                                     Icon(Icons.Rounded.Done, contentDescription = null)
                                                 },
@@ -374,9 +421,17 @@ fun PodcastDetailView(
                             }
                         )
                     }
+                    }
                 },
                 bottomBar = {
-                    if (selectedEpisodeIds.isNotEmpty()) {
+                    // M7: the multi-select action bar slides up instead of popping in.
+                    AnimatedVisibility(
+                        visible = inSelectionMode,
+                        enter = slideInVertically(MaterialTheme.motionScheme.fastSpatialSpec()) { it } +
+                            fadeIn(MaterialTheme.motionScheme.fastEffectsSpec()),
+                        exit = slideOutVertically(MaterialTheme.motionScheme.fastSpatialSpec()) { it } +
+                            fadeOut(MaterialTheme.motionScheme.fastEffectsSpec())
+                    ) {
                         Surface(
                             color = MaterialTheme.colorScheme.surfaceContainerHigh,
                             tonalElevation = 3.dp
@@ -454,7 +509,7 @@ fun PodcastDetailView(
                                 ) {
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                         Icon(Icons.Rounded.Done, contentDescription = null)
-                                        Text("Mark played", style = MaterialTheme.typography.labelSmall)
+                                        Text("Mark as played", style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                             }
@@ -491,10 +546,21 @@ fun PodcastDetailView(
             ) { inset ->
                 Box {
                     if(isAtTop) {
+                        val backdropHeightPx = with(androidx.compose.ui.platform.LocalDensity.current) {
+                            (inset.calculateTopPadding() + BACKDROP_SIZE).toPx()
+                        }
                         ShimmerAsyncImage(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(inset.calculateTopPadding() + BACKDROP_SIZE)
+                                // M7: fades out with the scroll (read while drawing, so no
+                                // recomposition), so it doesn't pop when the header leaves.
+                                .graphicsLayer {
+                                    val offset = if (vm.lazyListState.firstVisibleItemIndex == 0) {
+                                        vm.lazyListState.firstVisibleItemScrollOffset.toFloat()
+                                    } else backdropHeightPx
+                                    alpha = (1f - offset / backdropHeightPx.coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                }
                                 .hazeEffect(),
 
                             model = podcast.imageUrl,
@@ -570,6 +636,7 @@ fun PodcastDetailView(
                                         Column {
                                             ExpandableText(
                                                 text = podcast.fetchTitle(),
+                                                modifier = Modifier.semantics { heading() },
                                                 autoSize = TextAutoSize.StepBased(
                                                     minFontSize = 24.sp,
                                                     maxFontSize = 40.sp
@@ -717,6 +784,7 @@ fun PodcastDetailView(
                                 secondaryRightType = secondaryRightType,
                                 itemSwipeLeftAction = itemSwipeLeftAction,
                                 secondaryLeftType = secondaryLeftType,
+                                onToggleSelection = toggleSelection,
                                 onClickEpisode = onClickEpisode
                             )
                         }
@@ -741,6 +809,7 @@ fun PodcastDetailView(
         onDismiss = {
             vm.showDeleteDialog.value = false
         },
+        title = "Delete podcast?",
         itemName = podcast.fetchTitle(),
         additionalText = stringResource(R.string.dialog_delete_confirmation_podcast),
         onConfirm = {
@@ -793,6 +862,9 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
     secondaryRightType: app.podiumpodcasts.podium.EpisodeSwipeAction,
     itemSwipeLeftAction: app.podiumpodcasts.podium.EpisodeSwipeAction,
     secondaryLeftType: app.podiumpodcasts.podium.EpisodeSwipeAction,
+    onToggleSelection: (episodeId: String) -> Unit = { id ->
+        if (id in selectedEpisodeIds) selectedEpisodeIds.remove(id) else selectedEpisodeIds.add(id)
+    },
     onClickEpisode: (episode: PodcastEpisodeModel) -> Unit
 ) {
     item(
@@ -854,7 +926,7 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                             vm.searchFilterOrderBarState.negativeFilter.add(PodcastEpisodesFilter.PLAYED)
                         }
                     },
-                    label = { Text("Exclude listened") }
+                    label = { Text("Exclude played") }
                 )
 
                 val onlyDownloaded = PodcastEpisodesFilter.DOWNLOADED in vm.searchFilterOrderBarState.filter
@@ -882,7 +954,7 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                             vm.searchFilterOrderBarState.filter.add(PodcastEpisodesFilter.PAUSED)
                         }
                     },
-                    label = { Text("In Progress") }
+                    label = { Text("In progress") }
                 )
             }
         }
@@ -945,11 +1017,13 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                     SwipeableItem(
                         snackbarHostState = vm.snackbarHostState,
                         scope = scope,
+                        shape = app.podiumpodcasts.podium.ui.component.model.episode.episodeRowShape(it, episodePager.itemCount),
 
                         startAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
                             actionType = itemSwipeRightAction,
                             bundle = episodeBundle,
                             playerVm = playerVm,
+                            inQueue = inQueue,
                             onMarkPlayed = { markPlayed ->
                                 if (markPlayed) {
                                     vm.markAsPlayed(episodeBundle)
@@ -965,6 +1039,7 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                             ),
                             bundle = episodeBundle,
                             playerVm = playerVm,
+                            inQueue = inQueue,
                             onMarkPlayed = { markPlayed ->
                                 if (markPlayed) {
                                     vm.markAsPlayed(episodeBundle)
@@ -976,6 +1051,7 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                             actionType = itemSwipeLeftAction,
                             bundle = episodeBundle,
                             playerVm = playerVm,
+                            inQueue = inQueue,
                             onMarkPlayed = { markPlayed ->
                                 if (markPlayed) {
                                     vm.markAsPlayed(episodeBundle)
@@ -991,6 +1067,7 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                             ),
                             bundle = episodeBundle,
                             playerVm = playerVm,
+                            inQueue = inQueue,
                             onMarkPlayed = { markPlayed ->
                                 if (markPlayed) {
                                     vm.markAsPlayed(episodeBundle)
@@ -1005,20 +1082,14 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                                 count = episodePager.itemCount,
                                 isSelected = isSelected,
                                 showArtwork = false,
+                                inQueue = inQueue,
+                                playerVm = playerVm,
                                 onLongClick = {
-                                    if(isSelected) {
-                                        selectedEpisodeIds.remove(episodeBundle.episode.id)
-                                    } else {
-                                        selectedEpisodeIds.add(episodeBundle.episode.id)
-                                    }
+                                    onToggleSelection(episodeBundle.episode.id)
                                 },
                                 onClick = {
                                     if(selectedEpisodeIds.isNotEmpty()) {
-                                        if(isSelected) {
-                                            selectedEpisodeIds.remove(episodeBundle.episode.id)
-                                        } else {
-                                            selectedEpisodeIds.add(episodeBundle.episode.id)
-                                        }
+                                        onToggleSelection(episodeBundle.episode.id)
                                     } else {
                                         onClickEpisode(episodeBundle.episode)
                                     }

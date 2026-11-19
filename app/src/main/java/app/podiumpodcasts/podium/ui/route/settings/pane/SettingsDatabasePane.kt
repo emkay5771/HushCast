@@ -3,9 +3,7 @@ package app.podiumpodcasts.podium.ui.route.settings.pane
 import android.annotation.SuppressLint
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -29,8 +27,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.podiumpodcasts.podium.R
-import app.podiumpodcasts.podium.ui.component.settings.SettingsHeader
 import app.podiumpodcasts.podium.ui.component.settings.SettingsListItem
+import app.podiumpodcasts.podium.ui.component.settings.settingsGroup
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 import app.podiumpodcasts.podium.ui.route.settings.SettingsPaneKey
@@ -68,6 +66,8 @@ fun SettingsDatabasePane(
             )
         }
     ) {
+        val importExportHeader = stringResource(R.string.route_settings_import_export)
+
         LazyColumn(
             Modifier
                 .padding(it)
@@ -76,135 +76,126 @@ fun SettingsDatabasePane(
 
             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
         ) {
-            item {
-                val size = remember { vm.calculateDatabaseSize(context) ?: "" }
+            settingsGroup(key = "database", spaceAbove = 0.dp) {
+                row { pos ->
+                    val size = remember { vm.calculateDatabaseSize(context) ?: "" }
 
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.DataUsage,
-                            stringResource(R.string.route_settings_database_storage_used)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_database_storage_used),
-                    description = size,
-                    index = 0,
-                    count = 3
-                ) {
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.DataUsage,
+                                stringResource(R.string.route_settings_database_storage_used)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_database_storage_used),
+                        description = size,
+                        index = pos.index,
+                        count = pos.count
+                    ) {
 
+                    }
+                }
+                row { pos ->
+                    val state = vm.exportDatabaseState.value
+
+                    val exportShareTitle =
+                        stringResource(R.string.route_settings_database_export_share_title)
+
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.Save,
+                                stringResource(R.string.route_settings_database_export)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_database_export),
+                        description = when(state) {
+                            is ExportDatabaseState.Writing -> "${state.fileName} ..."
+                            else -> stringResource(R.string.route_settings_database_export_description)
+                        },
+
+                        index = pos.index,
+                        count = pos.count,
+
+                        onClick = {
+                            vm.exportAndShareDatabase(
+                                context = context,
+                                title = exportShareTitle
+                            )
+                        }
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.Restore,
+                                stringResource(R.string.route_settings_database_restore)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_database_restore),
+                        description = stringResource(
+                            R.string.route_settings_database_restore_description,
+                            stringResource(R.string.app_name)
+                        ),
+
+                        index = pos.index,
+                        count = pos.count,
+
+                        onClick = {
+                            onRestore()
+                        }
+                    )
                 }
             }
 
-            item {
-                val state = vm.exportDatabaseState.value
 
-                val exportShareTitle =
-                    stringResource(R.string.route_settings_database_export_share_title)
 
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Save,
-                            stringResource(R.string.route_settings_database_export)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_database_export),
-                    description = when(state) {
-                        is ExportDatabaseState.Writing -> "${state.fileName} ..."
-                        else -> stringResource(R.string.route_settings_database_export_description)
-                    },
+            settingsGroup(header = importExportHeader, key = "opml") {
+                row { pos ->
+                    val exportShareTitle =
+                        stringResource(R.string.route_settings_import_export_export_as_opml_share_title)
 
-                    index = 1,
-                    count = 3,
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.Publish,
+                                stringResource(R.string.route_settings_import_export_export_as_opml)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_import_export_export_as_opml),
+                        description = stringResource(R.string.route_settings_import_export_export_as_opml_description),
 
-                    onClick = {
-                        vm.exportAndShareDatabase(
-                            context = context,
-                            title = exportShareTitle
-                        )
-                    }
-                )
-            }
+                        index = pos.index,
+                        count = pos.count,
 
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Restore,
-                            stringResource(R.string.route_settings_database_restore)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_database_restore),
-                    description = stringResource(
-                        R.string.route_settings_database_restore_description,
-                        stringResource(R.string.app_name)
-                    ),
+                        onClick = {
+                            vm.exportAndShareOpml(
+                                context = context,
+                                title = exportShareTitle
+                            )
+                        }
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(
+                                Icons.Rounded.Download,
+                                stringResource(R.string.route_settings_import_export_import_from_opml)
+                            )
+                        },
+                        label = stringResource(R.string.route_settings_import_export_import_from_opml),
+                        description = stringResource(R.string.route_settings_import_export_import_from_opml_description),
 
-                    index = 2,
-                    count = 3,
+                        index = pos.index,
+                        count = pos.count,
 
-                    onClick = {
-                        onRestore()
-                    }
-                )
-            }
-
-            item {
-                Spacer(
-                    Modifier.height(32.dp)
-                )
-            }
-
-            item {
-                SettingsHeader(
-                    label = stringResource(R.string.route_settings_import_export)
-                )
-            }
-
-            item {
-                val exportShareTitle =
-                    stringResource(R.string.route_settings_import_export_export_as_opml_share_title)
-
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Publish,
-                            stringResource(R.string.route_settings_import_export_export_as_opml)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_import_export_export_as_opml),
-                    description = stringResource(R.string.route_settings_import_export_export_as_opml_description),
-
-                    index = 0,
-                    count = 2,
-
-                    onClick = {
-                        vm.exportAndShareOpml(
-                            context = context,
-                            title = exportShareTitle
-                        )
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(
-                            Icons.Rounded.Download,
-                            stringResource(R.string.route_settings_import_export_import_from_opml)
-                        )
-                    },
-                    label = stringResource(R.string.route_settings_import_export_import_from_opml),
-                    description = stringResource(R.string.route_settings_import_export_import_from_opml_description),
-
-                    index = 1,
-                    count = 2,
-
-                    onClick = {
-                        onOpmlImport()
-                    }
-                )
+                        onClick = {
+                            onOpmlImport()
+                        }
+                    )
+                }
             }
         }
     }

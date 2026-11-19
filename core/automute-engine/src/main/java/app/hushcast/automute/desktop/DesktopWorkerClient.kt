@@ -48,12 +48,81 @@ object DesktopWorkerClient {
     suspend fun healthCheck(
         baseUrl: String,
         token: String = "",
-        certFingerprint: String = ""
+        certFingerprint: String = "",
+        timeoutMs: Int? = null
     ): DesktopHealthResponse = withContext(Dispatchers.IO) {
         val normalized = normalizeUrl(baseUrl)
-        val timeout = if (normalized.startsWith("https://", ignoreCase = true)) 60_000 else 4_000
+        val timeout = timeoutMs ?: if (normalized.startsWith("https://", ignoreCase = true)) 60_000 else 4_000
         val body = getText("$normalized/v1/health", token, certFingerprint, timeoutMs = timeout)
         json.decodeFromString<DesktopHealthResponse>(body)
+    }
+
+    private class CachedHealth(val health: DesktopHealthResponse?, val atMs: Long)
+
+    private val healthCache = java.util.concurrent.ConcurrentHashMap<String, CachedHealth>()
+
+    const val HEALTH_CACHE_MS = 10 * 60 * 1000L
+    private const val HEALTH_FAILURE_CACHE_MS = 60 * 1000L
+
+    /**
+     * The worker's /v1/health, cached for [maxAgeMs] (a failed read for a minute).  Null when the
+     * worker didn't answer; never throws.
+     */
+    suspend fun cachedHealth(
+        baseUrl: String,
+        token: String = "",
+        certFingerprint: String = "",
+        maxAgeMs: Long = HEALTH_CACHE_MS,
+        timeoutMs: Int = 15_000
+    ): DesktopHealthResponse? {
+        val key = normalizeUrl(baseUrl)
+        val now = System.currentTimeMillis()
+        healthCache[key]?.let { cached ->
+            val ttl = if (cached.health != null) maxAgeMs else minOf(maxAgeMs, HEALTH_FAILURE_CACHE_MS)
+            if (now - cached.atMs in 0 until ttl) return cached.health
+        }
+        val fresh = try {
+            healthCheck(baseUrl, token, certFingerprint, timeoutMs = timeoutMs)
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            null
+        }
+        healthCache[key] = CachedHealth(fresh, System.currentTimeMillis())
+        return fresh
+    }
+
+    /**
+     * Tells the worker the phone has its own verified copy of the audio, so the worker can drop
+     * its copy (V17).  204 and 404 both count as done.  Best-effort: never throws.
+     */
+    suspend fun deleteWorkerAudio(
+        baseUrl: String,
+        token: String,
+        sha256: String,
+        certFingerprint: String = ""
+    ): Boolean = withContext(Dispatchers.IO) {
+        if (sha256.isBlank()) return@withContext false
+        try {
+            val normalized = normalizeUrl(baseUrl)
+            val conn = openConnection(
+                "$normalized/v1/episodes/$sha256/audio",
+                token,
+                minOf(defaultTimeoutMs(normalized), 20_000),
+                certFingerprint
+            )
+            try {
+                conn.requestMethod = "DELETE"
+                val code = conn.responseCode
+                code in 200..299 || code == 404
+            } finally {
+                conn.disconnect()
+            }
+        } catch (c: CancellationException) {
+            throw c
+        } catch (t: Throwable) {
+            false
+        }
     }
 
     private data class ActiveJobRef(
@@ -136,7 +205,9 @@ object DesktopWorkerClient {
     class DesktopWorkerJobException(
         message: String,
         val errorCode: String? = null,
-        val retryable: Boolean = true
+        val retryable: Boolean = true,
+        /** The worker's own words (errorMessage, else stageLabel), for the episode row (V10). */
+        val reason: String? = null
     ) : IllegalStateException(message)
 
     /**
@@ -223,7 +294,8 @@ object DesktopWorkerClient {
                 "FAILED" -> throw DesktopWorkerJobException(
                     message = "Desktop worker failed: ${status.errorMessage ?: status.stageLabel}",
                     errorCode = status.errorCode,
-                    retryable = status.retryable ?: true
+                    retryable = status.retryable ?: true,
+                    reason = status.errorMessage?.takeIf { it.isNotBlank() } ?: status.stageLabel.takeIf { it.isNotBlank() }
                 )
                 "QUEUED" -> {
                     val now = System.currentTimeMillis()

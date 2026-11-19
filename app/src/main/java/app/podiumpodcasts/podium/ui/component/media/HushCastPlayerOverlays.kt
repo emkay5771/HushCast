@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -46,19 +47,19 @@ fun EpisodeReadinessBadge(
     val isActionableNotProcessed = badge == ReadinessBadge.NOT_PROCESSED && onAnalyzeNowClick != null
     val (label, containerColor, contentColor, icon) = when {
         isActionableNotProcessed -> Quad(
-            "Analyze w/ HushCast AI",
+            "Analyze with HushCast",
             MaterialTheme.colorScheme.secondaryContainer,
             MaterialTheme.colorScheme.onSecondaryContainer,
             Icons.Rounded.AutoAwesome
         )
         badge == ReadinessBadge.READY -> Quad(
-            "HushCast Ready",
+            "HushCast ready",
             MaterialTheme.colorScheme.primaryContainer,
             MaterialTheme.colorScheme.onPrimaryContainer,
             Icons.Rounded.CheckCircle
         )
         badge == ReadinessBadge.WORD_MUTE_READY -> Quad(
-            "Word-Mute Ready",
+            "Word mute ready",
             MaterialTheme.colorScheme.secondaryContainer,
             MaterialTheme.colorScheme.onSecondaryContainer,
             Icons.AutoMirrored.Rounded.VolumeOff
@@ -70,7 +71,7 @@ fun EpisodeReadinessBadge(
             Icons.Rounded.HourglassTop
         )
         else -> Quad(
-            "Not Processed",
+            "Not processed",
             MaterialTheme.colorScheme.surfaceVariant,
             MaterialTheme.colorScheme.onSurfaceVariant,
             Icons.Rounded.Info
@@ -119,7 +120,7 @@ fun OneTapUndoAdSkipBanner(
         tonalElevation = 6.dp
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            modifier = Modifier.padding(start = 14.dp, end = 4.dp, top = 2.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -134,7 +135,11 @@ fun OneTapUndoAdSkipBanner(
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
-            TextButton(onClick = onUndo) {
+            // D1: a full 48 dp touch target (it measured ~28 dp inside the banner).
+            TextButton(
+                onClick = onUndo,
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
                 Icon(Icons.AutoMirrored.Rounded.Undo, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(4.dp))
                 Text("Undo", color = MaterialTheme.colorScheme.inversePrimary)
@@ -176,8 +181,7 @@ fun HushCastAnalyzeDialog(
 ) {
     val context = LocalContext.current
     val desktopConnected = remember(context) {
-        HushCastPrefs.isDesktopWorkerEnabled(context) &&
-            HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+        HushCastPrefs.isWorkerActive(context)
     }
     val localModelsReady = remember(context) {
         ModelManager(context).areAllModelsReady()
@@ -192,16 +196,16 @@ fun HushCastAnalyzeDialog(
 
     when {
         desktopConnected -> {
-            title = if (isDownloaded) "Refresh on Desktop / Cloud" else "Analyze with Desktop / Cloud"
+            title = if (isDownloaded) "Refresh on your worker?" else "Process on your worker?"
             body = if (isDownloaded) {
-                "Re-download and analyze \"$episodeTitle\" on your connected Desktop/Cloud Worker for fresh transcript, speakers, chapters, and ad markers."
+                "Download \"$episodeTitle\" again and process it on your connected worker for a fresh transcript, speakers, chapters and ad markers."
             } else {
-                "Download and analyze \"$episodeTitle\" on your connected Desktop/Cloud Worker, then stream the exact audio + AI bundle to your phone."
+                "Download and process \"$episodeTitle\" on your connected worker, then send the audio and results to your phone."
             }
-            primaryLabel = if (isDownloaded) "Refresh on Desktop" else "Download & Analyze (Worker)"
+            primaryLabel = if (isDownloaded) "Refresh on worker" else "Process on worker"
             primaryAction = onAnalyzeDesktop
             if (localModelsReady) {
-                secondaryLabel = if (isDownloaded) "Analyze On-Device" else "On-Device Instead"
+                secondaryLabel = if (isDownloaded) "Process on phone" else "Use phone instead"
                 secondaryAction = onAnalyzeOnDevice
             } else {
                 secondaryLabel = null
@@ -209,16 +213,16 @@ fun HushCastAnalyzeDialog(
             }
         }
         localModelsReady -> {
-            title = "Analyze On-Device with HushCast AI"
+            title = if (isDownloaded) "Process on this phone?" else "Download and process?"
             body = if (isDownloaded) {
                 "Run on-device HushCast AI on \"$episodeTitle\" to transcribe, auto-mute words, and detect sponsor reads."
             } else {
                 "\"$episodeTitle\" isn't downloaded yet. Download it now to run on-device HushCast AI."
             }
-            primaryLabel = if (isDownloaded) "Analyze On-Device" else "Download & Analyze"
+            primaryLabel = if (isDownloaded) "Process" else "Download & process"
             primaryAction = onAnalyzeOnDevice
             if (!isDownloaded) {
-                secondaryLabel = "Audio Only"
+                secondaryLabel = "Download audio only"
                 secondaryAction = onDownloadAudioOnly
             } else {
                 secondaryLabel = null
@@ -226,8 +230,8 @@ fun HushCastAnalyzeDialog(
             }
         }
         else -> {
-            title = "HushCast AI Not Set Up"
-            body = "No on-device AI models (~455 MB) are downloaded and no Desktop/Cloud Worker is connected. Download on-device models over Wi-Fi now, or pair a worker in Settings → HushCast."
+            title = "Set up HushCast?"
+            body = "HushCast needs its on-phone models (about 455 MB) or a connected worker. Download the models over Wi-Fi now, or pair a worker in Settings → HushCast."
             primaryLabel = "Set up (Wi-Fi)"
             primaryAction = {
                 ModelDownloadWorker.enqueue(
@@ -237,7 +241,7 @@ fun HushCastAnalyzeDialog(
                 )
             }
             if (!isDownloaded) {
-                secondaryLabel = "Audio Only"
+                secondaryLabel = "Download audio only"
                 secondaryAction = onDownloadAudioOnly
             } else {
                 secondaryLabel = null

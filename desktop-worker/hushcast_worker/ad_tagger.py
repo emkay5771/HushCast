@@ -46,6 +46,14 @@ _ABBREVIATIONS = frozenset({
 })
 _SENTENCE_END_RE = re.compile(r"[.?!][\"')\]]*$")
 MAX_SENTENCE_SEGMENT_S = 15.0
+# Fallback split (a stretch with no sentence end that runs past max_len); keep in parity
+# with SentenceSplitter.kt: split at the largest gap if it is >= FALLBACK_MIN_GAP_S, else at
+# the last word boundary at or before max_len. A fallback piece is never shorter than
+# FALLBACK_MIN_PIECE_S or FALLBACK_MIN_PIECE_WORDS words.
+FALLBACK_MIN_GAP_S = 0.15
+FALLBACK_MIN_PIECE_S = 3.0
+FALLBACK_MIN_PIECE_WORDS = 6
+_SPLIT_EPS = 1e-6
 
 
 def is_sentence_end(word: str) -> bool:
@@ -53,10 +61,40 @@ def is_sentence_end(word: str) -> bool:
     return bool(_SENTENCE_END_RE.search(w)) and w not in _ABBREVIATIONS
 
 
+def _fallback_split_count(cur: Sequence[WordDto], max_len: float) -> Optional[int]:
+    """
+    How many leading words of `cur` to flush when it runs past `max_len` without a sentence end,
+    or None to keep waiting (no piece would meet the minimum size yet). At least one word is
+    always kept back.
+    """
+    t0 = float(cur[0].start)
+    valid = [
+        n
+        for n in range(FALLBACK_MIN_PIECE_WORDS, len(cur))
+        if float(cur[n - 1].end) - t0 >= FALLBACK_MIN_PIECE_S - _SPLIT_EPS
+    ]
+    if not valid:
+        return None
+    best_n = valid[0]
+    best_gap = float(cur[best_n].start) - float(cur[best_n - 1].end)
+    for n in valid[1:]:
+        gap = float(cur[n].start) - float(cur[n - 1].end)
+        if gap > best_gap:
+            best_n, best_gap = n, gap
+    if best_gap >= FALLBACK_MIN_GAP_S - _SPLIT_EPS:
+        return best_n
+    within = [n for n in valid if float(cur[n - 1].end) - t0 <= max_len + _SPLIT_EPS]
+    # No usable pause (e.g. faster-whisper's contiguous word times): cut at the last word that
+    # keeps the piece within max_len, or as close above it as the minimums allow.
+    return within[-1] if within else valid[0]
+
+
 def split_sentences(words: Sequence[WordDto], max_len: float = MAX_SENTENCE_SEGMENT_S) -> list[SegmentDto]:
     """
-    Exact port of `SentenceSplitter.split` in core/automute-engine.
-    Call once per Whisper segment (don't join words across segments).
+    Port of `SentenceSplitter.split` in core/automute-engine.
+    Splits at sentence-ending punctuation; a stretch longer than `max_len` without one is cut by
+    `_fallback_split_count`. Word texts keep their leading space. Safe to run over a whole
+    episode's word list so sentences can span recognizer windows.
     """
     out: list[SegmentDto] = []
     cur: list[WordDto] = []
@@ -82,11 +120,9 @@ def split_sentences(words: Sequence[WordDto], max_len: float = MAX_SENTENCE_SEGM
         if is_sentence_end(w.text):
             _flush()
         elif (cur[-1].end - cur[0].start) > max_len and len(cur) > 2:
-            best = 0
-            for k in range(1, len(cur) - 1):
-                if (cur[k + 1].start - cur[k].end) > (cur[best + 1].start - cur[best].end):
-                    best = k
-            _flush(best + 1)
+            n_take = _fallback_split_count(cur, max_len)
+            if n_take is not None:
+                _flush(n_take)
     _flush()
     return out
 
@@ -183,29 +219,60 @@ def _db10(p: np.ndarray | float) -> np.ndarray | float:
     return max(10.0 * math.log10(p), DB_FLOOR) if p > 0.0 else DB_FLOOR
 
 
+_KW_BLOCK = 16384
+_KW_H_SPEC = np.fft.rfft(_K_WEIGHT_IR, n=_KW_BLOCK)
+
+
+class _KWeightStream:
+    """
+    Overlap-add FFT convolution with the 4096-tap K-weighting impulse response, produced in order
+    and on demand (V18). `take(n)` returns the next n filtered samples as float64. The blocks are the
+    same as `_apply_k_weight_fft` uses, so the output is bit-identical to it, but only one chunk is
+    held at a time instead of a full-length float64 copy (2 GB for a 3-hour episode).
+    """
+
+    def __init__(self, signal: np.ndarray) -> None:
+        self._signal = signal
+        self._n = len(signal)
+        self._ir_len = len(_K_WEIGHT_IR)
+        self._step = _KW_BLOCK - self._ir_len + 1
+        self._next_block = 0  # input position of the next block to convolve
+        self._tail = np.zeros(self._ir_len - 1, dtype=np.float64)
+        self._ready: list[np.ndarray] = []  # finished output not yet taken, in order
+        self._ready_len = 0
+
+    def _run_block(self) -> None:
+        pos = self._next_block
+        seg = self._signal[pos : pos + self._step].astype(np.float64)
+        conv = np.fft.irfft(np.fft.rfft(seg, n=_KW_BLOCK) * _KW_H_SPEC, n=_KW_BLOCK)
+        valid_len = len(seg)
+        conv[: len(self._tail)] += self._tail
+        self._ready.append(conv[:valid_len].copy())
+        self._ready_len += valid_len
+        if valid_len + self._ir_len - 1 <= _KW_BLOCK:
+            self._tail = conv[valid_len : valid_len + self._ir_len - 1].copy()
+        else:
+            self._tail = np.zeros(self._ir_len - 1, dtype=np.float64)
+        self._next_block = pos + self._step
+
+    def take(self, n: int) -> np.ndarray:
+        while self._ready_len < n and self._next_block < self._n:
+            self._run_block()
+        n = min(n, self._ready_len)
+        joined = self._ready[0] if len(self._ready) == 1 else np.concatenate(self._ready)
+        out = joined[:n]
+        rest = joined[n:].copy()  # less than one block; lets `joined` be freed with `out`
+        self._ready = [rest] if len(rest) else []
+        self._ready_len = len(rest)
+        return out
+
+
 def _apply_k_weight_fft(signal: np.ndarray) -> np.ndarray:
-    """Fast FFT convolution with the 4096-tap K-weighting impulse response."""
+    """Fast FFT convolution with the 4096-tap K-weighting impulse response (whole signal at once)."""
     n = len(signal)
     if n == 0:
         return np.zeros(0, dtype=np.float64)
-    ir_len = len(_K_WEIGHT_IR)
-    block_size = 16384
-    step = block_size - ir_len + 1
-    h_spec = np.fft.rfft(_K_WEIGHT_IR, n=block_size)
-    out = np.empty(n, dtype=np.float64)
-    # Overlap-add with ir_len - 1 overlap
-    tail = np.zeros(ir_len - 1, dtype=np.float64)
-    for pos in range(0, n, step):
-        seg = signal[pos : pos + step].astype(np.float64)
-        conv = np.fft.irfft(np.fft.rfft(seg, n=block_size) * h_spec, n=block_size)
-        valid_len = len(seg)
-        conv[: len(tail)] += tail
-        out[pos : pos + valid_len] = conv[:valid_len]
-        if valid_len + ir_len - 1 <= block_size:
-            tail = conv[valid_len : valid_len + ir_len - 1].copy()
-        else:
-            tail = np.zeros(ir_len - 1, dtype=np.float64)
-    return out
+    return _KWeightStream(signal).take(n)
 
 
 def extract_audio_frames(
@@ -268,8 +335,9 @@ def extract_audio_frames(
         else None
     )
 
-    # K-weight filter the entire padded mid signal in overlap-add blocks
-    kw_padded = _apply_k_weight_fft(padded_mid)
+    # K-weight the padded mid signal chunk by chunk, in step with the frame loop below (V18).
+    kw_stream = _KWeightStream(padded_mid)
+    kw_stream.take(PAD_LEFT)  # the frame loop starts at PAD_LEFT
 
     total_frames = (len(padded_mid) - PAD_LEFT - PAD_RIGHT) // HOP
     if total_frames <= 0:
@@ -317,7 +385,7 @@ def extract_audio_frames(
         s_start = PAD_LEFT + f0_idx * HOP
         s_end = PAD_LEFT + f1_idx * HOP
         mid_2d = padded_mid[s_start:s_end].astype(np.float64).reshape(nf, HOP)
-        kw_2d = kw_padded[s_start:s_end].reshape(nf, HOP)
+        kw_2d = kw_stream.take(s_end - s_start).reshape(nf, HOP)
 
         # Loudness & RMS
         lk_ms = np.sum(kw_2d * kw_2d, axis=1) / float(HOP)
@@ -415,7 +483,22 @@ def extract_audio_frames(
 
 
 def _round_half_even(x: float, digits: int) -> float:
-    return float(Decimal(str(x)).quantize(Decimal(10) ** -digits, rounding=ROUND_HALF_EVEN))
+    """
+    Exact port of `Decoder.round` (E/engine/Decoder.kt):
+    `BigDecimal(x).setScale(digits, RoundingMode.HALF_EVEN).toDouble()`.
+    `Decimal(x)` is the exact binary value of the double, like `BigDecimal(double)`, so only true
+    binary ties round to even. (`Decimal(str(x))` treated the shortest repr as exact, which made
+    e.g. 0.015 a tie and rounded it to 0.02 where Kotlin gives 0.01: a 10 ms span-edge difference.)
+    """
+    return float(Decimal(float(x)).quantize(Decimal(10) ** -digits, rounding=ROUND_HALF_EVEN))
+
+
+def _kotlin_mean(values: np.ndarray) -> float:
+    """Mean as `Decoder.findSpans` computes it: float probabilities summed in order into a double."""
+    s = 0.0
+    for v in values:
+        s += float(v)
+    return s / len(values)
 
 
 def _valid(arr: np.ndarray, start: int, stop: int) -> np.ndarray:
@@ -565,6 +648,11 @@ def compute_segment_features(
         row[14] = a / max(dur, 1.0)
         row[15] = e - a
         row[16] = float(s.nWords)
+        # A3: spk_change is filled from the worker's k-means speakers (`audio.assign_speakers`); the
+        # phone has no diarization and always leaves it 0. Kept on purpose: ad_tagger.onnx (v1.1)
+        # normalizes this input with mu=0.189, sd=0.392, i.e. a 0/1 flag that was 1 on ~19% of the
+        # training segments, so the training data had real speaker changes. The phone's constant 0
+        # says "no change" for every segment, a pattern unlike the training data.
         prev_spk = segments[i - 1].speaker if i > 0 else s.speaker
         row[17] = 1.0 if (s.speaker is not None and prev_spk is not None and s.speaker != prev_spk) else 0.0
 
@@ -631,7 +719,7 @@ def find_ad_candidates(
         while j + 1 < n and (hot[j + 1] or (j + 2 < n and hot[j + 2] and not inside[j + 1])):
             j += 1
         if j - i + 1 >= CAND_MIN_SEGMENTS:
-            avg_p = _round_half_even(float(np.mean(probs[i : j + 1, 1])), 3)
+            avg_p = _round_half_even(_kotlin_mean(probs[i : j + 1, 1]), 3)
             start_s = _round_half_even(float(segments[i].start), 2)
             end_s = _round_half_even(float(segments[j].end), 2)
             out.append(
@@ -686,7 +774,7 @@ def decode_ad_segments(probs: np.ndarray, segments: Sequence[SegmentDto]) -> lis
     out: list[AdSegmentDto] = []
     for i, j, cls_idx in runs:
         cls_name = CLASSES[cls_idx]
-        avg_p = _round_half_even(float(np.mean(probs[i : j + 1, cls_idx])), 3)
+        avg_p = _round_half_even(_kotlin_mean(probs[i : j + 1, cls_idx]), 3)
         start_s = _round_half_even(float(segments[i].start), 2)
         end_s = _round_half_even(float(segments[j].end), 2)
 

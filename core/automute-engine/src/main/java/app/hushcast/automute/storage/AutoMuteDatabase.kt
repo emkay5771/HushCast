@@ -19,6 +19,7 @@ import app.hushcast.automute.dsp.ReadinessBadge
 import app.hushcast.automute.engine.Segment
 import app.hushcast.automute.engine.Word
 import app.hushcast.automute.matcher.MuteRule
+import app.hushcast.automute.transcript.ApproxSpan
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,7 +40,12 @@ import java.util.zip.GZIPOutputStream
 @Serializable
 data class WordIndexBlob(
     val words: List<Word>,
-    val segments: List<Segment>
+    val segments: List<Segment>,
+    /**
+     * SRT/VTT cues whose words were spread evenly over the cue, not heard (see CueRealigner).
+     * Stored inside the blob, so older blobs simply decode with none.
+     */
+    val approxSpans: List<ApproxSpan> = emptyList()
 )
 
 @Entity(tableName = "episode_word_index")
@@ -96,10 +102,14 @@ data class MuteRuleEntity(
     val pattern: String,
     val isRegex: Boolean = false,
     val matchPlurals: Boolean = true,
-    val actionMode: String = MuteActionMode.HARD_SILENCE.name,
+    /** A [MuteActionMode] name, or "DEFAULT" to follow the global mute mode (the normal case). */
+    val actionMode: String = DEFAULT_RULE_MODE,
     val enabled: Boolean = true,
     val category: String = "Custom"
 )
+
+/** Stored rule mode meaning "follow the global mute mode". */
+const val DEFAULT_RULE_MODE = "DEFAULT"
 
 @Entity(tableName = "podcast_ad_policy")
 data class PodcastAdPolicyEntity(
@@ -347,11 +357,49 @@ interface AutoMuteDao {
     @Query("DELETE FROM ad_segments WHERE episodeId = :episodeId AND fileSha256 != :keepSha256")
     suspend fun deleteAdSegmentsForOtherHashes(episodeId: String, keepSha256: String)
 
+    /** Removes the episode's mute segments, ad segments and offset maps for every other file hash. */
     @androidx.room.Transaction
     suspend fun clearAnalysisForOtherHashes(episodeId: String, keepSha256: String) {
         deleteMuteSegmentsForOtherHashes(episodeId, keepSha256)
         deleteAdSegmentsForOtherHashes(episodeId, keepSha256)
         deleteOtherOffsetMaps(episodeId, keepSha256)
+    }
+
+    /**
+     * A5: writes the new hash's mute segments and removes every other hash's results for the
+     * episode in one transaction.  Runs before ad detection, so a failed or stopped ad stage
+     * never leaves old-hash results behind.
+     */
+    @androidx.room.Transaction
+    suspend fun replaceMuteSegmentsAndClearOtherHashes(
+        episodeId: String,
+        sha256: String,
+        segments: List<MuteSegmentEntity>
+    ) {
+        replaceMuteSegments(sha256, segments)
+        clearAnalysisForOtherHashes(episodeId, sha256)
+    }
+
+    /** A5: the ad segments and the old-hash cleanup in one transaction. */
+    @androidx.room.Transaction
+    suspend fun replaceAdSegmentsAndClearOtherHashes(
+        episodeId: String,
+        sha256: String,
+        segments: List<AdSegmentEntity>
+    ) {
+        replaceAdSegments(sha256, segments)
+        clearAnalysisForOtherHashes(episodeId, sha256)
+    }
+
+    /** Re-aligned words and the mute segments matched on them, together. */
+    @androidx.room.Transaction
+    suspend fun saveWordIndexAndMuteSegments(
+        index: EpisodeWordIndexEntity,
+        episodeId: String,
+        segments: List<MuteSegmentEntity>
+    ) {
+        upsertWordIndex(index)
+        replaceMuteSegmentsAndClearOtherHashes(episodeId, index.fileSha256, segments)
     }
 
     @Query("SELECT * FROM episode_chunk_checkpoints WHERE fileSha256 = :sha256 ORDER BY chunkIndex ASC")
@@ -362,6 +410,39 @@ interface AutoMuteDao {
 
     @Query("DELETE FROM episode_chunk_checkpoints WHERE fileSha256 = :sha256")
     suspend fun deleteCheckpoints(sha256: String)
+
+    /**
+     * Every checkpoint row of a file: keys "sha:..." (per model and pipeline version) and the
+     * bare legacy key.  substr instead of LIKE so nothing in the key acts as a wildcard.
+     */
+    @Query(
+        """
+        DELETE FROM episode_chunk_checkpoints
+        WHERE fileSha256 = :sha256 OR substr(fileSha256, 1, length(:sha256) + 1) = :sha256 || ':'
+        """
+    )
+    suspend fun deleteAllCheckpointsForSha(sha256: String): Int
+
+    /**
+     * Checkpoints left behind by earlier versions, which wrote "sha:model" keys but deleted by
+     * bare sha.  A row goes when its file finished (READY) more than [cutoffMs] ago, or when the
+     * file has no word index and no status touched since [cutoffMs] (nothing is resuming it).
+     * The age comes from the status row: the checkpoint table has no timestamp.
+     */
+    @Query(
+        """
+        DELETE FROM episode_chunk_checkpoints
+        WHERE (CASE WHEN instr(fileSha256, ':') > 0 THEN substr(fileSha256, 1, instr(fileSha256, ':') - 1) ELSE fileSha256 END)
+            IN (SELECT fileSha256 FROM episode_analysis_status WHERE badge = 'READY' AND updatedAt < :cutoffMs)
+        OR (
+            (CASE WHEN instr(fileSha256, ':') > 0 THEN substr(fileSha256, 1, instr(fileSha256, ':') - 1) ELSE fileSha256 END)
+                NOT IN (SELECT fileSha256 FROM episode_word_index)
+            AND (CASE WHEN instr(fileSha256, ':') > 0 THEN substr(fileSha256, 1, instr(fileSha256, ':') - 1) ELSE fileSha256 END)
+                NOT IN (SELECT fileSha256 FROM episode_analysis_status WHERE updatedAt >= :cutoffMs)
+        )
+        """
+    )
+    suspend fun pruneOrphanCheckpoints(cutoffMs: Long): Int
 
     @Query("SELECT * FROM episode_offset_map WHERE fileSha256 = :sha256 LIMIT 1")
     suspend fun getOffsetMap(sha256: String): EpisodeOffsetMapEntity?
@@ -579,23 +660,32 @@ fun MuteSegmentEntity.toDomain(defaultActionMode: MuteActionMode = MuteActionMod
     enabled = enabled
 )
 
+/**
+ * Resolves each segment's mute mode: a rule (or segment) stored as "DEFAULT" follows
+ * [defaultActionMode]; otherwise the rule's own mode wins, then the segment's.  This is the one
+ * place modes are resolved, so the player sheet, Settings and reloads always agree.
+ */
+fun resolveMuteWindows(
+    segments: List<MuteSegmentEntity>,
+    rulesById: Map<Long, MuteRuleEntity>,
+    defaultActionMode: MuteActionMode
+): List<MuteWindow> = segments.map { seg ->
+    val rule = rulesById[seg.ruleId]
+    val useDefault = seg.actionMode.equals(DEFAULT_RULE_MODE, ignoreCase = true) ||
+        (rule != null && rule.actionMode.equals(DEFAULT_RULE_MODE, ignoreCase = true))
+    val resolvedMode = when {
+        useDefault -> defaultActionMode
+        rule != null -> runCatching { MuteActionMode.valueOf(rule.actionMode) }.getOrDefault(defaultActionMode)
+        else -> runCatching { MuteActionMode.valueOf(seg.actionMode) }.getOrDefault(defaultActionMode)
+    }
+    seg.toDomain(defaultActionMode).copy(actionMode = resolvedMode)
+}
+
 suspend fun AutoMuteDao.loadResolvedMuteWindows(
     fileSha256: String,
     defaultActionMode: MuteActionMode
-): List<MuteWindow> {
-    val rulesById = getAllRules().associateBy { it.id }
-    return getMuteSegments(fileSha256).map { seg ->
-        val rule = rulesById[seg.ruleId]
-        val useDefault = seg.actionMode.equals("DEFAULT", ignoreCase = true) ||
-            (rule != null && rule.actionMode.equals("DEFAULT", ignoreCase = true))
-        val resolvedMode = when {
-            useDefault -> defaultActionMode
-            rule != null -> runCatching { MuteActionMode.valueOf(rule.actionMode) }.getOrDefault(defaultActionMode)
-            else -> runCatching { MuteActionMode.valueOf(seg.actionMode) }.getOrDefault(defaultActionMode)
-        }
-        seg.toDomain(defaultActionMode).copy(actionMode = resolvedMode)
-    }
-}
+): List<MuteWindow> =
+    resolveMuteWindows(getMuteSegments(fileSha256), getAllRules().associateBy { it.id }, defaultActionMode)
 
 suspend fun AutoMuteDao.loadResolvedMuteWindowsByEpisode(
     episodeId: String,
@@ -605,18 +695,22 @@ suspend fun AutoMuteDao.loadResolvedMuteWindowsByEpisode(
     if (sha != null) {
         return loadResolvedMuteWindows(sha, defaultActionMode)
     }
-    val rulesById = getAllRules().associateBy { it.id }
-    return observeMuteSegmentsByEpisode(episodeId).first().map { seg ->
-        val rule = rulesById[seg.ruleId]
-        val useDefault = seg.actionMode.equals("DEFAULT", ignoreCase = true) ||
-            (rule != null && rule.actionMode.equals("DEFAULT", ignoreCase = true))
-        val resolvedMode = when {
-            useDefault -> defaultActionMode
-            rule != null -> runCatching { MuteActionMode.valueOf(rule.actionMode) }.getOrDefault(defaultActionMode)
-            else -> runCatching { MuteActionMode.valueOf(seg.actionMode) }.getOrDefault(defaultActionMode)
-        }
-        seg.toDomain(defaultActionMode).copy(actionMode = resolvedMode)
-    }
+    return resolveMuteWindows(
+        observeMuteSegmentsByEpisode(episodeId).first(),
+        getAllRules().associateBy { it.id },
+        defaultActionMode
+    )
+}
+
+/**
+ * One-time fix for installs from 1.0.30 and earlier: rules were saved with the global mode's
+ * name, so changing the mode never reached them.  There is no per-rule mode UI, so every rule
+ * is switched to follow the global mode.  Safe to call on every start.
+ */
+suspend fun AutoMuteDao.migrateRulesToDefaultModeOnce(context: android.content.Context) {
+    if (app.hushcast.automute.engine.HushCastPrefs.isRuleModeMigrated(context)) return
+    updateAllRulesActionMode(DEFAULT_RULE_MODE)
+    app.hushcast.automute.engine.HushCastPrefs.setRuleModeMigrated(context)
 }
 
 fun AdSegmentEntity.toDomain() = AdWindow(

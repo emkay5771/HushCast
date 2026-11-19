@@ -20,6 +20,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -58,6 +59,11 @@ fun ContinuePlayingRoute(
     val vm = viewModel { ContinuePlayingViewModel(db) }
 
     val continuePlaying = vm.continuePlaying.collectAsLazyPagingItems()
+    // S7: one lookup and one Set for the whole list, not one per row.
+    val rowPlayerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
+    val queueEpisodeIds by remember(rowPlayerVm) {
+        androidx.compose.runtime.derivedStateOf { rowPlayerVm.queue.toHashSet() }
+    }
 
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
@@ -142,6 +148,7 @@ fun ContinuePlayingRoute(
                         scope = scope,
                         modifier = Modifier.animateItem(),
                         snackbarHostState = snackbarHostState,
+                        shape = app.podiumpodcasts.podium.ui.component.model.episode.episodeRowShape(it, continuePlaying.itemCount),
                         startAction = SwipeableItemActions.CheckAction(
                             onAction = {
                                 val previousPlayed = item.playState.played
@@ -190,6 +197,8 @@ fun ContinuePlayingRoute(
 
                             index = it,
                             count = continuePlaying.itemCount,
+                            inQueue = item.episode.id in queueEpisodeIds,
+                            playerVm = rowPlayerVm,
 
                             colors = ListItemDefaults.segmentedColors(
                                 containerColor = MaterialTheme.colorScheme.surfaceContainerHigh

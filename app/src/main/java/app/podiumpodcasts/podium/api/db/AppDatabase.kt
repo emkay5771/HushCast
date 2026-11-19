@@ -47,7 +47,7 @@ import app.podiumpodcasts.podium.api.db.model.statistics.UpdatePodcastRunModel
         QueueItemModel::class,
         ChapterSkipModel::class,
         app.podiumpodcasts.podium.api.db.model.EpisodeChapterModel::class
-    ], version = 20, exportSchema = true
+    ], version = 21, exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun podcasts(): PodcastDao
@@ -379,6 +379,26 @@ val MIGRATION_19_20 = object : Migration(19, 20) {
     }
 }
 
+/**
+ * 1.0.31: transcript fall-through (T5), chapter-fetch backoff, and the once-per-podcast
+ * unconditional fetch for feeds that keep answering 304.
+ */
+internal const val HISTORY_DEDUPE_SQL =
+    "DELETE FROM `podcastHistory` WHERE `id` NOT IN " +
+        "(SELECT MIN(`id`) FROM `podcastHistory` GROUP BY `episodeId`, `timestamp`)"
+
+val MIGRATION_20_21 = object : Migration(20, 21) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `podcastEpisode` ADD COLUMN `transcriptAlternatesJson` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `podcastEpisode` ADD COLUMN `chaptersFetchFailures` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `podcastEpisode` ADD COLUMN `chaptersRetryAfter` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `podcastSubscription` ADD COLUMN `extrasVersion` INTEGER NOT NULL DEFAULT 0")
+        // History entries that the old "update every entry of this episode" bug gave the same
+        // timestamp are exact duplicates on screen: keep the first of each.
+        db.execSQL(HISTORY_DEDUPE_SQL)
+    }
+}
+
 val ALL_MIGRATIONS = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
@@ -398,5 +418,6 @@ val ALL_MIGRATIONS = arrayOf(
     MIGRATION_16_17,
     MIGRATION_17_18,
     MIGRATION_18_19,
-    MIGRATION_19_20
+    MIGRATION_19_20,
+    MIGRATION_20_21
 )

@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -14,6 +15,7 @@
 #include "whisper.h"
 #define DR_MP3_IMPLEMENTATION
 #include "dr_mp3.h"
+#include "mp3_seek_cache.h"
 
 namespace {
 
@@ -578,6 +580,10 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_fftFree(JNIEnv *, jclass, jlo
 
 struct NativeMp3Decoder {
     drmp3 mp3;
+    std::string path;
+    // Bound to mp3 once a seek needs it; shared with the per-file cache (mp3_seek_cache.h).
+    std::shared_ptr<const hushcast::Mp3SeekTable> seekTable;
+    bool seekTableTried = false;
     std::vector<float> interleaved;
     std::vector<float> mid;
     std::vector<float> side;
@@ -592,6 +598,7 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_mp3Open(JNIEnv * env, jclass,
         delete dec;
         return 0L;
     }
+    dec->path = path;
     env->ReleaseStringUTFChars(jpath, path);
     return reinterpret_cast<jlong>(dec);
 }
@@ -650,6 +657,13 @@ Java_app_hushcast_automute_nativebridge_WhisperJni_mp3Seek(
         JNIEnv *, jclass, jlong h, jlong frameIndex) {
     auto * dec = reinterpret_cast<NativeMp3Decoder *>(h);
     if (frameIndex < 0) frameIndex = 0;
+    // Past the first ~30 s a brute-force seek decodes everything before the target, so bind the
+    // file's seek table (built once per file, then cached).  Decoded samples are unchanged.
+    const drmp3_uint64 rate = dec->mp3.sampleRate ? dec->mp3.sampleRate : 44100;
+    if (!dec->seekTableTried && (drmp3_uint64) frameIndex > rate * 30) {
+        dec->seekTableTried = true;
+        dec->seekTable = hushcast::bindCachedMp3SeekTable(&dec->mp3, dec->path);
+    }
     return drmp3_seek_to_pcm_frame(&dec->mp3, (drmp3_uint64) frameIndex) ? JNI_TRUE : JNI_FALSE;
 }
 

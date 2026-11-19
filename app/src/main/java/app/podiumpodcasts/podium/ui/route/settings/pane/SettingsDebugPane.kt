@@ -3,9 +3,7 @@ package app.podiumpodcasts.podium.ui.route.settings.pane
 import android.annotation.SuppressLint
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -40,6 +38,7 @@ import app.podiumpodcasts.podium.background.worker.NightlyWorker
 import app.podiumpodcasts.podium.background.worker.PeriodicPodcastUpdateWorker
 import app.podiumpodcasts.podium.ui.component.settings.SettingsListItem
 import app.podiumpodcasts.podium.ui.component.settings.SettingsSwitchListItem
+import app.podiumpodcasts.podium.ui.component.settings.settingsGroup
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 import app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository
 import app.podiumpodcasts.podium.ui.route.settings.SettingsPaneKey
@@ -84,189 +83,186 @@ fun SettingsDebugPane(
 
             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
         ) {
-            item {
-                val enableUpdateNotification =
-                    vm.repository.debug.enableUpdateNotification.collectAsState(false)
+            settingsGroup(key = "notifications", spaceAbove = 0.dp) {
+                row { pos ->
+                    val enableUpdateNotification =
+                        vm.repository.debug.enableUpdateNotification.collectAsState(false)
 
-                SettingsSwitchListItem(
-                    checked = enableUpdateNotification.value,
-                    onCheckedChange = {
-                        scope.launch {
-                            vm.repository.debug.setEnableUpdateNotification(it)
+                    SettingsSwitchListItem(
+                        checked = enableUpdateNotification.value,
+                        onCheckedChange = {
+                            scope.launch {
+                                vm.repository.debug.setEnableUpdateNotification(it)
+                            }
+                        },
+
+                        icon = {
+                            Icon(Icons.Rounded.Notifications, "")
+                        },
+                        label = "Enable update notifications",
+                        description = "Receive debug notifications when periodic podcast updates run",
+
+                        index = pos.index,
+                        count = pos.count
+                    )
+                }
+                row { pos ->
+                    val enableNightlyNotification =
+                        vm.repository.debug.enableNightlyNotification.collectAsState(false)
+
+                    SettingsSwitchListItem(
+                        checked = enableNightlyNotification.value,
+                        onCheckedChange = {
+                            scope.launch {
+                                vm.repository.debug.setEnableNightlyNotification(it)
+                            }
+                        },
+
+                        icon = {
+                            Icon(Icons.Rounded.Notifications, "")
+                        },
+                        label = "Enable nightly notifications",
+                        description = "Receive debug notifications when nightly tasks run",
+
+                        index = pos.index,
+                        count = pos.count
+                    )
+                }
+            }
+
+
+            settingsGroup(key = "actions") {
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(Icons.Rounded.Update, "")
+                        },
+                        label = "Run podcast update worker",
+                        description = "Fetch all podcast feeds for updates",
+
+                        index = pos.index,
+                        count = pos.count,
+
+                        onClick = {
+                            WorkManager.getInstance(context)
+                                .enqueueUniqueWork(
+                                    uniqueWorkName = PeriodicPodcastUpdateWorker.INSTANT_UNIQUE_NAME,
+                                    existingWorkPolicy = ExistingWorkPolicy.KEEP,
+                                    request = OneTimeWorkRequestBuilder<PeriodicPodcastUpdateWorker>()
+                                        .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                                        // Same as a pull-to-refresh: the shorter chapter-download budget.
+                                        .addTag(PeriodicPodcastUpdateWorker.TAG_MANUAL)
+                                        .build()
+                                )
                         }
-                    },
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(Icons.Rounded.Bedtime, "")
+                        },
+                        label = "Run nightly worker",
+                        description = "Run all nightly tasks",
 
-                    icon = {
-                        Icon(Icons.Rounded.Notifications, "")
-                    },
-                    label = "Enable update notifications",
-                    description = "Receive debug notifications when periodic podcast updates run",
+                        index = pos.index,
+                        count = pos.count,
 
-                    index = 0,
-                    count = 2
-                )
-            }
-
-            item {
-                val enableNightlyNotification =
-                    vm.repository.debug.enableNightlyNotification.collectAsState(false)
-
-                SettingsSwitchListItem(
-                    checked = enableNightlyNotification.value,
-                    onCheckedChange = {
-                        scope.launch {
-                            vm.repository.debug.setEnableNightlyNotification(it)
+                        onClick = {
+                            WorkManager.getInstance(context)
+                                .enqueueUniqueWork(
+                                    uniqueWorkName = "DailyWorker-Once",
+                                    existingWorkPolicy = ExistingWorkPolicy.KEEP,
+                                    request = OneTimeWorkRequestBuilder<NightlyWorker>()
+                                        .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                                        .build()
+                                )
                         }
-                    },
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(Icons.Rounded.CleaningServices, "")
+                        },
+                        label = "Delete latest episodes",
+                        description = "Delete last episodes from each podcast",
 
-                    icon = {
-                        Icon(Icons.Rounded.Notifications, "")
-                    },
-                    label = "Enable nightly notifications",
-                    description = "Receive debug notifications when nightly tasks run",
+                        index = pos.index,
+                        count = pos.count,
 
-                    index = 1,
-                    count = 2
-                )
-            }
+                        onClick = {
+                            scope.launch {
+                                val podcasts = db.podcasts().allSync()
 
-            item {
-                Spacer(Modifier.height(16.dp))
-            }
+                                podcasts.forEach {
+                                    val episodes = db.podcastEpisodes().all(it.origin).first()
 
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(Icons.Rounded.Update, "")
-                    },
-                    label = "Run podcast update worker",
-                    description = "Fetch all podcast feeds for updates",
-
-                    index = 0,
-                    count = 6,
-
-                    onClick = {
-                        WorkManager.getInstance(context)
-                            .enqueueUniqueWork(
-                                uniqueWorkName = "PeriodicPodcastUpdateWorkerInstant",
-                                existingWorkPolicy = ExistingWorkPolicy.KEEP,
-                                request = OneTimeWorkRequestBuilder<PeriodicPodcastUpdateWorker>()
-                                    .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-                                    .build()
-                            )
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(Icons.Rounded.Bedtime, "")
-                    },
-                    label = "Run nightly worker",
-                    description = "Run all nightly tasks",
-
-                    index = 1,
-                    count = 6,
-
-                    onClick = {
-                        WorkManager.getInstance(context)
-                            .enqueueUniqueWork(
-                                uniqueWorkName = "DailyWorker-Once",
-                                existingWorkPolicy = ExistingWorkPolicy.KEEP,
-                                request = OneTimeWorkRequestBuilder<NightlyWorker>()
-                                    .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
-                                    .build()
-                            )
-                    }
-                )
-            }
-
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(Icons.Rounded.CleaningServices, "")
-                    },
-                    label = "Delete latest episodes",
-                    description = "Delete last episodes from each podcast",
-
-                    index = 2,
-                    count = 6,
-
-                    onClick = {
-                        scope.launch {
-                            val podcasts = db.podcasts().allSync()
-
-                            podcasts.forEach {
-                                val episodes = db.podcastEpisodes().all(it.origin).first()
-
-                                val latest = episodes.firstOrNull() ?: return@forEach
-                                db.podcastEpisodes().delete(latest.episode.id)
-                                db.podcastSubscriptions()
-                                    .storeCacheValues(it.origin, "", "", "")
+                                    val latest = episodes.firstOrNull() ?: return@forEach
+                                    db.podcastEpisodes().delete(latest.episode.id)
+                                    db.podcastSubscriptions()
+                                        .storeCacheValues(it.origin, "", "", "")
+                                }
                             }
                         }
-                    }
-                )
-            }
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(Icons.Rounded.Palette, "")
+                        },
+                        label = "Fix seed colors",
+                        description = "Create seed colors for all podcasts",
 
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(Icons.Rounded.Palette, "")
-                    },
-                    label = "Fix seed colors",
-                    description = "Create seed colors for all podcasts",
+                        index = pos.index,
+                        count = pos.count,
 
-                    index = 3,
-                    count = 6,
-
-                    onClick = {
-                        scope.launch {
-                            val fix = FixSeedColorsWork(context, db)
-                            fix.doWork()
+                        onClick = {
+                            scope.launch {
+                                val fix = FixSeedColorsWork(context, db)
+                                fix.doWork()
+                            }
                         }
-                    }
-                )
-            }
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(Icons.Rounded.DeleteSweep, "")
+                        },
+                        label = "Delete all played downloads",
+                        description = "Run delete played downloads work",
 
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(Icons.Rounded.DeleteSweep, "")
-                    },
-                    label = "Delete all played downloads",
-                    description = "Run delete played downloads work",
+                        index = pos.index,
+                        count = pos.count,
 
-                    index = 4,
-                    count = 6,
-
-                    onClick = {
-                        scope.launch {
-                            val fix = DeletePlayedDownloadsWork(context, db)
-                            fix.doWork()
+                        onClick = {
+                            scope.launch {
+                                val fix = DeletePlayedDownloadsWork(context, db)
+                                fix.doWork()
+                            }
                         }
-                    }
-                )
-            }
+                    )
+                }
+                row { pos ->
+                    SettingsListItem(
+                        icon = {
+                            Icon(Icons.Rounded.AutoGraph, "")
+                        },
+                        label = "Delete update podcast statistics",
+                        description = "This will reset the update podcast data usage estimate",
 
-            item {
-                SettingsListItem(
-                    icon = {
-                        Icon(Icons.Rounded.AutoGraph, "")
-                    },
-                    label = "Delete update podcast statistics",
-                    description = "This will reset the update podcast data usage estimate",
+                        index = pos.index,
+                        count = pos.count,
 
-                    index = 5,
-                    count = 6,
-
-                    onClick = {
-                        scope.launch {
-                            db.statisticsUpdatePodcastRun().clear()
+                        onClick = {
+                            scope.launch {
+                                db.statisticsUpdatePodcastRun().clear()
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
         }
     }

@@ -72,7 +72,7 @@ fun DownloadManagementBottomSheet(
         if(cachedBundle.download == null) return@ModalBottomSheet
 
         val hasDesktopUrl = remember(context) {
-            app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerUrl(context).isNotBlank()
+            app.hushcast.automute.engine.HushCastPrefs.isWorkerActive(context)
         }
 
         LazyColumn(
@@ -128,19 +128,30 @@ fun DownloadManagementBottomSheet(
                             }
                         }
                     ) {
-                        Text("Replace with Desktop Version")
+                        Text("Replace with desktop version")
                     }
                 }
             }
 
             item {
                 var showDeleteConfirm = remember { mutableStateOf(false) }
+                val playerVm = androidx.lifecycle.viewmodel.compose.viewModel<app.podiumpodcasts.podium.ui.vm.MediaPlayerViewModel>()
                 if (showDeleteConfirm.value) {
                     app.podiumpodcasts.podium.ui.dialog.DeleteConfirmationDialog(
                         onDismiss = { showDeleteConfirm.value = false },
+                        title = "Delete download?",
                         itemName = bundle.episode.title,
-                        additionalText = "This will delete the downloaded audio file from your device.",
+                        additionalText = "The audio file is removed from this device. You can download it again later.",
                         onConfirm = {
+                            // Item 2: never delete the file the player is using.
+                            if (playerVm.metadataEpisodeId == bundle.episode.id) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    app.podiumpodcasts.podium.ui.component.common.swipeable.CANT_REMOVE_PLAYING_MESSAGE,
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                                return@DeleteConfirmationDialog
+                            }
                             scope.launch {
                                 DownloadManager.deleteEpisodeDownload(
                                     context = context,

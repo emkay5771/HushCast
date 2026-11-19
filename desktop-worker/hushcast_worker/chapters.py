@@ -52,6 +52,26 @@ def _get_chat_llm(chat_model_path: Path):
         _CACHED_CHAT_LLM = (key_path, key_cls, llm)
         return llm
 
+
+def release_chat_llm() -> bool:
+    """
+    Drops the cached chat model and frees its weights (V18, low-memory machines).
+    Returns True if a model was released. The next `_get_chat_llm` call reloads it.
+    """
+    global _CACHED_CHAT_LLM
+    with _CHAT_LLM_LOCK:
+        cached = _CACHED_CHAT_LLM
+        _CACHED_CHAT_LLM = None
+    if cached is None:
+        return False
+    close = getattr(cached[2], "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            logger.debug("Chat LLM close() failed", exc_info=True)
+    return True
+
 _STOPWORDS = {
     "a", "about", "above", "across", "actually", "after", "again", "against", "all",
     "almost", "already", "also", "always", "am", "an", "and", "any", "are", "aren't",

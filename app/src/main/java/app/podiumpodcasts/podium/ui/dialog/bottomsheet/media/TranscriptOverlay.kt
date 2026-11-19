@@ -1,6 +1,9 @@
 package app.podiumpodcasts.podium.ui.dialog.bottomsheet.media
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -15,6 +18,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -22,15 +26,22 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.VolumeOff
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.VerticalAlignCenter
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -38,12 +49,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -53,9 +67,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -69,12 +90,16 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
+import app.hushcast.automute.dsp.AdWindow
 import app.hushcast.automute.dsp.MuteWindow
 import app.hushcast.automute.engine.Word
+import app.hushcast.automute.storage.MuteSegmentEntity
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.Normalizer
+import kotlin.coroutines.cancellation.CancellationException
 
 private val DIACRITICS_REGEX = Regex("\\p{InCombiningDiacriticalMarks}+")
 
@@ -83,13 +108,35 @@ private fun normalizeForSearch(input: String): String {
     return DIACRITICS_REGEX.replace(nfd, "").lowercase()
 }
 
+/** A transcript word as it goes into the mute list: trimmed of punctuation, keeping ' and -. */
+fun cleanMuteWord(raw: String): String =
+    raw.trim().trim { !it.isLetterOrDigit() && it != '\'' && it != '-' }
+
+/** The ad block a transcript line falls in (overlap of at least part of the line), if any. */
+internal fun adForLine(line: TranscriptLineUi, adWindows: List<AdWindow>): AdWindow? {
+    if (adWindows.isEmpty() || line.endMs <= 0L) return null
+    return adWindows.firstOrNull { ad -> line.startMs < ad.endMs && line.endMs > ad.startMs }
+}
+
+/**
+ * T2: once the transcript list can't scroll further, the leftover drag and fling stop here
+ * instead of moving (and closing) the bottom sheet around it.
+ */
+private object KeepOverscrollInside : NestedScrollConnection {
+    override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
+        Offset(0f, available.y)
+
+    override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity =
+        Velocity(0f, available.y)
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun TranscriptOverlay(
     state: TranscriptLoadState,
     episodeTitle: String,
-    currentPositionMs: Long,
-    positionMsState: androidx.compose.runtime.State<Long>? = null,
+    /** S4: the live position as state; only the parts that need it read it. */
+    positionMsState: State<Long>,
     isPlaying: Boolean,
     muteWindows: List<MuteWindow>,
     onClose: () -> Unit,
@@ -100,9 +147,16 @@ fun TranscriptOverlay(
     onProcessNow: (() -> Unit)? = null,
     onDownloadNow: (() -> Unit)? = null,
     bottomControlsPadding: Dp = 128.dp,
+    /** Sponsor blocks, marked in the transcript (T3). */
+    adWindows: List<AdWindow> = emptyList(),
+    /** Starts of the ad blocks that will be skipped automatically; these get "Play anyway". */
+    autoSkipAdStarts: Set<Long> = emptySet(),
+    /** "Play anyway" on a sponsor block: let it play this time, like Undo (T3).  Null hides it. */
+    onPlayAnyway: ((AdWindow) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val view = LocalView.current
+    val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
 
@@ -125,14 +179,22 @@ fun TranscriptOverlay(
         activeMatchCursor = 0
     }
 
-    // Back closes search first, then the transcript (T2, T3)
-    BackHandler(enabled = true) {
-        if (searchOpen) {
-            searchOpen = false
-            searchInput = ""
-            debouncedQuery = ""
-        } else {
+    // Back closes search first, then the transcript.  Closing the transcript follows the
+    // predictive-back gesture (T2): the panel shrinks with the swipe and closes on release.
+    var backProgress by remember { mutableFloatStateOf(0f) }
+    BackHandler(enabled = searchOpen) {
+        searchOpen = false
+        searchInput = ""
+        debouncedQuery = ""
+    }
+    PredictiveBackHandler(enabled = !searchOpen) { progress ->
+        try {
+            progress.collect { event -> backProgress = event.progress }
             onClose()
+        } catch (e: CancellationException) {
+            // Gesture cancelled: spring back.
+        } finally {
+            backProgress = 0f
         }
     }
 
@@ -172,9 +234,9 @@ fun TranscriptOverlay(
         }
     }
 
-    val posState = positionMsState ?: androidx.compose.runtime.rememberUpdatedState(currentPositionMs)
+    val posState = positionMsState
     val activeLineIndex by remember(lines) {
-        androidx.compose.runtime.derivedStateOf {
+        derivedStateOf {
             val pos = posState.value
             if (lines.isEmpty()) -1
             else lines.indexOfFirst { pos in it.startMs..it.endMs }
@@ -200,9 +262,35 @@ fun TranscriptOverlay(
         }
     }
 
+    // Ad blocks the user chose to play this time; their "Play anyway" goes away.
+    var playedAnywayStarts by remember { mutableStateOf(emptySet<Long>()) }
+    // Row actions menu (long-press): which line, and the word pressed, if any (T3).
+    var menuLineIdx by remember { mutableStateOf<Int?>(null) }
+    var menuWord by remember { mutableStateOf<Word?>(null) }
+
+    fun copyText(text: String) {
+        val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
+        clipboard.setPrimaryClip(ClipData.newPlainText("Transcript", text))
+    }
+
+    fun isWordMuted(word: Word): Boolean {
+        val wStartMs = (word.start * 1000.0).toLong()
+        val wEndMs = (word.end * 1000.0).toLong()
+        return muteWindows.any { m -> m.enabled && wEndMs >= m.startMs && wStartMs <= m.endMs }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
+            .graphicsLayer {
+                // T2: predictive back shrinks the transcript towards the bottom as the user swipes.
+                val p = backProgress
+                val scale = 1f - 0.08f * p
+                scaleX = scale
+                scaleY = scale
+                alpha = 1f - 0.25f * p
+                transformOrigin = TransformOrigin(0.5f, 1f)
+            }
             .background(MaterialTheme.colorScheme.surface)
     ) {
         // Top bar: Close on left, Search & Share on right (T2)
@@ -314,6 +402,7 @@ fun TranscriptOverlay(
                 .weight(1f)
                 .fillMaxWidth()
                 .onSizeChanged { viewportHeightPx = it.height }
+                .nestedScroll(KeepOverscrollInside)
         ) {
             when (state) {
                 TranscriptLoadState.Loading -> {
@@ -402,61 +491,79 @@ fun TranscriptOverlay(
                 }
 
                 is TranscriptLoadState.Ready -> {
-                    SelectionContainer {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .pointerInput(Unit) {
-                                    detectTapGestures(
-                                        onPress = {
-                                            lastTouchAtMs = System.currentTimeMillis()
+                    // T3: no SelectionContainer around clickable rows; copying is a row action instead.
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onPress = {
+                                        lastTouchAtMs = System.currentTimeMillis()
+                                    }
+                                )
+                            },
+                        contentPadding = PaddingValues(
+                            start = 16.dp,
+                            end = 16.dp,
+                            top = 8.dp,
+                            bottom = bottomControlsPadding
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        itemsIndexed(
+                            items = lines,
+                            key = { idx, line -> "${idx}_${line.startMs}" }
+                        ) { idx, line ->
+                            val isActive = idx == activeLineIndex
+                            val isSearchMatch = idx in matchingLineIndices
+                            val isCurrentSearchMatch = idx == currentMatchLineIdx
+
+                            val prevSpeaker = lines.getOrNull(idx - 1)?.speaker
+                            val showSpeaker = !line.speaker.isNullOrBlank() && line.speaker != prevSpeaker
+
+                            val lineAd = remember(line, adWindows) { adForLine(line, adWindows) }
+                            val prevLineAd = remember(idx, lines, adWindows) {
+                                lines.getOrNull(idx - 1)?.let { adForLine(it, adWindows) }
+                            }
+                            val adStartsHere = lineAd != null && lineAd != prevLineAd
+
+                            val bgColor = when {
+                                isCurrentSearchMatch -> MaterialTheme.colorScheme.tertiaryContainer
+                                isActive -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                                isSearchMatch -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
+                                lineAd != null -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f)
+                                else -> MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.4f)
+                            }
+
+                            val firstMutableWord = line.words.firstOrNull { it.text.trim().isNotEmpty() }
+                            val firstWordMuted = firstMutableWord != null && isWordMuted(firstMutableWord)
+                            val canPlayFromHere = line.startMs > 0L || idx == 0
+
+                            fun openMenu(word: Word?) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                menuWord = word
+                                menuLineIdx = idx
+                            }
+
+                            val rowSemantics = Modifier.semantics {
+                                onClick(label = "Play from here") {
+                                    if (canPlayFromHere) {
+                                        onSeekToMs(line.startMs)
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                                customActions = buildList {
+                                    add(
+                                        CustomAccessibilityAction("Copy text") {
+                                            copyText(line.text)
+                                            true
                                         }
                                     )
-                                },
-                            contentPadding = PaddingValues(
-                                start = 16.dp,
-                                end = 16.dp,
-                                top = 8.dp,
-                                bottom = bottomControlsPadding
-                            ),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            itemsIndexed(
-                                items = lines,
-                                key = { idx, line -> "${idx}_${line.startMs}" }
-                            ) { idx, line ->
-                                val isActive = idx == activeLineIndex
-                                val isSearchMatch = idx in matchingLineIndices
-                                val isCurrentSearchMatch = idx == currentMatchLineIdx
-
-                                val prevSpeaker = lines.getOrNull(idx - 1)?.speaker
-                                val showSpeaker = !line.speaker.isNullOrBlank() && line.speaker != prevSpeaker
-
-                                val bgColor = when {
-                                    isCurrentSearchMatch -> MaterialTheme.colorScheme.tertiaryContainer
-                                    isActive -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                                    isSearchMatch -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
-                                    else -> MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.4f)
-                                }
-
-                                val firstMutableWord = line.words.firstOrNull { it.text.trim().isNotEmpty() }
-                                val firstWordMuted = firstMutableWord != null && run {
-                                    val wStartMs = (firstMutableWord.start * 1000.0).toLong()
-                                    val wEndMs = (firstMutableWord.end * 1000.0).toLong()
-                                    muteWindows.any { m -> m.enabled && wEndMs >= m.startMs && wStartMs <= m.endMs }
-                                }
-                                val rowSemantics = Modifier.semantics {
-                                    onClick(label = "Play from here") {
-                                        if (line.startMs > 0L || idx == 0) {
-                                            onSeekToMs(line.startMs)
-                                            true
-                                        } else {
-                                            false
-                                        }
-                                    }
                                     if (firstMutableWord != null) {
-                                        customActions = listOf(
+                                        add(
                                             CustomAccessibilityAction(
                                                 if (firstWordMuted) "Unmute word" else "Mute word"
                                             ) {
@@ -466,132 +573,191 @@ fun TranscriptOverlay(
                                         )
                                     }
                                 }
+                            }
 
-                                var textLayoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
-                                val wordRanges = remember(line.words) {
-                                    val ranges = ArrayList<Pair<IntRange, Word>>(line.words.size)
-                                    var cursor = 0
-                                    line.words.forEachIndexed { wIdx, w ->
-                                        if (wIdx > 0 && !w.text.startsWith(" ")) {
-                                            cursor += 1
-                                        }
-                                        val start = cursor
-                                        cursor += w.text.length
-                                        ranges.add((start until cursor) to w)
+                            var textLayoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+                            val wordRanges = remember(line.words) {
+                                val ranges = ArrayList<Pair<IntRange, Word>>(line.words.size)
+                                var cursor = 0
+                                line.words.forEachIndexed { wIdx, w ->
+                                    if (wIdx > 0 && !w.text.startsWith(" ")) {
+                                        cursor += 1
                                     }
-                                    ranges
+                                    val start = cursor
+                                    cursor += w.text.length
+                                    ranges.add((start until cursor) to w)
+                                }
+                                ranges
+                            }
+
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                if (adStartsHere && lineAd != null) {
+                                    SponsorBlockHeader(
+                                        ad = lineAd,
+                                        showPlayAnyway = onPlayAnyway != null &&
+                                            lineAd.startMs in autoSkipAdStarts &&
+                                            lineAd.startMs !in playedAnywayStarts,
+                                        onPlayAnyway = {
+                                            playedAnywayStarts = playedAnywayStarts + lineAd.startMs
+                                            onPlayAnyway?.invoke(lineAd)
+                                        }
+                                    )
                                 }
 
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(bgColor)
-                                        .then(
-                                            if (line.words.isEmpty()) {
-                                                Modifier.combinedClickable(
-                                                    onClickLabel = "Play from here",
-                                                    onClick = {
-                                                        if (line.startMs > 0L || idx == 0) {
-                                                            onSeekToMs(line.startMs)
-                                                        }
-                                                    },
-                                                    onLongClick = {
-                                                        if (firstMutableWord != null) {
-                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                            onMuteWord(firstMutableWord)
-                                                        }
+                                Box {
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(bgColor)
+                                            .then(
+                                                if (line.words.isEmpty()) {
+                                                    Modifier.combinedClickable(
+                                                        onClickLabel = "Play from here",
+                                                        onLongClickLabel = "More actions",
+                                                        onClick = {
+                                                            if (canPlayFromHere) onSeekToMs(line.startMs)
+                                                        },
+                                                        onLongClick = { openMenu(null) }
+                                                    )
+                                                } else {
+                                                    Modifier
+                                                }
+                                            )
+                                            .then(rowSemantics)
+                                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                                    ) {
+                                        if (showSpeaker) {
+                                            Text(
+                                                text = line.speaker!!,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.padding(bottom = 2.dp)
+                                            )
+                                        }
+
+                                        if (line.words.isNotEmpty()) {
+                                            val annotated = buildAnnotatedString {
+                                                line.words.forEachIndexed { wIdx, w ->
+                                                    if (wIdx > 0 && !w.text.startsWith(" ")) {
+                                                        append(" ")
                                                     }
-                                                )
-                                            } else {
-                                                Modifier
+                                                    val wStartMs = (w.start * 1000.0).toLong()
+                                                    val wEndMs = (w.end * 1000.0).toLong()
+                                                    // Only the active line reads the position (S4).
+                                                    val isSpoken = isActive && posState.value in wStartMs..wEndMs
+                                                    val isMuted = muteWindows.any { m ->
+                                                        m.enabled && wEndMs >= m.startMs && wStartMs <= m.endMs
+                                                    }
+                                                    val style = when {
+                                                        isMuted -> SpanStyle(
+                                                            color = MaterialTheme.colorScheme.error,
+                                                            textDecoration = TextDecoration.LineThrough,
+                                                            fontWeight = FontWeight.Medium
+                                                        )
+                                                        isSpoken -> SpanStyle(
+                                                            color = MaterialTheme.colorScheme.primary,
+                                                            fontWeight = FontWeight.Bold
+                                                        )
+                                                        else -> SpanStyle()
+                                                    }
+                                                    withStyle(style) {
+                                                        append(w.text)
+                                                    }
+                                                }
                                             }
-                                        )
-                                        .then(rowSemantics)
-                                        .padding(horizontal = 12.dp, vertical = 10.dp)
-                                ) {
-                                    if (showSpeaker) {
-                                        Text(
-                                            text = line.speaker!!,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.padding(bottom = 2.dp)
-                                        )
+                                            Text(
+                                                text = annotated,
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                                                onTextLayout = { textLayoutResult = it },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .pointerInput(wordRanges, line.startMs, idx) {
+                                                        detectTapGestures(
+                                                            onTap = {
+                                                                if (canPlayFromHere) onSeekToMs(line.startMs)
+                                                            },
+                                                            onLongPress = { offset ->
+                                                                val layout = textLayoutResult
+                                                                val charIdx = layout?.getOffsetForPosition(offset)
+                                                                val hitWord = if (charIdx != null) {
+                                                                    wordRanges.firstOrNull { (range, _) -> charIdx in range }?.second
+                                                                        ?: wordRanges.minByOrNull { (range, _) ->
+                                                                            kotlin.math.min(
+                                                                                kotlin.math.abs(charIdx - range.first),
+                                                                                kotlin.math.abs(charIdx - range.last)
+                                                                            )
+                                                                        }?.second
+                                                                } else null
+                                                                val target = (hitWord ?: firstMutableWord)
+                                                                    ?.takeIf { it.text.trim().isNotEmpty() }
+                                                                openMenu(target)
+                                                            }
+                                                        )
+                                                    }
+                                            )
+                                        } else {
+                                            Text(
+                                                text = line.text,
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                                                color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
                                     }
 
-                                    if (line.words.isNotEmpty()) {
-                                        val annotated = buildAnnotatedString {
-                                            line.words.forEachIndexed { wIdx, w ->
-                                                if (wIdx > 0 && !w.text.startsWith(" ")) {
-                                                    append(" ")
-                                                }
-                                                val wStartMs = (w.start * 1000.0).toLong()
-                                                val wEndMs = (w.end * 1000.0).toLong()
-                                                val isSpoken = isActive && posState.value in wStartMs..wEndMs
-                                                val isMuted = muteWindows.any { m ->
-                                                    m.enabled && wEndMs >= m.startMs && wStartMs <= m.endMs
-                                                }
-                                                val style = when {
-                                                    isMuted -> SpanStyle(
-                                                        color = MaterialTheme.colorScheme.error,
-                                                        textDecoration = TextDecoration.LineThrough,
-                                                        fontWeight = FontWeight.Medium
-                                                    )
-                                                    isSpoken -> SpanStyle(
-                                                        color = MaterialTheme.colorScheme.primary,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                    else -> SpanStyle()
-                                                }
-                                                withStyle(style) {
-                                                    append(w.text)
-                                                }
-                                            }
+                                    // T3: long-press actions (copy replaces text selection).
+                                    DropdownMenu(
+                                        expanded = menuLineIdx == idx,
+                                        onDismissRequest = {
+                                            menuLineIdx = null
+                                            menuWord = null
                                         }
-                                        Text(
-                                            text = annotated,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-                                            onTextLayout = { textLayoutResult = it },
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .pointerInput(wordRanges, line.startMs, idx) {
-                                                    detectTapGestures(
-                                                        onTap = {
-                                                            if (line.startMs > 0L || idx == 0) {
-                                                                onSeekToMs(line.startMs)
-                                                            }
-                                                        },
-                                                        onLongPress = { offset ->
-                                                            val layout = textLayoutResult
-                                                            val charIdx = layout?.getOffsetForPosition(offset)
-                                                            val hitWord = if (charIdx != null) {
-                                                                wordRanges.firstOrNull { (range, _) -> charIdx in range }?.second
-                                                                    ?: wordRanges.minByOrNull { (range, _) ->
-                                                                        kotlin.math.min(
-                                                                            kotlin.math.abs(charIdx - range.first),
-                                                                            kotlin.math.abs(charIdx - range.last)
-                                                                        )
-                                                                    }?.second
-                                                            } else null
-                                                            val target = (hitWord ?: firstMutableWord)
-                                                                ?.takeIf { it.text.trim().isNotEmpty() }
-                                                            if (target != null) {
-                                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                                onMuteWord(target)
-                                                            }
-                                                        }
-                                                    )
+                                    ) {
+                                        if (canPlayFromHere) {
+                                            DropdownMenuItem(
+                                                leadingIcon = { Icon(Icons.Rounded.PlayArrow, contentDescription = null) },
+                                                text = { Text("Play from here") },
+                                                onClick = {
+                                                    menuLineIdx = null
+                                                    onSeekToMs(line.startMs)
                                                 }
+                                            )
+                                        }
+                                        DropdownMenuItem(
+                                            leadingIcon = { Icon(Icons.Rounded.ContentCopy, contentDescription = null) },
+                                            text = { Text("Copy text") },
+                                            onClick = {
+                                                menuLineIdx = null
+                                                copyText(line.text)
+                                            }
                                         )
-                                    } else {
-                                        Text(
-                                            text = line.text,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
-                                            color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface
-                                        )
+                                        val word = menuWord
+                                        if (word != null && cleanMuteWord(word.text).isNotEmpty()) {
+                                            val muted = isWordMuted(word)
+                                            DropdownMenuItem(
+                                                leadingIcon = {
+                                                    Icon(
+                                                        imageVector = if (muted) Icons.AutoMirrored.Rounded.VolumeUp
+                                                        else Icons.AutoMirrored.Rounded.VolumeOff,
+                                                        contentDescription = null
+                                                    )
+                                                },
+                                                text = {
+                                                    Text(
+                                                        if (muted) "Unmute \"${cleanMuteWord(word.text)}\""
+                                                        else "Mute \"${cleanMuteWord(word.text)}\""
+                                                    )
+                                                },
+                                                onClick = {
+                                                    menuLineIdx = null
+                                                    menuWord = null
+                                                    onMuteWord(word)
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -626,5 +792,110 @@ fun TranscriptOverlay(
                 }
             }
         }
+    }
+}
+
+/** The label above a sponsor block in the transcript, with "Play anyway" when it will be skipped (T3). */
+@Composable
+private fun SponsorBlockHeader(
+    ad: AdWindow,
+    showPlayAnyway: Boolean,
+    onPlayAnyway: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .padding(start = 12.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.SkipNext,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        val seconds = ((ad.endMs - ad.startMs) / 1000L).coerceAtLeast(0L)
+        Text(
+            text = "${formatAdDisplayLabel(ad)} · ${seconds}s",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        if (showPlayAnyway) {
+            TextButton(
+                onClick = onPlayAnyway,
+                modifier = Modifier.heightIn(min = 48.dp)
+            ) {
+                Text("Play anyway")
+            }
+        }
+    }
+}
+
+/**
+ * The "Mute word?" / "Unmute word?" confirmation shared by the player and the episode page (item 5).
+ * Unmute turns off this word's mute segment(s) in the episode, as the player always did; the word
+ * stays in the mute list.  Mute adds the word to the list.
+ */
+@Composable
+fun WordMuteDialog(
+    word: Word,
+    muteSegments: List<MuteSegmentEntity>,
+    onUnmuteSegments: (List<Long>) -> Unit,
+    onAddMuteWord: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val cleanWord = cleanMuteWord(word.text)
+    val mutedIds = remember(word, muteSegments) { mutedSegmentIdsForWord(word, muteSegments) }
+    if (cleanWord.isEmpty() && mutedIds.isEmpty()) {
+        LaunchedEffect(Unit) { onDismiss() }
+        return
+    }
+    if (mutedIds.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Unmute \"$cleanWord\" here?") },
+            text = { Text("This spot plays with sound. \"$cleanWord\" stays on your mute list.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onUnmuteSegments(mutedIds)
+                    }
+                ) {
+                    Text("Unmute")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+            }
+        )
+    } else {
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text("Mute \"$cleanWord\"?") },
+            text = { Text("Add \"$cleanWord\" to your mute list. It's muted in every episode.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onAddMuteWord(cleanWord)
+                    }
+                ) {
+                    Text("Mute word")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onDismiss) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }

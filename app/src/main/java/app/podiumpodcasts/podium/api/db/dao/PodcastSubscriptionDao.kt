@@ -87,6 +87,9 @@ interface PodcastSubscriptionDao {
         contentLength: String
     )
 
+    @Query("UPDATE podcastSubscription SET extrasVersion=:version WHERE origin=:origin")
+    suspend fun setExtrasVersion(origin: String, version: Int)
+
     @Query("UPDATE podcastSubscription SET lastUpdate=:timestamp WHERE origin=:origin")
     suspend fun logUpdate(origin: String, timestamp: Long = System.currentTimeMillis())
 

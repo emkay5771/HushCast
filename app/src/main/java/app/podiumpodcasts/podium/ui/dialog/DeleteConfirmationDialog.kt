@@ -10,14 +10,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.res.stringResource
-import app.podiumpodcasts.podium.R
 
+/**
+ * D5: an action-specific confirmation ("Delete download?" with Delete / Cancel), never
+ * "Are you sure? / Yes / Abort".  Callers name the action in [title] and, when it isn't a plain
+ * delete, in [confirmLabel].
+ */
 @Composable
 fun DeleteConfirmationDialog(
     onDismiss: () -> Unit,
     itemName: String,
     additionalText: String = "",
+    title: String = "Delete?",
+    confirmLabel: String = "Delete",
+    dismissLabel: String = "Cancel",
     onConfirm: () -> Unit
 ) {
     AlertDialog(
@@ -27,19 +33,14 @@ fun DeleteConfirmationDialog(
         icon = {
             Icon(
                 Icons.Rounded.Warning,
-                contentDescription = stringResource(R.string.common_confirmation)
+                contentDescription = null
             )
         },
         title = {
-            Text(stringResource(R.string.common_are_you_sure))
+            Text(title)
         },
         text = {
-            Text(
-                text = stringResource(
-                    R.string.dialog_delete_confirmation_text,
-                    itemName
-                ) + " $additionalText"
-            )
+            Text(text = deleteConfirmationBody(itemName, additionalText))
         },
         dismissButton = {
             TextButton(
@@ -50,7 +51,7 @@ fun DeleteConfirmationDialog(
                     contentColor = MaterialTheme.colorScheme.onErrorContainer
                 )
             ) {
-                Text(stringResource(R.string.common_action_abort))
+                Text(dismissLabel)
             }
         },
         containerColor = MaterialTheme.colorScheme.errorContainer,
@@ -68,8 +69,16 @@ fun DeleteConfirmationDialog(
                     contentColor = MaterialTheme.colorScheme.onError
                 )
             ) {
-                Text(stringResource(R.string.common_action_yes))
+                Text(confirmLabel)
             }
         }
     )
+}
+
+/** "“Name” will be deleted. <extra>", or just the extra text when there's no name. */
+fun deleteConfirmationBody(itemName: String, additionalText: String): String {
+    val name = itemName.trim()
+    val extra = additionalText.trim()
+    val lead = if (name.isNotEmpty()) "“$name” will be deleted." else ""
+    return listOf(lead, extra).filter { it.isNotEmpty() }.joinToString(" ")
 }

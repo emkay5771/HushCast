@@ -1,7 +1,6 @@
 package app.hushcast.automute.engine
 
 import android.content.Context
-import android.os.Build
 import android.os.PowerManager
 import android.os.Process
 import kotlinx.coroutines.CoroutineDispatcher
@@ -32,15 +31,8 @@ object CpuTopology {
 
     fun performanceCoreCount(): Int = cachedPerformanceCores
 
-    fun recommendedThreads(context: Context): Int {
-        val base = performanceCoreCount()
-        if (Build.VERSION.SDK_INT >= 30) {
-            val pm = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
-            val headroom = runCatching { pm?.getThermalHeadroom(10) ?: 0f }.getOrDefault(0f)
-            if (headroom >= 0.85f) return max(1, base / 2)
-        }
-        return if (isThermallyThrottled(context)) max(1, base / 2) else base
-    }
+    /** Threads for analysis right now (heat and playback); see [AnalysisThrottle]. */
+    fun recommendedThreads(context: Context): Int = AnalysisThrottle.threads(context)
 
     private fun detectPerformanceCores(): Int {
         val total = Runtime.getRuntime().availableProcessors()

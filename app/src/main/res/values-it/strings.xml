@@ -162,6 +162,9 @@
     <string name="route_podcast_settings">Impostazioni podcast</string>
     <string name="route_restore">Ripristina da backup</string>
     <string name="route_restore_action_restart_app">Riavvia app</string>
+    <string name="route_restore_action_restore">Ripristina</string>
+    <string name="route_restore_confirm_title">Sostituire i tuoi dati?</string>
+    <string name="common_action_cancel">Annulla</string>
     <string name="route_restore_confirmation">Il ripristino da un file di backup sovrascriverà il database corrente. Tutti i dati andranno persi.</string>
     <string name="route_restore_invalid_backup_file">File di backup non valido</string>
     <string name="route_restore_invalid_backup_file_text">Seleziona un file di backup %1$s valido.</string>

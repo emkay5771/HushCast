@@ -28,6 +28,7 @@ import app.podiumpodcasts.podium.api.chapters.ResolvedChapter
 import app.podiumpodcasts.podium.api.db.AppDatabase
 import app.podiumpodcasts.podium.api.db.model.ChapterSkipModel
 import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeBundle
+import app.podiumpodcasts.podium.api.db.model.transcriptCandidates
 import app.podiumpodcasts.podium.background.HushCastEngineBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -35,6 +36,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
@@ -48,6 +50,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.util.concurrent.TimeUnit
+import app.hushcast.automute.storage.loadResolvedMuteWindows
 
 data class TranscriptLineUi(
     val index: Int,
@@ -57,6 +60,25 @@ data class TranscriptLineUi(
     val text: String,
     val words: List<Word>
 )
+
+/**
+ * A value tagged with the episode it belongs to.  The episode page shares one
+ * [PlayerScreenViewModel], so right after it re-binds, the flows still hold the previous episode's
+ * data; screens compare [episodeId] and ignore anything that isn't theirs (item 2).
+ */
+data class EpisodeScoped<T>(val episodeId: String, val value: T) {
+    fun valueFor(id: String): T? = if (episodeId == id) value else null
+}
+
+/**
+ * Mute segments that cover [word] (in seconds) and are on.  "Unmute word" turns these off for
+ * the episode; the word stays in the mute list (item 5).
+ */
+fun mutedSegmentIdsForWord(word: Word, segments: List<MuteSegmentEntity>): List<Long> {
+    val wStartMs = (word.start * 1000.0).toLong()
+    val wEndMs = (word.end * 1000.0).toLong()
+    return segments.filter { m -> m.enabled && wEndMs >= m.startMs && wStartMs <= m.endMs }.map { it.id }
+}
 
 sealed interface TranscriptLoadState {
     data object Loading : TranscriptLoadState
@@ -89,12 +111,18 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
     private val _durationMs = MutableStateFlow(0L)
     private val _feedTranscriptRetry = MutableStateFlow(0)
 
+    /**
+     * Points every flow at [episodeId].  Cheap and idempotent, so screens call it during composition
+     * (before their first frame).  A duration of 1 ms or less means "unknown".
+     */
     fun bindEpisode(episodeId: String, durationMs: Long) {
+        val dur = durationMs.takeIf { it > 1L } ?: 0L
         if (_episodeId.value != episodeId) {
+            // Duration first, so chapters never resolve for the new episode with the old duration.
+            _durationMs.value = dur
             _episodeId.value = episodeId
-        }
-        if (durationMs > 0L && _durationMs.value != durationMs) {
-            _durationMs.value = durationMs
+        } else if (dur > 0L && _durationMs.value != dur) {
+            _durationMs.value = dur
         }
     }
 
@@ -111,16 +139,26 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val muteSegments: StateFlow<List<MuteSegmentEntity>> = _episodeId
+    val muteSegmentsScoped: StateFlow<EpisodeScoped<List<MuteSegmentEntity>>> = _episodeId
         .flatMapLatest { id ->
-            if (id.isBlank()) flowOf(emptyList()) else autoMuteDb.dao().observeMuteSegmentsByEpisode(id)
+            if (id.isBlank()) flowOf(EpisodeScoped(id, emptyList()))
+            else autoMuteDb.dao().observeMuteSegmentsByEpisode(id).map { EpisodeScoped(id, it) }
         }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EpisodeScoped("", emptyList()))
+
+    val muteSegments: StateFlow<List<MuteSegmentEntity>> = muteSegmentsScoped
+        .map { it.value }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    val adSegments: StateFlow<List<AdSegmentEntity>> = _episodeId
+    val adSegmentsScoped: StateFlow<EpisodeScoped<List<AdSegmentEntity>>> = _episodeId
         .flatMapLatest { id ->
-            if (id.isBlank()) flowOf(emptyList()) else autoMuteDb.dao().observeAdSegmentsByEpisode(id)
+            if (id.isBlank()) flowOf(EpisodeScoped(id, emptyList()))
+            else autoMuteDb.dao().observeAdSegmentsByEpisode(id).map { EpisodeScoped(id, it) }
         }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EpisodeScoped("", emptyList()))
+
+    val adSegments: StateFlow<List<AdSegmentEntity>> = adSegmentsScoped
+        .map { it.value }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val isFavorite: StateFlow<Boolean> = _episodeId
@@ -136,12 +174,16 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
-    val resolvedChapters: StateFlow<List<ResolvedChapter>> = combine(_episodeId, _durationMs) { id, dur ->
+    val resolvedChaptersScoped: StateFlow<EpisodeScoped<List<ResolvedChapter>>> = combine(_episodeId, _durationMs) { id, dur ->
         id to dur
     }.flatMapLatest { (id, dur) ->
-        if (id.isBlank()) flowOf(emptyList())
-        else EpisodeChapterHelper.observeResolvedChapters(appDb, autoMuteDb, id, dur)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        if (id.isBlank()) flowOf(EpisodeScoped(id, emptyList()))
+        else EpisodeChapterHelper.observeResolvedChapters(appDb, autoMuteDb, id, dur).map { EpisodeScoped(id, it) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EpisodeScoped("", emptyList()))
+
+    val resolvedChapters: StateFlow<List<ResolvedChapter>> = resolvedChaptersScoped
+        .map { it.value }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val episodeSummary: StateFlow<String?> = _episodeId
         .flatMapLatest { id ->
@@ -149,37 +191,49 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    val wordIndexBlob: StateFlow<WordIndexBlob?> = combine(_episodeId, analysisStatus) { id, status ->
+    private val wordIndexBlobScoped: StateFlow<EpisodeScoped<WordIndexBlob?>> = combine(_episodeId, analysisStatus) { id, status ->
         id to status?.fileSha256
     }.flatMapLatest { (id, _) ->
-        if (id.isBlank()) flowOf(null)
+        if (id.isBlank()) flowOf(EpisodeScoped<WordIndexBlob?>(id, null))
         else flowOf(id).map { epId ->
             withContext(Dispatchers.Default) {
                 val idx = autoMuteDb.dao().getWordIndexByEpisode(epId)
-                idx?.let { runCatching { BlobCodec.decompress(it.compressedBlob) }.getOrNull() }
+                EpisodeScoped<WordIndexBlob?>(epId, idx?.let { runCatching { BlobCodec.decompress(it.compressedBlob) }.getOrNull() })
             }
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EpisodeScoped("", null))
+
+    val wordIndexBlob: StateFlow<WordIndexBlob?> = wordIndexBlobScoped
+        .map { it.value }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     private val _publisherTranscript = MutableStateFlow<Pair<String, TranscriptLoadState>?>(null)
 
-    val transcriptState: StateFlow<TranscriptLoadState> = combine(
+    val transcriptStateScoped: StateFlow<EpisodeScoped<TranscriptLoadState>> = combine(
         _episodeId,
         episodeBundle,
         analysisStatus,
-        wordIndexBlob,
+        wordIndexBlobScoped,
         _publisherTranscript,
         _feedTranscriptRetry
     ) { arr ->
         val id = arr[0] as String
-        val bundle = arr[1] as PodcastEpisodeBundle?
-        val status = arr[2] as EpisodeAnalysisStatusEntity?
-        val blob = arr[3] as WordIndexBlob?
+        val bundleRaw = arr[1] as PodcastEpisodeBundle?
+        val statusRaw = arr[2] as EpisodeAnalysisStatusEntity?
+        @Suppress("UNCHECKED_CAST")
+        val blobScoped = arr[3] as EpisodeScoped<WordIndexBlob?>
         @Suppress("UNCHECKED_CAST")
         val pubPair = arr[4] as Pair<String, TranscriptLoadState>?
 
-        if (id.isBlank()) return@combine TranscriptLoadState.Empty
-        if (blob != null && (blob.segments.isNotEmpty() || blob.words.isNotEmpty())) {
+        if (id.isBlank()) return@combine EpisodeScoped<TranscriptLoadState>(id, TranscriptLoadState.Empty)
+        // Right after a re-bind the inner flows can still hold the previous episode's data (item 2).
+        if (blobScoped.episodeId != id || (bundleRaw != null && bundleRaw.episode.id != id)) {
+            return@combine EpisodeScoped<TranscriptLoadState>(id, TranscriptLoadState.Loading)
+        }
+        val bundle = bundleRaw
+        val status = statusRaw?.takeIf { it.episodeId == id }
+        val blob = blobScoped.value
+        val state: TranscriptLoadState = if (blob != null && (blob.segments.isNotEmpty() || blob.words.isNotEmpty())) {
             val lines = buildLinesFromWordIndex(blob)
             if (lines.isEmpty()) TranscriptLoadState.Empty
             else TranscriptLoadState.Ready(
@@ -201,8 +255,13 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
                 TranscriptLoadState.NotProcessed(downloaded)
             }
         }
+        EpisodeScoped<TranscriptLoadState>(id, state)
     }
         .flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), EpisodeScoped("", TranscriptLoadState.Loading))
+
+    val transcriptState: StateFlow<TranscriptLoadState> = transcriptStateScoped
+        .map { it.value }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TranscriptLoadState.Loading)
 
     init {
@@ -210,17 +269,24 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
             combine(_episodeId, episodeBundle, wordIndexBlob, _feedTranscriptRetry) { id, bundle, blob, retry ->
                 TranscriptFetchKey(
                     id = id,
-                    url = bundle?.episode?.transcriptUrl.orEmpty(),
-                    type = bundle?.episode?.transcriptType.orEmpty(),
+                    // Feed order ranked JSON > VTT > SRT > HTML; alternates are tried if the best one fails (T5).
+                    candidates = bundle?.episode?.transcriptCandidates().orEmpty(),
                     hasBlob = blob != null,
                     retry = retry
                 )
             }
                 .distinctUntilChanged()
-                .collect { key ->
-                    if (key.id.isNotBlank() && !key.hasBlob && key.url.isNotBlank()) {
+                // collectLatest: a new episode (or retry) cancels the fetch still running for the old one.
+                .collectLatest { key ->
+                    if (key.id.isNotBlank() && !key.hasBlob && key.candidates.isNotEmpty()) {
                         _publisherTranscript.value = key.id to TranscriptLoadState.Loading
-                        val loaded = fetchAndParsePublisherTranscript(key.url, key.type)
+                        var loaded: TranscriptLoadState = TranscriptLoadState.Empty
+                        for ((url, type) in key.candidates) {
+                            val attempt = fetchAndParsePublisherTranscript(url, type)
+                            // Keep the first error to show if nothing works; an empty file is not an error.
+                            if (attempt is TranscriptLoadState.Ready) { loaded = attempt; break }
+                            if (attempt is TranscriptLoadState.Error && loaded !is TranscriptLoadState.Error) loaded = attempt
+                        }
                         _publisherTranscript.value = key.id to loaded
                     }
                 }
@@ -229,8 +295,7 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
 
     private data class TranscriptFetchKey(
         val id: String,
-        val url: String,
-        val type: String,
+        val candidates: List<Pair<String, String>>,
         val hasBlob: Boolean,
         val retry: Int
     )
@@ -331,17 +396,21 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
                 )
             )
         }
-        return segs.mapIndexed { idx, seg ->
-            val segWords = blob.words.filter { w ->
-                w.start >= seg.start - 0.05 && w.end <= seg.end + 0.05
-            }
+        // R3: group sentences into paragraphs and keep the worker's speaker IDs, as the 1.0.27
+        // transcript card did.  A paragraph ends when the speaker changes, after a long pause, or
+        // at a sentence end once it has grown long enough.
+        val paragraphs = groupIntoParagraphs(segs)
+        return paragraphs.mapIndexed { idx, group ->
+            val start = group.first().start
+            val end = group.last().end
+            val paraWords = blob.words.filter { w -> w.start >= start - 0.05 && w.end <= end + 0.05 }
             TranscriptLineUi(
                 index = idx,
-                startMs = (seg.start * 1000.0).toLong().coerceAtLeast(0L),
-                endMs = (seg.end * 1000.0).toLong().coerceAtLeast(0L),
-                speaker = null,
-                text = seg.text.trim(),
-                words = segWords
+                startMs = (start * 1000.0).toLong().coerceAtLeast(0L),
+                endMs = (end * 1000.0).toLong().coerceAtLeast(0L),
+                speaker = group.first().speaker?.let { "Speaker ${it + 1}" },
+                text = group.joinToString(" ") { it.text.trim() }.trim(),
+                words = paraWords
             )
         }
     }
@@ -436,13 +505,15 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
                     pattern = cleaned,
                     isRegex = false,
                     matchPlurals = true,
-                    actionMode = actionMode.name,
+                    // Follow the global mute mode, so changing it later applies to this word too.
+                    actionMode = app.hushcast.automute.storage.DEFAULT_RULE_MODE,
                     enabled = true,
                     category = "Custom"
                 )
             )
             if (HushCastEngineBridge.currentEpisodeId == epId) {
-                val sha = analysisStatus.value?.fileSha256
+                // Read the status fresh: this view model is shared, so analysisStatus may be stale.
+                val sha = autoMuteDb.dao().getStatus(epId)?.fileSha256
                 if (!sha.isNullOrBlank()) {
                     val precision = app.hushcast.automute.engine.HushCastPrefs.getMuteTimingPrecision(getApplication())
                     val rules = autoMuteDb.dao().getEnabledRules().map { it.toDomain() }
@@ -455,17 +526,16 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
                             postPadMs = precision.postPadMs,
                             compiled = compiled
                         )
-                    val updated = autoMuteDb.dao().getMuteSegments(sha).map {
-                        MuteWindow(
-                            startMs = it.startMs,
-                            endMs = it.endMs,
-                            word = it.word,
-                            ruleId = it.ruleId,
-                            actionMode = runCatching { MuteActionMode.valueOf(it.actionMode) }
-                                .getOrDefault(HushCastEngineBridge.defaultActionMode),
-                            enabled = it.enabled
-                        )
-                    }
+                    // The new word may fall in SRT/VTT cues whose word times are only estimates.
+                    episodeBundle.value?.episode?.takeIf { it.id == epId }
+                        ?.craftDownloadFile(getApplication())?.takeIf { it.exists() }
+                        ?.let { file ->
+                            app.hushcast.automute.worker.EpisodeAnalysisWorker.enqueueRealignIfNeeded(
+                                getApplication(), epId, file.absolutePath, actionMode
+                            )
+                        }
+                    // Same resolver as PlaybackService, so rules that follow the global mode do here too.
+                    val updated = autoMuteDb.dao().loadResolvedMuteWindows(sha, HushCastEngineBridge.defaultActionMode)
                     HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
                 }
             }
@@ -473,24 +543,19 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    fun toggleMuteSegment(segmentId: Long, enabled: Boolean) {
+    fun toggleMuteSegment(segmentId: Long, enabled: Boolean) = setMuteSegmentsEnabled(listOf(segmentId), enabled)
+
+    /** Turns mute segments on or off for this episode only (the word stays in the mute list). */
+    fun setMuteSegmentsEnabled(segmentIds: List<Long>, enabled: Boolean) {
+        if (segmentIds.isEmpty()) return
         val epId = _episodeId.value
         viewModelScope.launch(Dispatchers.IO) {
-            autoMuteDb.dao().setMuteSegmentEnabled(segmentId, enabled)
+            segmentIds.forEach { autoMuteDb.dao().setMuteSegmentEnabled(it, enabled) }
             if (HushCastEngineBridge.currentEpisodeId == epId) {
-                val sha = analysisStatus.value?.fileSha256
+                val sha = autoMuteDb.dao().getStatus(epId)?.fileSha256
                 if (!sha.isNullOrBlank()) {
-                    val updated = autoMuteDb.dao().getMuteSegments(sha).map {
-                        MuteWindow(
-                            startMs = it.startMs,
-                            endMs = it.endMs,
-                            word = it.word,
-                            ruleId = it.ruleId,
-                            actionMode = runCatching { MuteActionMode.valueOf(it.actionMode) }
-                                .getOrDefault(HushCastEngineBridge.defaultActionMode),
-                            enabled = it.enabled
-                        )
-                    }
+                    // Same resolver as PlaybackService, so rules that follow the global mode do here too.
+                    val updated = autoMuteDb.dao().loadResolvedMuteWindows(sha, HushCastEngineBridge.defaultActionMode)
                     HushCastEngineBridge.autoMuteProcessor.updateWindows(updated)
                 }
             }
@@ -536,4 +601,30 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
             }
         }
     }
+}
+
+/** Sentence segments grouped into transcript paragraphs (R3); mirrors the 1.0.27 card's rules. */
+internal fun groupIntoParagraphs(segments: List<Segment>): List<List<Segment>> {
+    val out = ArrayList<List<Segment>>()
+    val cur = ArrayList<Segment>()
+    var chars = 0
+    for (seg in segments) {
+        if (cur.isNotEmpty()) {
+            val prev = cur.last()
+            val speakerChanged = seg.speaker != prev.speaker
+            val longPause = seg.start - prev.end >= 1.5
+            val durationSec = prev.end - cur.first().start
+            val sentenceEnd = prev.text.trimEnd().let { t -> t.endsWith(".") || t.endsWith("?") || t.endsWith("!") }
+            val longEnough = chars >= 260 || cur.size >= 3 || durationSec >= 12.0
+            if (speakerChanged || longPause || (sentenceEnd && longEnough) || chars >= 500) {
+                out.add(cur.toList())
+                cur.clear()
+                chars = 0
+            }
+        }
+        cur.add(seg)
+        chars += seg.text.trim().length + 1
+    }
+    if (cur.isNotEmpty()) out.add(cur.toList())
+    return out
 }

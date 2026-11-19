@@ -311,7 +311,7 @@ object WordMatcher {
         return mergeOverlappingWindows(rawWindows)
     }
 
-    private fun mergeOverlappingWindows(windows: List<MuteWindow>): List<MuteWindow> {
+    internal fun mergeOverlappingWindows(windows: List<MuteWindow>): List<MuteWindow> {
         if (windows.isEmpty()) return emptyList()
         val sorted = windows.sortedBy { it.startMs }
         val merged = ArrayList<MuteWindow>(sorted.size)

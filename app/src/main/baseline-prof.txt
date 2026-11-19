@@ -1,0 +1,119 @@
+# S2: baseline profile for HushCast (human-readable ART profile rules).
+#
+# Installed by androidx.profileinstaller and compiled ahead of time on install, so the code below
+# doesn't start out interpreted.  Rules use wildcards on purpose: the app is Compose-heavy, and
+# most of the hot code is in generated lambda classes (Foo**) whose names change between builds.
+#
+#   H = hot, S = run during startup, P = run after startup.
+#   HSPL<class>;->**(**)**   every method of that class
+#   HSPL<class>**->**(**)**  the class and its lambda/inner classes
+#   L<package>/**;           preload every class in the package
+#
+# Extend with a generated profile (Macrobenchmark BaselineProfileRule) when there's a
+# benchmark module; generated rules can be appended below these.
+
+# ---------------------------------------------------------------------------------------------
+# App startup: application, activity, splash, settings, database, theme, navigation
+# ---------------------------------------------------------------------------------------------
+HSPLapp/podiumpodcasts/podium/App**->**(**)**
+HSPLapp/podiumpodcasts/podium/AppActivity**->**(**)**
+HSPLapp/podiumpodcasts/podium/PodiumAppKt**->**(**)**
+HSPLapp/podiumpodcasts/podium/SettingsRepository**->**(**)**
+HSPLapp/podiumpodcasts/podium/SettingsKeys**->**(**)**
+HSPLapp/podiumpodcasts/podium/PodcastGridOrganization**->**(**)**
+HSPLapp/podiumpodcasts/podium/PodcastGridState**->**(**)**
+HSPLapp/podiumpodcasts/podium/PodcastFolder**->**(**)**
+HSPLapp/podiumpodcasts/podium/manager/DatabaseManager**->**(**)**
+HSPLapp/podiumpodcasts/podium/api/db/AppDatabase**->**(**)**
+HSPLapp/podiumpodcasts/podium/api/db/dao/**->**(**)**
+HSPLapp/podiumpodcasts/podium/api/db/model/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/MainKt**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/DetailPaneKey**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/DeepLink**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/navigation/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/theme/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/helper/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/component/common/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/vm/MainViewModel**->**(**)**
+Lapp/podiumpodcasts/podium/App;
+Lapp/podiumpodcasts/podium/AppActivity;
+Lapp/podiumpodcasts/podium/SettingsRepository;
+Lapp/podiumpodcasts/podium/PodcastGridOrganization;
+Lapp/podiumpodcasts/podium/api/db/**;
+Lapp/podiumpodcasts/podium/ui/navigation/**;
+Lapp/podiumpodcasts/podium/ui/theme/**;
+Lapp/podiumpodcasts/podium/ui/helper/**;
+
+# ---------------------------------------------------------------------------------------------
+# Home grid (the usual first screen): route, folder dialogs, cards, view models, artwork
+# ---------------------------------------------------------------------------------------------
+HSPLapp/podiumpodcasts/podium/ui/route/home/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/route/content/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/component/model/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/component/PodcastGridOptionsSheetKt**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/component/PodiumSnackbarHostKt**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/component/layout/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/dialog/ShimmerAsyncImage**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/vm/home/**->**(**)**
+HSPLapp/podiumpodcasts/podium/SubscriptionsLayout**->**(**)**
+HSPLapp/podiumpodcasts/podium/SubscriptionsSort**->**(**)**
+HSPLapp/podiumpodcasts/podium/SubscriptionsBadgeMode**->**(**)**
+Lapp/podiumpodcasts/podium/ui/route/home/**;
+Lapp/podiumpodcasts/podium/ui/component/model/**;
+Lapp/podiumpodcasts/podium/ui/vm/home/**;
+
+# Other tab roots
+HSPLapp/podiumpodcasts/podium/ui/route/library/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/route/discover/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/route/list/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/route/downloads/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/vm/library/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/vm/DownloadsViewModel**->**(**)**
+
+# Podcast page
+HSPLapp/podiumpodcasts/podium/ui/view/model/PodcastDetailViewKt**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/vm/PodcastDetailViewModel**->**(**)**
+
+# ---------------------------------------------------------------------------------------------
+# Mini player, player sheet and their view models
+# ---------------------------------------------------------------------------------------------
+HSPLapp/podiumpodcasts/podium/ui/component/media/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/dialog/bottomsheet/media/**->**(**)**
+HSPLapp/podiumpodcasts/podium/ui/vm/MediaPlayerViewModel**->**(**)**
+Lapp/podiumpodcasts/podium/ui/component/media/**;
+Lapp/podiumpodcasts/podium/ui/dialog/bottomsheet/media/**;
+Lapp/podiumpodcasts/podium/ui/vm/MediaPlayerViewModel;
+
+# ---------------------------------------------------------------------------------------------
+# Playback service and the Media3 session (connects on every start, in onStart)
+# ---------------------------------------------------------------------------------------------
+HSPLapp/podiumpodcasts/podium/background/PlaybackService**->**(**)**
+HSPLapp/podiumpodcasts/podium/background/MediaLibrarySessionCallback**->**(**)**
+HSPLapp/podiumpodcasts/podium/background/HushCastEngineBridge**->**(**)**
+Lapp/podiumpodcasts/podium/background/PlaybackService;
+Lapp/podiumpodcasts/podium/background/MediaLibrarySessionCallback;
+
+HSPLandroidx/media3/session/MediaController**->**(**)**
+HSPLandroidx/media3/session/MediaControllerImplBase**->**(**)**
+HSPLandroidx/media3/session/MediaBrowser**->**(**)**
+HSPLandroidx/media3/session/MediaSession**->**(**)**
+HSPLandroidx/media3/session/MediaSessionImpl**->**(**)**
+HSPLandroidx/media3/session/MediaLibraryService**->**(**)**
+HSPLandroidx/media3/session/MediaSessionService**->**(**)**
+HSPLandroidx/media3/session/MediaSessionStub**->**(**)**
+HSPLandroidx/media3/session/MediaControllerStub**->**(**)**
+HSPLandroidx/media3/session/SessionToken**->**(**)**
+HSPLandroidx/media3/session/ConnectionState**->**(**)**
+HSPLandroidx/media3/session/PlayerInfo**->**(**)**
+HSPLandroidx/media3/session/PlayerWrapper**->**(**)**
+HSPLandroidx/media3/session/SessionCommands**->**(**)**
+HSPLandroidx/media3/session/MediaNotification**->**(**)**
+HSPLandroidx/media3/session/DefaultMediaNotificationProvider**->**(**)**
+HSPLandroidx/media3/common/MediaItem**->**(**)**
+HSPLandroidx/media3/common/MediaMetadata**->**(**)**
+HSPLandroidx/media3/common/Player**->**(**)**
+HSPLandroidx/media3/common/Timeline**->**(**)**
+HSPLandroidx/media3/common/PlaybackParameters**->**(**)**
+HSPLandroidx/media3/common/util/**->**(**)**
+Landroidx/media3/session/**;
+Landroidx/media3/common/**;
