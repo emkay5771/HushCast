@@ -2,14 +2,7 @@
 
 ![License](https://img.shields.io/github/license/emkay5771/HushCast?style=for-the-badge) ![GitHub release (latest by date)](https://img.shields.io/github/v/release/emkay5771/HushCast?style=for-the-badge)
 
-**HushCast** is a privacy-first, open-source podcast app for **Android** that automatically skips sponsor reads and mutes or removes unwanted words—using AI that runs **right on your phone**, on your **home Mac/PC**, or on your own **free-tier cloud GPU**.
-
-<p align="center">
-  <img src="images/screenshots/02.png" width="200" alt="Podcast Detail" />
-  <img src="images/screenshots/03.png" width="200" alt="Full-Screen Player" />
-  <img src="images/screenshots/04.png" width="200" alt="Discover" />
-  <img src="images/screenshots/05.png" width="200" alt="Library" />
-</p>
+**HushCast** is a privacy-first, open-source podcast app for **Android** that automatically mutes or removes unwanted words and skips sponsor reads—using AI that runs **right on your phone**, on your **home Mac/PC**, or on your own **free-tier cloud GPU**.
 
 > [!NOTE]
 > **First-time setup on your phone:** After installing the APK, open **Settings → HushCast** to either download the on-device AI models over Wi-Fi **or** pair a Desktop/Cloud Companion Worker via QR code or local network discovery.
@@ -17,11 +10,6 @@
 ---
 
 ## 🌟 Why HushCast?
-
-### ⏭️ Skip Sponsor Reads Automatically—With a Safety Net
-- **Hands-free ad skipping**: HushCast detects host-read ads and sponsor segments and jumps right past them.
-- **One-tap Undo & indicator chime**: Optionally play a subtle chime when a sponsor is skipped, and tap **Undo** in the player if you ever want to hear a segment back.
-- **See what's coming**: Detected sponsor spans and muted words appear directly on the player scrubber and miniplayer progress bar, and collapse into neat pills in the transcript view.
 
 ### 🔇 Mute, Duck, Bleep, or Snip Out Any Word
 - **Five ways to handle matched words**:
@@ -31,6 +19,11 @@
   - **Bleep**: Plays a classic censor tone.
   - **Custom Sound Effect**: Pick any audio file on your phone to play instead.
 - **Presets & custom rules**: Built-in **Profanity** and **Explicit Content** presets, masked-word matching (`f***`, `s**t`), plurals, multi-word phrases, and custom rules.
+
+### ⏭️ Skip Sponsor Reads Automatically—With a Safety Net
+- **Hands-free ad skipping**: HushCast detects host-read ads and sponsor segments and jumps right past them.
+- **One-tap Undo & indicator chime**: Optionally play a subtle chime when a sponsor is skipped, and tap **Undo** in the player if you ever want to hear a segment back.
+- **See what's coming**: Detected sponsor spans and muted words appear directly on the player scrubber and miniplayer progress bar, and collapse into neat pills in the transcript view.
 
 ### 🎧 A Fast, Tactile Podcast Player
 - **Pocket Casts-style controls**: Compact floating miniplayer with queue count and blocked-content markers, plus a full-screen player with **Player**, **Transcript**, **Chapters**, and **Notes** tabs.
