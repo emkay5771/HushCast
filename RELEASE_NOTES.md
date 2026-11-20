@@ -1,3 +1,15 @@
+# HushCast v1.0.46-hushcast
+
+## What's New
+- **Default episode sort & season grouping** (Settings → Appearance → Podcast page):
+  - Set your **Default episode order** (newest or oldest first), **Group by season by default** for shows with seasons, and **Season order** (match episode order, newest season first, or oldest season first).
+  - Toggle **Serial show defaults** if you want your global defaults to apply to serial shows too.
+  - Toggle **Season order** directly in the podcast page's sort sheet whenever **Group by season** is active.
+- **Tidier Appearance settings**:
+  - **Navigation** (startup screen and bottom tabs) and **Podcast page** now live in their own subpages under **Layout & navigation**.
+
+---
+
 # HushCast v1.0.45-hushcast
 
 ## What's New
