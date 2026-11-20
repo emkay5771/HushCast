@@ -599,6 +599,9 @@ class GpuWorker:
                     existing_embeddings=existing_emb,
                     on_progress=_on_progress,
                     cancel_event=cancel_event,
+                    podcast_title=req.podcastTitle,
+                    podcast_origin=req.podcastOrigin,
+                    fingerprint_store=self.cache.fingerprints,
                 )
                 self.cache.save_reprocessed(
                     sha256=bundle.fileSha256,

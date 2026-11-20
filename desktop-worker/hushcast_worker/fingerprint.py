@@ -450,6 +450,26 @@ class FingerprintStore:
         if meta and meta.get("file"):
             (self.root / str(meta["file"])).unlink(missing_ok=True)
 
+    def get(self, file_sha256: str) -> Optional[EpisodeFingerprint]:
+        if not file_sha256:
+            return None
+        with self._lock:
+            self._refresh_index_locked()
+            meta = self._index.get(file_sha256)
+            if not meta or not meta.get("file"):
+                return None
+            fname = str(meta["file"])
+            podcast_key = str(meta.get("podcastKey") or "")
+        path = self.root / fname
+        try:
+            return EpisodeFingerprint.from_bytes(
+                path.read_bytes(),
+                file_sha256=file_sha256,
+                podcast_key=podcast_key,
+            )
+        except (OSError, ValueError, zlib.error):
+            return None
+
     def load_references(
         self,
         *,

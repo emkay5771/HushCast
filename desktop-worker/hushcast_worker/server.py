@@ -592,8 +592,15 @@ def create_app(
                                     "existing_embeddings": existing_emb,
                                     "on_progress": on_reprocess_progress,
                                 }
-                                if "cancel_event" in inspect.signature(backend.reprocess_bundle).parameters:
+                                rep_sig = inspect.signature(backend.reprocess_bundle).parameters
+                                if "cancel_event" in rep_sig:
                                     rep_kwargs["cancel_event"] = cancel_event
+                                if "podcast_title" in rep_sig:
+                                    rep_kwargs["podcast_title"] = req.podcastTitle
+                                if "podcast_origin" in rep_sig:
+                                    rep_kwargs["podcast_origin"] = req.podcastOrigin
+                                if "fingerprint_store" in rep_sig:
+                                    rep_kwargs["fingerprint_store"] = cache.fingerprints
                                 bundle, new_emb = await asyncio.to_thread(backend.reprocess_bundle, **rep_kwargs)
                             finally:
                                 jobs_in_thread.discard(job_id)

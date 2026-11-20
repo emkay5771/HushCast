@@ -1426,6 +1426,9 @@ class LocalMlBackend:
         existing_embeddings: Optional[object],
         on_progress: ProgressCallback,
         cancel_event: Optional[threading.Event] = None,
+        podcast_title: Optional[str] = None,
+        podcast_origin: Optional[str] = None,
+        fingerprint_store: Optional[FingerprintStore] = None,
     ) -> tuple[DesktopAnalysisBundle, Optional[object]]:
         import numpy as np
 
@@ -1452,12 +1455,13 @@ class LocalMlBackend:
                             words[i].end = words[i + 1].start
                     on_progress(JobState.TAGGING, 95, f"Aligned {n_aligned}/{len(words)} words")
         elif stage_upper == "ADS_AND_SUMMARY":
+            pcm_16k = np.zeros(0, dtype=np.float32)
             pcm_24k_mid = np.zeros(0, dtype=np.float32)
             pcm_24k_side: Optional[np.ndarray] = None
             duration_sec = existing_bundle.durationSec
             if audio_path is not None and audio_path.exists():
                 on_progress(JobState.EMBEDDING, 25, "Decoding audio for ad detection")
-                _, pcm_24k_mid, pcm_24k_side, duration_sec = decode_audio_streams(audio_path)
+                pcm_16k, pcm_24k_mid, pcm_24k_side, duration_sec = decode_audio_streams(audio_path)
             texts = [s.text for s in segments]
             if texts:
                 if emb_2d is None or getattr(emb_2d, "shape", (0,))[0] != len(texts):
@@ -1474,6 +1478,28 @@ class LocalMlBackend:
                 sess = self._get_ort_session()
                 probs = sess.run(None, {"emb": emb, "feats": feats})[0][0]
                 ad_segments = decode_ad_segments(probs, segments)
+
+                if fingerprint_store is not None:
+                    try:
+                        podcast_key = normalize_podcast_key(podcast_origin, podcast_title)
+                        fp = fingerprint_store.get(existing_bundle.fileSha256)
+                        if fp is None and len(pcm_16k) > 0:
+                            fp = compute_fingerprint(
+                                pcm_16k,
+                                file_sha256=existing_bundle.fileSha256,
+                                podcast_key=podcast_key,
+                            )
+                            fingerprint_store.save(fp)
+                        if fp is not None:
+                            refs = fingerprint_store.load_references(
+                                exclude_sha256=existing_bundle.fileSha256,
+                                podcast_key=fp.podcast_key or podcast_key,
+                            )
+                            fp_segments = find_repeated_segments(fp, refs)
+                            if fp_segments:
+                                ad_segments = merge_fingerprint_segments(ad_segments, fp_segments)
+                    except Exception:
+                        logger.warning("Reprocess fingerprinting failed for %s", existing_bundle.episodeId, exc_info=True)
 
                 chat_path = self.chat_model_path()
                 sum_mode = f"LLM ({chat_path.name})" if (chat_path and chat_path.exists()) else "Extractive summary"
