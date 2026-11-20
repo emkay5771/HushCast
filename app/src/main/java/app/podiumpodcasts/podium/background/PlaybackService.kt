@@ -905,7 +905,6 @@ class PlaybackService : MediaLibraryService() {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 HushCastEngineBridge.clearPendingUndo()
                 speedItemKey.value = SpeedItemKey(mediaItem?.getOrigin(), mediaItem?.getEpisodeId())
-                updatePlayState()
                 onEpisodeStarted(mediaItem)
                 mediaSession?.let { session ->
                     onUpdateNotification(session, session.player.playWhenReady)
@@ -918,31 +917,33 @@ class PlaybackService : MediaLibraryService() {
                 newPosition: Player.PositionInfo,
                 reason: Int
             ) {
-                if (reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION) {
-                    val prevItem = oldPosition.mediaItem
-                    if (prevItem != null && prevItem != newPosition.mediaItem) {
-                        val prevOrigin = prevItem.getOrigin()
-                        val prevEpisodeId = prevItem.getEpisodeId()
-                        val prevAudioUrl = prevItem.getAudioUrl()
-                        val prevPosSec = (oldPosition.positionMs / 1000L).toInt().coerceAtLeast(1)
-                        if (prevOrigin != null && prevEpisodeId != null && prevAudioUrl != null) {
-                            scope.launch(Dispatchers.IO) {
-                                db.withTransaction {
+                val prevItem = oldPosition.mediaItem
+                if (prevItem != null && prevItem != newPosition.mediaItem) {
+                    val prevOrigin = prevItem.getOrigin()
+                    val prevEpisodeId = prevItem.getEpisodeId()
+                    val prevAudioUrl = prevItem.getAudioUrl()
+                    val isAutoFinish = reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION
+                    val prevPosSec = (oldPosition.positionMs / 1000L).toInt().coerceAtLeast(1)
+                    if (prevOrigin != null && prevEpisodeId != null && prevAudioUrl != null && oldPosition.positionMs >= 1000L) {
+                        scope.launch(Dispatchers.IO) {
+                            db.withTransaction {
+                                if (isAutoFinish) {
                                     db.podcastEpisodePlayStates().savePlayed(prevEpisodeId, true)
-                                    db.podcastEpisodePlayStates().saveState(prevEpisodeId, prevPosSec)
-                                    db.syncActions().addPlayState(
-                                        origin = prevOrigin,
-                                        episodeId = prevEpisodeId,
-                                        audioUrl = prevAudioUrl,
-                                        duration = prevPosSec,
-                                        state = prevPosSec,
-                                        played = true
-                                    )
                                 }
+                                db.podcastEpisodePlayStates().saveState(prevEpisodeId, prevPosSec)
+                                db.syncActions().addPlayState(
+                                    origin = prevOrigin,
+                                    episodeId = prevEpisodeId,
+                                    audioUrl = prevAudioUrl,
+                                    duration = prevPosSec,
+                                    state = prevPosSec,
+                                    played = isAutoFinish
+                                )
                             }
                         }
                     }
-                } else if (reason == Player.DISCONTINUITY_REASON_SEEK ||
+                }
+                if (reason == Player.DISCONTINUITY_REASON_SEEK ||
                     reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT ||
                     reason == Player.DISCONTINUITY_REASON_AUTO_TRANSITION
                 ) {

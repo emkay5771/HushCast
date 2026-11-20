@@ -86,7 +86,9 @@ object WordMatcher {
      * again once after an update (see App).  2: words inside longer words, compounds, any
      * asterisk-masked word, "-ies" plurals, hyphenated words, names guarded ([WordForms]).
      */
-    const val MATCHER_VERSION = 2
+    const val MATCHER_VERSION = 3
+
+    private val SAFE_CONTRACTIONS = setOf("he'll", "he\u2019ll")
 
     private val MASKED_PROFANITY_MAP = mapOf(
         "f***" to "fuck",
@@ -107,6 +109,7 @@ object WordMatcher {
             .trimStart { !it.isLetterOrDigit() && it != '*' }
             .trimEnd { !it.isLetterOrDigit() && it != '*' }
         MASKED_PROFANITY_MAP[trimmed]?.let { return it }
+        if (trimmed in SAFE_CONTRACTIONS) return "he'll"
         return trimmed.replace("'", "").replace("\u2019", "")
     }
 
