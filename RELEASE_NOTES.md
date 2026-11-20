@@ -1,3 +1,12 @@
+# HushCast v1.0.48-hushcast
+
+## What's New
+- **Queue playback position saving**: Switching episodes in the queue now saves your playback position on the episode you left instead of overwriting or losing it.
+- **Word matching fix**: Excluded the contraction `"he'll"` from matching the `"hell"` profanity rule (existing analyzed episodes re-evaluate automatically).
+- **Modal & fast-reprocess fingerprinting**: Wired cross-episode fingerprinting into the Modal cloud worker and `ADS_AND_SUMMARY` reprocessing so recurring intros/outros/promos are detected without re-transcribing or re-decoding audio.
+
+---
+
 # HushCast v1.0.47-hushcast
 
 ## What's New
