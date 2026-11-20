@@ -124,14 +124,9 @@ class BuiltInFiltersTest {
 
     @Test
     fun `contraction he'll is not matched as hell`() {
-        val rules = BuiltInFilters.rulesFor(FilterSettings(profanity = ProfanityLevel.STRICT))
-        val compiled = WordMatcher.compile(rules)
-        val words = listOf(
-            Word(start = 0.0, end = 0.4, text = "he'll"),
-            Word(start = 0.5, end = 0.9, text = "he\u2019ll"),
-            Word(start = 1.0, end = 1.4, text = "hell")
+        assertEquals(
+            listOf("hell"),
+            muted("he'll he\u2019ll hell", FilterSettings(ProfanityLevel.STRICT))
         )
-        val matches = WordMatcher.matchWords(words, compiled)
-        assertEquals(listOf("hell"), matches.map { it.word })
     }
 }
