@@ -139,9 +139,17 @@ import app.podiumpodcasts.podium.ui.theme.rememberBaseColorScheme
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
+enum class AppearanceSettingsSection(val title: String) {
+    HUB("Appearance"),
+    NAVIGATION("Navigation"),
+    PODCAST_PAGE("Podcast page")
+}
+
 @kotlinx.parcelize.Parcelize
 @Serializable
-class SettingsAppearanceKey : SettingsPaneKey()
+data class SettingsAppearanceKey(
+    val section: AppearanceSettingsSection = AppearanceSettingsSection.HUB
+) : SettingsPaneKey()
 
 /** What the color sheet edits: a new custom seed color, or style/contrast of the current palette. */
 private enum class ColorSheetMode { CUSTOM, FINE_TUNE }
@@ -149,7 +157,9 @@ private enum class ColorSheetMode { CUSTOM, FINE_TUNE }
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsAppearancePane(
-    navigationIcon: @Composable () -> Unit
+    section: AppearanceSettingsSection = AppearanceSettingsSection.HUB,
+    navigationIcon: @Composable () -> Unit,
+    onNavigate: (SettingsPaneKey) -> Unit = {}
 ) {
     val scope = rememberCoroutineScope()
 
@@ -169,6 +179,9 @@ fun SettingsAppearancePane(
     val blurAvailable = rememberCrossWindowBlurEnabled()
     val bottomBarRaw by appearance.bottomBarItemsRaw.collectAsState("HOME,DISCOVER,LIBRARY")
     val enabledNavItems = NavBarItems.parseList(bottomBarRaw)
+    val episodeListDefaults by appearance.episodeListDefaults.collectAsState(
+        app.podiumpodcasts.podium.EpisodeListDefaults()
+    )
 
     val isDark = LocalDarkTheme.current
     var colorSheet by remember { mutableStateOf<ColorSheetMode?>(null) }
@@ -178,7 +191,13 @@ fun SettingsAppearancePane(
             CenterAlignedTopAppBar(
                 navigationIcon = navigationIcon,
                 title = {
-                    Text(stringResource(R.string.route_settings_appearance))
+                    Text(
+                        if (section == AppearanceSettingsSection.HUB) {
+                            stringResource(R.string.route_settings_appearance)
+                        } else {
+                            section.title
+                        }
+                    )
                 }
             )
         }
@@ -190,6 +209,8 @@ fun SettingsAppearancePane(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
         ) {
+            when (section) {
+                AppearanceSettingsSection.HUB -> {
             // Preview + mode.  Laid out as in the R20 wireframe: no header above these two.
             settingsGroup(key = "preview", spaceAbove = 0.dp) {
                 row { pos ->
@@ -306,20 +327,58 @@ fun SettingsAppearancePane(
                 }
             }
 
-            settingsGroup(header = "Navigation", key = "navigation") {
+            settingsGroup(header = "Layout & navigation", key = "more") {
                 row { pos ->
-                    StartupScreenRow(position = pos)
+                    SettingsListItem(
+                        icon = { Icon(Icons.Rounded.Start, contentDescription = null) },
+                        label = "Navigation",
+                        description = "Startup screen and ${enabledNavItems.size} bottom tabs",
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = { onNavigate(SettingsAppearanceKey(AppearanceSettingsSection.NAVIGATION)) }
+                    )
+                }
+                row { pos ->
+                    val orderLabel = if (episodeListDefaults.order == app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder.ASCENDING) {
+                        "Oldest first"
+                    } else {
+                        "Newest first"
+                    }
+                    val summary = buildList {
+                        add(orderLabel)
+                        if (episodeListDefaults.groupBySeason) add("Group by season")
+                    }.joinToString(" · ")
+                    SettingsListItem(
+                        icon = { Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = null) },
+                        label = "Podcast page",
+                        description = summary,
+                        index = pos.index,
+                        count = pos.count,
+                        onClick = { onNavigate(SettingsAppearanceKey(AppearanceSettingsSection.PODCAST_PAGE)) }
+                    )
                 }
             }
-
-            bottomNavigationGroup(
-                enabledItems = enabledNavItems,
-                onChange = { items ->
-                    scope.launch { appearance.setBottomBarItemsRaw(NavBarItems.serializeList(items)) }
                 }
-            )
 
-            podcastPageGroup()
+                AppearanceSettingsSection.NAVIGATION -> {
+                    settingsGroup(header = "Startup", key = "navigation", spaceAbove = 0.dp) {
+                        row { pos ->
+                            StartupScreenRow(position = pos)
+                        }
+                    }
+
+                    bottomNavigationGroup(
+                        enabledItems = enabledNavItems,
+                        onChange = { items ->
+                            scope.launch { appearance.setBottomBarItemsRaw(NavBarItems.serializeList(items)) }
+                        }
+                    )
+                }
+
+                AppearanceSettingsSection.PODCAST_PAGE -> {
+                    podcastPageGroup(spaceAbove = 0.dp)
+                }
+            }
         }
     }
 
@@ -913,8 +972,10 @@ private fun StartupScreenRow(position: SettingsGroupPosition) {
     }
 }
 
-private fun app.podiumpodcasts.podium.ui.component.common.SettingsListScope.podcastPageGroup() {
-    settingsGroup(header = "Podcast page", key = "podcast_page") {
+private fun androidx.compose.foundation.lazy.LazyListScope.podcastPageGroup(
+    spaceAbove: Dp = 16.dp
+) {
+    settingsGroup(header = "Episodes", key = "podcast_page", spaceAbove = spaceAbove) {
         row { pos ->
             EpisodeDefaultOrderRow(position = pos)
         }

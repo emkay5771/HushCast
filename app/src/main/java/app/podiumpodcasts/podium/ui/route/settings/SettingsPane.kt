@@ -71,10 +71,17 @@ fun SettingsPane(
         }
 
         is SettingsAppearanceKey -> {
+            val isHub = contentKey.section == app.podiumpodcasts.podium.ui.route.settings.pane.AppearanceSettingsSection.HUB
             SettingsAppearancePane(
+                section = contentKey.section,
                 navigationIcon = {
-                    NavigationIcon()
-                }
+                    if (!isHub) {
+                        BackButton { onBack() }
+                    } else {
+                        NavigationIcon()
+                    }
+                },
+                onNavigate = { onPane(it) }
             )
         }
 
