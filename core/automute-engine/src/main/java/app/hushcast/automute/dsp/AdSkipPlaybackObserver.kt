@@ -64,6 +64,10 @@ class AdSkipPlaybackObserver {
 
     fun getAdWindows(): List<AdWindow> = adWindows
 
+    /** Whether playback will jump past [ad] on its own (auto-skip on, in scope, not bypassed by Undo). */
+    fun willAutoSkip(ad: AdWindow): Boolean =
+        policyMode == AdPolicyMode.AUTO_SKIP && shouldAutoSkip(ad) && ad.startMs !in userBypassedStartMs
+
     /**
      * Checks whether [pos] is inside an active sponsor ad matching [autoSkipScope] and triggers an auto-skip.
      * Used both by PlayerMessage callbacks (P5) and on position discontinuities.

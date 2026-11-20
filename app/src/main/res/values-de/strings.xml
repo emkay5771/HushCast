@@ -311,4 +311,30 @@
     <string name="podcast_season_order">Staffelreihenfolge</string>
     <string name="podcast_season_order_newest">Neueste Staffel zuerst</string>
     <string name="podcast_season_order_oldest">Älteste Staffel zuerst</string>
+    <!-- Android Auto -->
+    <string name="car_tab_new">Neu</string>
+    <string name="car_tab_podcasts">Podcasts</string>
+    <string name="car_tab_downloads">Downloads</string>
+    <string name="car_section_continue">Weiterhören</string>
+    <string name="car_section_season">Staffel %1$d</string>
+    <string name="car_section_other">Weitere Episoden</string>
+    <string name="car_section_episodes">Episoden</string>
+    <string name="car_episode_number">EP. %1$d</string>
+    <string name="car_time_left">noch %1$s</string>
+    <string name="car_played">Gehört</string>
+    <string name="car_ad_until">%1$s · bis %2$s</string>
+    <string name="car_ad_skipped">%1$s übersprungen (%2$s)</string>
+    <string name="car_action_skip_sponsor">Sponsor überspringen</string>
+    <string name="car_action_undo_skip">Überspringen rückgängig</string>
+    <string name="car_action_next_chapter">Nächstes Kapitel</string>
+    <string name="car_action_add_up_next">Zu „Nächste Titel“ hinzufügen</string>
+    <string name="car_action_download">Herunterladen</string>
+    <string name="car_action_mark_played">Als gehört markieren</string>
+    <string name="car_result_added_up_next">Zu „Nächste Titel“ hinzugefügt</string>
+    <string name="car_result_downloading">Wird heruntergeladen</string>
+    <string name="car_result_marked_played">Als gehört markiert</string>
+    <string name="car_error_not_found">„%1$s“ wurde in deinen HushCast-Podcasts nicht gefunden</string>
+    <string name="car_error_offline">Streamen ist gerade nicht möglich. Lade Episoden auf dein Handy herunter, um offline zu hören.</string>
+    <string name="car_error_file_missing">Der Download dieser Episode fehlt. Lade sie erneut auf dein Handy herunter, wenn es sicher ist.</string>
+    <string name="car_error_generic">Diese Episode kann gerade nicht abgespielt werden. Sieh in HushCast auf deinem Handy nach, wenn es sicher ist.</string>
 </resources>

@@ -1,3 +1,34 @@
+# HushCast v1.0.49-hushcast
+
+## What's New
+- **Android Auto, rebuilt for the car**:
+  - **Four tabs with icons: Up Next, New, Podcasts, Downloads.** No more "More" menu hiding your subscriptions.
+  - **New** starts with **Continue listening** (what you're in the middle of), then **New episodes**, and never lists an episode twice.
+  - **Serial shows play from the start**: they open on Season 1, Episode 1, with a heading for each season. Other shows list newest first.
+  - **Episode rows say where you are**: "EP. 12 · 31m left" inside a show, "Serial · 31m left" in mixed lists, or "Played", with the unplayed dot, the explicit badge and a downloaded tick.
+  - **Downloads tab**: what's on your phone, playable with no signal. It replaces "Locally available", which listed every podcast you'd ever opened.
+  - **Search**: tap the search button in the car to find your podcasts and episodes by name.
+  - **Voice**: "Hey Google, play Serial on HushCast" continues the Serial episode you're in the middle of, or starts the next one. "Play HushCast" picks up where you left off. If nothing matches, the car says so.
+  - **Now Playing**:
+    - **Skip sponsor** appears while an ad plays that HushCast won't skip by itself (for example with sponsor skipping set to "Mark only").
+    - **Undo** appears after an automatic skip, for as long as the phone offers it.
+    - **Next chapter** appears when the episode has a later chapter.
+    - The line under the title shows what's happening: "Sponsor · until 34:10", "Skipped Sponsor (1:20)", or the chapter's name.
+    - These extras only appear while your phone is connected to a car.
+  - **Clear error messages**: "Can't stream right now. Download episodes on your phone to listen offline." instead of raw error text.
+
+## Fixes
+- **Playing an episode from the car no longer clears Up Next.** It now works like the phone: the episode you were listening to moves to the top of Up Next, at its position.
+- **Restoring a backup made on 1.0.47 failed** with "Unsupported … schema version 5". Backups from 1.0.47 and later restore again.
+- The car shows your podcasts' current names (renames, and Podcasting 2.0 episodes that showed a live show's title).
+- Car lists update when you start, pause or queue something, and are capped (50 new episodes, 200 per podcast, 100 downloads) so long feeds open quickly.
+- The phone's Up Next sheet keeps showing the podcast's name under the playing episode while connected to a car.
+
+## Installing from GitHub?
+Android Auto only shows apps from the Play Store until you turn on **Unknown sources** in Android Auto's developer settings. See **Installation → Android Auto** in the README.
+
+---
+
 # HushCast v1.0.48-hushcast
 
 ## What's New

@@ -308,4 +308,30 @@
     <string name="podcast_season_order">Orden de temporadas</string>
     <string name="podcast_season_order_newest">Temporada más reciente primero</string>
     <string name="podcast_season_order_oldest">Temporada más antigua primero</string>
+    <!-- Android Auto -->
+    <string name="car_tab_new">Nuevo</string>
+    <string name="car_tab_podcasts">Podcasts</string>
+    <string name="car_tab_downloads">Descargas</string>
+    <string name="car_section_continue">Seguir escuchando</string>
+    <string name="car_section_season">Temporada %1$d</string>
+    <string name="car_section_other">Otros episodios</string>
+    <string name="car_section_episodes">Episodios</string>
+    <string name="car_episode_number">EP. %1$d</string>
+    <string name="car_time_left">quedan %1$s</string>
+    <string name="car_played">Escuchado</string>
+    <string name="car_ad_until">%1$s · hasta %2$s</string>
+    <string name="car_ad_skipped">Saltado: %1$s (%2$s)</string>
+    <string name="car_action_skip_sponsor">Saltar patrocinio</string>
+    <string name="car_action_undo_skip">Deshacer salto</string>
+    <string name="car_action_next_chapter">Siguiente capítulo</string>
+    <string name="car_action_add_up_next">Añadir a A continuación</string>
+    <string name="car_action_download">Descargar</string>
+    <string name="car_action_mark_played">Marcar como escuchado</string>
+    <string name="car_result_added_up_next">Añadido a A continuación</string>
+    <string name="car_result_downloading">Descargando</string>
+    <string name="car_result_marked_played">Marcado como escuchado</string>
+    <string name="car_error_not_found">No se encontró «%1$s» en tus podcasts de HushCast</string>
+    <string name="car_error_offline">No se puede reproducir en streaming ahora. Descarga episodios en tu teléfono para escuchar sin conexión.</string>
+    <string name="car_error_file_missing">Falta la descarga de este episodio. Descárgalo de nuevo en tu teléfono cuando sea seguro.</string>
+    <string name="car_error_generic">No se puede reproducir este episodio ahora. Revisa HushCast en tu teléfono cuando sea seguro.</string>
 </resources>

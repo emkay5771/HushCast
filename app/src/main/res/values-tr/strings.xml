@@ -296,4 +296,30 @@
     <string name="podcast_season_order">Sezon sırası</string>
     <string name="podcast_season_order_newest">En yeni sezon önce</string>
     <string name="podcast_season_order_oldest">En eski sezon önce</string>
+    <!-- Android Auto -->
+    <string name="car_tab_new">Yeni</string>
+    <string name="car_tab_podcasts">Podcast\'ler</string>
+    <string name="car_tab_downloads">İndirilenler</string>
+    <string name="car_section_continue">Dinlemeye devam et</string>
+    <string name="car_section_season">%1$d. sezon</string>
+    <string name="car_section_other">Diğer bölümler</string>
+    <string name="car_section_episodes">Bölümler</string>
+    <string name="car_episode_number">BÖL. %1$d</string>
+    <string name="car_time_left">%1$s kaldı</string>
+    <string name="car_played">Dinlendi</string>
+    <string name="car_ad_until">%1$s · %2$s\'e kadar</string>
+    <string name="car_ad_skipped">%1$s atlandı (%2$s)</string>
+    <string name="car_action_skip_sponsor">Sponsoru atla</string>
+    <string name="car_action_undo_skip">Atlamayı geri al</string>
+    <string name="car_action_next_chapter">Sonraki kısım</string>
+    <string name="car_action_add_up_next">Sıradakine ekle</string>
+    <string name="car_action_download">İndir</string>
+    <string name="car_action_mark_played">Dinlendi olarak işaretle</string>
+    <string name="car_result_added_up_next">Sıradakine eklendi</string>
+    <string name="car_result_downloading">İndiriliyor</string>
+    <string name="car_result_marked_played">Dinlendi olarak işaretlendi</string>
+    <string name="car_error_not_found">HushCast podcast\'lerinizde “%1$s” bulunamadı</string>
+    <string name="car_error_offline">Şu anda yayın yapılamıyor. Çevrimdışı dinlemek için bölümleri telefonunuza indirin.</string>
+    <string name="car_error_file_missing">Bu bölümün indirmesi eksik. Güvenli olduğunda telefonunuza yeniden indirin.</string>
+    <string name="car_error_generic">Bu bölüm şu anda oynatılamıyor. Güvenli olduğunda telefonunuzda HushCast\'e bakın.</string>
 </resources>
