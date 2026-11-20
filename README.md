@@ -20,6 +20,10 @@
   - **Custom Sound Effect**: Pick any audio file on your phone to play instead.
 - **Presets & custom rules**: Built-in **Profanity** and **Explicit Content** presets, masked-word matching (`f***`, `s**t`), plurals, multi-word phrases, and custom rules.
 
+### 📑 Auto-Generated Chapters, Transcripts & Summaries
+- **Jump straight to the topics you care about**: When paired with a Desktop or Cloud Worker, HushCast automatically breaks episodes into timestamped **Chapters**—even for podcasts that don't include chapters in their feed.
+- **Speaker-labeled transcripts & summaries**: Follow along with live-highlighted transcripts labeled by speaker (`Speaker 1`, `Speaker 2`, …), read AI-generated episode summaries, and search across analyzed episodes by meaning.
+
 ### ⏭️ Skip Sponsor Reads Automatically—With a Safety Net
 - **Hands-free ad skipping**: HushCast detects host-read ads and sponsor segments and jumps right past them.
 - **One-tap Undo & indicator chime**: Optionally play a subtle chime when a sponsor is skipped, and tap **Undo** in the player if you ever want to hear a segment back.
@@ -27,7 +31,6 @@
 
 ### 🎧 A Fast, Tactile Podcast Player
 - **Pocket Casts-style controls**: Compact floating miniplayer with queue count and blocked-content markers, plus a full-screen player with **Player**, **Transcript**, **Chapters**, and **Notes** tabs.
-- **Auto-generated chapters, transcripts & summaries**: When paired with a Desktop or Cloud Worker, HushCast automatically generates timestamped **Chapters**, **speaker-labeled transcripts**, and **episode summaries**—even for podcasts that don't include chapters in their feed.
 - **Effortless queue & episode management**: Swipe up for **Up Next** (with swipe-to-remove **Undo**), half-swipe episodes for quick actions, full-swipe for your primary action, or long-press to bulk-manage episodes.
 - **Playback polish**: Speed stepper & presets (`0.5x`–`3.0x`) with live speed shown in Android's media notification, **Trim Silence**, **Volume Boost**, **speed- & skip-adjusted remaining time** (e.g., `-24:10 (-16:07)`), and a **10-second fade-out Sleep Timer**.
 - **Adaptive Material 3 Expressive UI**: Artwork-adaptive **Material You** colors, smooth progressive-blurred podcast headers, predictive back gestures, and customizable player action buttons.
