@@ -6,7 +6,6 @@ import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
-import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.PlaybackParameters
@@ -37,6 +36,13 @@ import app.podiumpodcasts.podium.HeadsetPrevAction
 import app.podiumpodcasts.podium.R
 import app.podiumpodcasts.podium.SettingsRepository
 import app.podiumpodcasts.podium.api.db.model.MediaMetadataExtra
+import app.podiumpodcasts.podium.background.car.CarActions
+import app.podiumpodcasts.podium.background.car.CarCommands
+import app.podiumpodcasts.podium.background.car.CarConnectionWatcher
+import app.podiumpodcasts.podium.background.car.CarDebugReceiver
+import app.podiumpodcasts.podium.background.car.CarLibrary
+import app.podiumpodcasts.podium.background.car.CarMediaItems
+import app.podiumpodcasts.podium.background.car.HushCastSessionPlayer
 import app.podiumpodcasts.podium.background.notification.NewPodcastEpisodeNotification
 import app.podiumpodcasts.podium.background.worker.sync.PartialSynchronizationWorker
 import app.podiumpodcasts.podium.manager.DatabaseManager
@@ -125,6 +131,17 @@ class PlaybackService : MediaLibraryService() {
     private lateinit var exoPlayer: ExoPlayer
     private var mediaSession: MediaLibrarySession? = null
     private var sessionCallback: MediaLibrarySessionCallback? = null
+
+    // Android Auto
+    val carItems by lazy { CarMediaItems(this) }
+    val carLibrary by lazy {
+        CarLibrary(db, carItems) { HushCastEngineBridge.currentEpisodeId }
+    }
+    /** Car-mode buttons, subtitle and errors; set once the session exists. */
+    var carCommands: CarCommands? = null
+        private set
+    private var carDebugReceiver: CarDebugReceiver? = null
+    private var carConnectionWatcher: CarConnectionWatcher? = null
 
     private var currentSkipEndingValue: Int = 0
     @Volatile var currentSeekBackIncrementMs: Long = 10_000L
@@ -232,47 +249,42 @@ class PlaybackService : MediaLibraryService() {
             .setHandleAudioBecomingNoisy(true)
             .build()
 
-        val player = object : ForwardingPlayer(exoPlayer) {
-            override fun seekForward() {
-                val skipRanges = HushCastEngineBridge.getActiveSkipRanges()
-                if (skipRanges.isEmpty()) {
-                    super.seekForward()
-                    return
-                }
-                val target = app.hushcast.automute.dsp.SkipAwareSeekCalculator.computeForwardTargetMs(
-                    fromMs = currentPosition,
-                    incrementMs = currentSeekForwardIncrementMs,
-                    durationMs = duration,
-                    skipRanges = skipRanges
-                )
-                seekTo(target)
-            }
-
-            override fun seekBack() {
-                val skipRanges = HushCastEngineBridge.getActiveSkipRanges()
-                if (skipRanges.isEmpty()) {
-                    super.seekBack()
-                    return
-                }
-                val target = app.hushcast.automute.dsp.SkipAwareSeekCalculator.computeBackTargetMs(
-                    fromMs = currentPosition,
-                    incrementMs = currentSeekBackIncrementMs,
-                    skipRanges = skipRanges
-                )
-                seekTo(target)
-            }
-        }
+        // One wrapper: ad-aware ±seek, plus the car's live subtitle (F11).
+        val player = HushCastSessionPlayer(
+            exoPlayer,
+            seekBackIncrementMs = { currentSeekBackIncrementMs },
+            seekForwardIncrementMs = { currentSeekForwardIncrementMs }
+        )
 
         val callback = MediaLibrarySessionCallback(this)
         sessionCallback = callback
 
         mediaSession = MediaLibrarySession.Builder(this, player, callback)
             .setMediaButtonPreferences(buildMediaButtons(exoPlayer))
+            .setCommandButtonsForMediaItems(buildCarRowButtons())
             .setSessionActivity(
                 DeepLink.OpenMediaPlayer()
                     .asPendingIntent(this, 42)!!
             )
             .build()
+
+        carCommands = CarCommands(
+            context = this,
+            strings = carItems.strings,
+            sessionPlayer = player,
+            session = { mediaSession },
+            onButtonsChanged = { mediaSession?.setMediaButtonPreferences(buildMediaButtons(exoPlayer)) },
+            jumpToNextChapter = { jumpToNextChapter() },
+            onListsChanged = { mediaSession?.let { sessionCallback?.notifyCarListsChanged(it) } }
+        ).also { player.addListener(it.playerListener) }
+
+        scope.launch {
+            HushCastEngineBridge.pendingUndoEvent.collect { carCommands?.refresh() }
+        }
+        carConnectionWatcher = CarConnectionWatcher(this, scope) { carCommands?.setCarConnected(it) }
+            .also { it.start() }
+
+        if (app.podiumpodcasts.podium.BuildConfig.DEV_TOOLS) registerCarDebugHooks()
 
         // Load persisted settings asynchronously on startup (F2, P9, P22)
         scope.launch {
@@ -451,6 +463,7 @@ class PlaybackService : MediaLibraryService() {
 
         scope.launch {
             downloadedEpisodeEvents.collect { downloadedId ->
+                carCommands?.listsChanged()
                 val bundle = withContext(Dispatchers.IO) {
                     db.podcastEpisodes().getSyncNullable(downloadedId)
                 } ?: return@collect
@@ -773,7 +786,79 @@ class PlaybackService : MediaLibraryService() {
             .setDisplayName("${getString(R.string.common_action_toggle_playback_speed)} ($speedLabel)")
             .build()
 
-        return listOf(seekBack, seekForward, playbackSpeed)
+        // In the car: Skip sponsor or Undo, then Next chapter, before Speed (F8–F10).
+        return listOf(seekBack, seekForward) + (carCommands?.buttons() ?: emptyList()) + playbackSpeed
+    }
+
+    /** The car's episode-row actions (F7). Icons are URIs the car loads itself. */
+    private fun buildCarRowButtons(): List<CommandButton> = listOf(
+        CommandButton.Builder(CommandButton.ICON_QUEUE_ADD)
+            .setSessionCommand(SessionCommand(CarActions.ADD_UP_NEXT, Bundle.EMPTY))
+            .setDisplayName(getString(R.string.car_action_add_up_next))
+            .setIconUri(carItems.resourceUri(R.drawable.ic_car_queue_add))
+            .build(),
+        CommandButton.Builder(CommandButton.ICON_UNDEFINED)
+            .setCustomIconResId(R.drawable.ic_car_download)
+            .setSessionCommand(SessionCommand(CarActions.DOWNLOAD, Bundle.EMPTY))
+            .setDisplayName(getString(R.string.car_action_download))
+            .setIconUri(carItems.resourceUri(R.drawable.ic_car_download))
+            .build(),
+        CommandButton.Builder(CommandButton.ICON_CHECK_CIRCLE_UNFILLED)
+            .setSessionCommand(SessionCommand(CarActions.MARK_PLAYED, Bundle.EMPTY))
+            .setDisplayName(getString(R.string.car_action_mark_played))
+            .setIconUri(carItems.resourceUri(R.drawable.ic_car_mark_played))
+            .build()
+    )
+
+    /**
+     * Car "Add to Up Next": after what's playing, as the phone's enqueue(). With nothing loaded it
+     * only goes into the saved queue. Main thread.
+     */
+    suspend fun addToUpNextFromCar(bundle: app.podiumpodcasts.podium.api.db.model.PodcastEpisodeBundle) {
+        val p = mediaSession?.player ?: return
+        val id = bundle.episode.id
+        if (p.mediaItemCount == 0) {
+            withContext(Dispatchers.IO) {
+                val queued = db.playbackQueue().getQueueSync().map { it.episodeId }
+                if (id !in queued) db.playbackQueue().replaceQueue(queued + id)
+            }
+            return
+        }
+        val from = p.currentMediaItemIndex.coerceAtLeast(0)
+        val present = (from until p.mediaItemCount).any { p.getMediaItemAt(it).getEpisodeId() == id }
+        if (!present) {
+            val item = withContext(Dispatchers.IO) { bundle.createMediaItem(this@PlaybackService) }
+            p.addMediaItem(item)
+        }
+        val upNext = (p.currentMediaItemIndex + 1 until p.mediaItemCount).mapNotNull { p.getMediaItemAt(it).getEpisodeId() }
+        withContext(Dispatchers.IO) { db.playbackQueue().replaceQueue(upNext) }
+    }
+
+    /** Debug builds: adb hooks for the car tests (see CarDebugReceiver). */
+    private fun registerCarDebugHooks() {
+        val receiver = CarDebugReceiver(
+            positionMs = { mediaSession?.player?.currentPosition ?: 0L },
+            injectAd = { ad, policy ->
+                val observer = HushCastEngineBridge.adSkipObserver
+                val windows = (observer.getAdWindows() + ad).sortedBy { it.startMs }
+                observer.setEpisodeAds(windows, policy ?: observer.policyMode)
+                schedulePositionCallbacks()
+                carCommands?.refresh()
+            },
+            voice = { query ->
+                // Same path as "Hey Google, play <query> on HushCast".
+                mediaSession?.let { session ->
+                    scope.launch {
+                        val r = sessionCallback?.voiceItems(session, query) ?: return@launch
+                        session.player.setMediaItems(r.mediaItems, r.startIndex, r.startPositionMs)
+                        session.player.prepare()
+                        session.player.play()
+                    }
+                }
+            }
+        )
+        receiver.register(this)
+        carDebugReceiver = receiver
     }
 
     private fun speedIconResId(speed: Float): Int {
@@ -1036,6 +1121,8 @@ class PlaybackService : MediaLibraryService() {
             override fun onPlayerError(error: PlaybackException) {
                 android.util.Log.e("PlaybackService", "Player error: ${error.errorCodeName} (${error.message})", error)
                 updatePlayStateHandler.removeCallbacks(updatePlayStateRunnable)
+                val isLocalFile = mediaSession?.player?.currentMediaItem?.localConfiguration?.uri?.scheme == "file"
+                carCommands?.onPlayerError(error, isLocalFile)
                 super.onPlayerError(error)
             }
 
@@ -1227,6 +1314,10 @@ class PlaybackService : MediaLibraryService() {
 
         stopSleepTimer()
         sessionCallback?.destroy()
+        carConnectionWatcher?.stop()
+        carCommands?.destroy()
+        carDebugReceiver?.let { runCatching { unregisterReceiver(it) } }
+        carDebugReceiver = null
         job.cancel()
 
         mediaSession?.run {

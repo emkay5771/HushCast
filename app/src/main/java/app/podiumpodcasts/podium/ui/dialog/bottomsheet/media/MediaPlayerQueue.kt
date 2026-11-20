@@ -244,7 +244,8 @@ fun MediaPlayerQueueBottomSheet(
                                         overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
-                                        text = vm.mediaMetadata?.subtitle?.toString() ?: "",
+                                        // The podcast's name. Not subtitle: in the car that line shows ads and chapters.
+                                        text = (vm.mediaMetadata?.artist ?: vm.mediaMetadata?.subtitle)?.toString() ?: "",
                                         style = Typography.bodySmall,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis

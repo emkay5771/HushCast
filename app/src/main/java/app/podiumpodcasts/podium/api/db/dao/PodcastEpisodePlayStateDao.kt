@@ -92,6 +92,12 @@ interface PodcastEpisodePlayStateDao {
     @Query("SELECT * FROM podcastEpisodePlayState, podcastEpisode e WHERE played=0 AND state>0 AND episodeId=e.id ORDER BY pubDate DESC LIMIT :limit OFFSET :offset")
     suspend fun getContinuePlayingSync(limit: Int, offset: Int): List<PodcastPlayStateBundle>
 
+    /** Car "Continue listening": in-progress episodes, most recently played first. */
+    @Transaction
+    @RewriteQueriesToDropUnusedColumns
+    @Query("SELECT * FROM podcastEpisodePlayState, podcastEpisode e WHERE played=0 AND state>0 AND episodeId=e.id ORDER BY lastUpdate DESC LIMIT :limit")
+    suspend fun getRecentlyPlayingSync(limit: Int): List<PodcastPlayStateBundle>
+
     @Query("SELECT * FROM podcastEpisodePlayState WHERE episodeId=:episodeId")
     suspend fun get(episodeId: String): PodcastEpisodePlayStateModel
 

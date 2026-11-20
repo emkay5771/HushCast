@@ -311,4 +311,30 @@
     <string name="podcast_season_order">Ordine delle stagioni</string>
     <string name="podcast_season_order_newest">Stagione più recente prima</string>
     <string name="podcast_season_order_oldest">Stagione meno recente prima</string>
+    <!-- Android Auto -->
+    <string name="car_tab_new">Novità</string>
+    <string name="car_tab_podcasts">Podcast</string>
+    <string name="car_tab_downloads">Download</string>
+    <string name="car_section_continue">Continua ad ascoltare</string>
+    <string name="car_section_season">Stagione %1$d</string>
+    <string name="car_section_other">Altri episodi</string>
+    <string name="car_section_episodes">Episodi</string>
+    <string name="car_episode_number">EP. %1$d</string>
+    <string name="car_time_left">%1$s rimanenti</string>
+    <string name="car_played">Ascoltato</string>
+    <string name="car_ad_until">%1$s · fino a %2$s</string>
+    <string name="car_ad_skipped">%1$s saltato (%2$s)</string>
+    <string name="car_action_skip_sponsor">Salta sponsor</string>
+    <string name="car_action_undo_skip">Annulla salto</string>
+    <string name="car_action_next_chapter">Capitolo successivo</string>
+    <string name="car_action_add_up_next">Aggiungi a In coda</string>
+    <string name="car_action_download">Scarica</string>
+    <string name="car_action_mark_played">Segna come ascoltato</string>
+    <string name="car_result_added_up_next">Aggiunto a In coda</string>
+    <string name="car_result_downloading">Download in corso</string>
+    <string name="car_result_marked_played">Segnato come ascoltato</string>
+    <string name="car_error_not_found">«%1$s» non trovato nei tuoi podcast HushCast</string>
+    <string name="car_error_offline">Impossibile riprodurre in streaming ora. Scarica gli episodi sul telefono per ascoltarli offline.</string>
+    <string name="car_error_file_missing">Il download di questo episodio non c\'è più. Scaricalo di nuovo sul telefono quando è sicuro.</string>
+    <string name="car_error_generic">Impossibile riprodurre questo episodio ora. Controlla HushCast sul telefono quando è sicuro.</string>
 </resources>

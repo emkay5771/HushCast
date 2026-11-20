@@ -296,4 +296,30 @@
     <string name="podcast_season_order">Ordre des saisons</string>
     <string name="podcast_season_order_newest">Saison la plus récente d\'abord</string>
     <string name="podcast_season_order_oldest">Saison la plus ancienne d\'abord</string>
+    <!-- Android Auto -->
+    <string name="car_tab_new">Nouveau</string>
+    <string name="car_tab_podcasts">Podcasts</string>
+    <string name="car_tab_downloads">Téléchargements</string>
+    <string name="car_section_continue">Reprendre l\'écoute</string>
+    <string name="car_section_season">Saison %1$d</string>
+    <string name="car_section_other">Autres épisodes</string>
+    <string name="car_section_episodes">Épisodes</string>
+    <string name="car_episode_number">ÉP. %1$d</string>
+    <string name="car_time_left">%1$s restantes</string>
+    <string name="car_played">Écouté</string>
+    <string name="car_ad_until">%1$s · jusqu\'à %2$s</string>
+    <string name="car_ad_skipped">%1$s ignoré (%2$s)</string>
+    <string name="car_action_skip_sponsor">Passer le sponsor</string>
+    <string name="car_action_undo_skip">Annuler le saut</string>
+    <string name="car_action_next_chapter">Chapitre suivant</string>
+    <string name="car_action_add_up_next">Ajouter à À suivre</string>
+    <string name="car_action_download">Télécharger</string>
+    <string name="car_action_mark_played">Marquer comme écouté</string>
+    <string name="car_result_added_up_next">Ajouté à À suivre</string>
+    <string name="car_result_downloading">Téléchargement…</string>
+    <string name="car_result_marked_played">Marqué comme écouté</string>
+    <string name="car_error_not_found">« %1$s » introuvable dans vos podcasts HushCast</string>
+    <string name="car_error_offline">Lecture en streaming impossible pour le moment. Téléchargez des épisodes sur votre téléphone pour les écouter hors connexion.</string>
+    <string name="car_error_file_missing">Le téléchargement de cet épisode est introuvable. Téléchargez-le à nouveau sur votre téléphone quand c\'est sans danger.</string>
+    <string name="car_error_generic">Impossible de lire cet épisode pour le moment. Consultez HushCast sur votre téléphone quand c\'est sans danger.</string>
 </resources>

@@ -311,4 +311,30 @@
     <string name="podcast_season_order">Season order</string>
     <string name="podcast_season_order_newest">Newest season first</string>
     <string name="podcast_season_order_oldest">Oldest season first</string>
+    <!-- Android Auto -->
+    <string name="car_tab_new">New</string>
+    <string name="car_tab_podcasts">Podcasts</string>
+    <string name="car_tab_downloads">Downloads</string>
+    <string name="car_section_continue">Continue listening</string>
+    <string name="car_section_season">Season %1$d</string>
+    <string name="car_section_other">Other episodes</string>
+    <string name="car_section_episodes">Episodes</string>
+    <string name="car_episode_number">EP. %1$d</string>
+    <string name="car_time_left">%1$s left</string>
+    <string name="car_played">Played</string>
+    <string name="car_ad_until">%1$s · until %2$s</string>
+    <string name="car_ad_skipped">Skipped %1$s (%2$s)</string>
+    <string name="car_action_skip_sponsor">Skip sponsor</string>
+    <string name="car_action_undo_skip">Undo skip</string>
+    <string name="car_action_next_chapter">Next chapter</string>
+    <string name="car_action_add_up_next">Add to Up Next</string>
+    <string name="car_action_download">Download</string>
+    <string name="car_action_mark_played">Mark played</string>
+    <string name="car_result_added_up_next">Added to Up Next</string>
+    <string name="car_result_downloading">Downloading</string>
+    <string name="car_result_marked_played">Marked played</string>
+    <string name="car_error_not_found">Couldn\'t find “%1$s” in your HushCast podcasts</string>
+    <string name="car_error_offline">Can\'t stream right now. Download episodes on your phone to listen offline.</string>
+    <string name="car_error_file_missing">This episode\'s download is missing. Download it again on your phone when it\'s safe.</string>
+    <string name="car_error_generic">Can\'t play this episode right now. Check HushCast on your phone when it\'s safe.</string>
 </resources>

@@ -83,6 +83,13 @@ Under the hood, HushCast runs a two-stage pipeline so even mid-range phones stay
 3. Open the downloaded file and allow **Install unknown apps** if prompted.
 4. Open **HushCast → Settings → HushCast** to download the on-device AI models or pair your Desktop/Cloud Companion Worker.
 
+#### Android Auto
+Android Auto only shows media apps installed from the Play Store, unless you allow others. Because HushCast is installed from GitHub (or Obtainium), turn this on once:
+1. On your phone, open **Android Auto settings** (Settings → Connected devices → Connection preferences → Android Auto).
+2. Scroll to **Version** and tap it 10 times, then confirm to turn on **developer mode**.
+3. Open the **⋮** menu → **Developer settings** and turn on **Unknown sources**.
+4. Reconnect to your car. HushCast appears in the car's app launcher.
+
 ### Desktop / Cloud Companion Worker (Optional)
 See [`desktop-worker/README.md`](desktop-worker/README.md) for macOS Apple Silicon Metal setup, cache CLI flags, and Modal serverless GPU deployment.
 

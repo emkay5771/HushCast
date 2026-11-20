@@ -183,6 +183,45 @@ interface PodcastEpisodeDao {
     @Query("SELECT * FROM podcastEpisode WHERE origin=:origin ORDER BY pubDate DESC LIMIT :limit OFFSET :offset")
     suspend fun get(origin: String, limit: Int, offset: Int): List<PodcastEpisodeBundle>
 
+    // ---- Android Auto lists (capped, no paging) ----
+
+    /** Car: a serial show from its start, season by season (no season last), oldest first. */
+    @Transaction
+    @Query(
+        """
+        SELECT * FROM podcastEpisode WHERE origin = :origin
+        ORDER BY CASE WHEN season IS NULL THEN 1 ELSE 0 END ASC, season ASC, pubDate ASC
+        LIMIT :limit
+        """
+    )
+    suspend fun getForCarSerial(origin: String, limit: Int): List<PodcastEpisodeBundle>
+
+    /** Car: downloaded episodes, newest first. */
+    @Transaction
+    @Query(
+        """
+        SELECT e.* FROM podcastEpisode e
+        INNER JOIN podcastEpisodeDownload d ON d.episodeId = e.id
+        WHERE d.state = :downloadedState
+        ORDER BY e.pubDate DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun getDownloadedForCar(downloadedState: Int, limit: Int): List<PodcastEpisodeBundle>
+
+    /** Car search and voice: episodes of subscribed podcasts whose title contains [query]. */
+    @Transaction
+    @Query(
+        """
+        SELECT e.* FROM podcastEpisode e
+        INNER JOIN podcastSubscription s ON e.origin = s.origin
+        WHERE e.title LIKE '%' || :query || '%'
+        ORDER BY e.pubDate DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun searchForCar(query: String, limit: Int): List<PodcastEpisodeBundle>
+
     @Transaction
     @Query(
         """
