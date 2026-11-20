@@ -196,6 +196,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
             controller.prepare()
             controller.play()
             syncQueue(persist = true)
+            autoDownloadIfEnabled(context, bundle)
             return
         }
 
@@ -208,6 +209,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
             if (startPositionMs != null) controller.seekTo(currentIdx, startPositionMs.coerceAtLeast(0L))
             controller.prepare()
             controller.play()
+            autoDownloadIfEnabled(context, bundle)
             return
         }
 
@@ -253,6 +255,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         controller.prepare()
         controller.play()
         syncQueue(persist = true)
+        autoDownloadIfEnabled(context, bundle)
     }
 
     private fun oldIdNotBlank(id: String?): Boolean = !id.isNullOrBlank()
