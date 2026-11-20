@@ -430,10 +430,12 @@ class PlaybackService : MediaLibraryService() {
                 val savingsRowId = if (epId != null && savedMs > 0L) {
                     withContext(Dispatchers.IO) {
                         val epBundle = db.podcastEpisodes().getSyncNullable(epId)
+                        val origin = epBundle?.episode?.origin ?: ""
+                        val podcastTitle = if (origin.isNotBlank()) db.podcasts().getSync(origin)?.title ?: "" else ""
                         autoMuteDb.dao().insertReclaimedTime(
                             app.hushcast.automute.storage.ReclaimedTimeEntity(
-                                podcastOrigin = epBundle?.episode?.origin ?: "",
-                                podcastTitle = epBundle?.podcast?.title ?: "",
+                                podcastOrigin = origin,
+                                podcastTitle = podcastTitle,
                                 episodeId = epId,
                                 category = event.adWindow.adClass,
                                 savedMs = savedMs,

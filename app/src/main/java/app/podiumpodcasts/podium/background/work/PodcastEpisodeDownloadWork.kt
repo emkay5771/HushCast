@@ -126,6 +126,7 @@ class PodcastEpisodeDownloadWork(
                         audioUrl = episode.audioUrl,
                         title = episode.title,
                         podcastTitle = podcastModel?.title,
+                        podcastOrigin = episode.origin,
                         destFile = file,
                         workerUrl = workerUrl,
                         token = app.hushcast.automute.engine.HushCastPrefs.getDesktopWorkerToken(context),
@@ -381,6 +382,7 @@ class PodcastEpisodeDownloadWork(
         audioUrl: String,
         title: String,
         podcastTitle: String? = null,
+        podcastOrigin: String? = null,
         destFile: File,
         workerUrl: String,
         token: String,
@@ -460,7 +462,7 @@ class PodcastEpisodeDownloadWork(
                     force = forceReprocess,
                     reprocessStage = reprocessStage,
                     podcastTitle = podcastTitle,
-                    podcastOrigin = episode.origin
+                    podcastOrigin = podcastOrigin
                 )
                 // A retry (constraint stop, process death) re-attaches to the job it started instead
                 // of spawning a second, billed GPU job.

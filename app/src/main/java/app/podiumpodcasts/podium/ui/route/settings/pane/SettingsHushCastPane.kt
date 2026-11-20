@@ -1719,7 +1719,8 @@ fun SettingsHushCastPane(
                                         )
                                     },
                                     index = pos.index,
-                                    count = pos.count
+                                    count = pos.count,
+                                    onClick = {}
                                 )
                             }
                         }
@@ -1740,7 +1741,8 @@ fun SettingsHushCastPane(
                                             )
                                         },
                                         index = pos.index,
-                                        count = pos.count
+                                        count = pos.count,
+                                        onClick = {}
                                     )
                                 }
                             }

@@ -864,7 +864,7 @@ fun MediaPlayerBottomSheet(
                                                     onUndoSkip = { undo ->
                                                         haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                                         HushCastEngineBridge.adSkipObserver.bypassAd(undo.adWindow.startMs)
-                                                        HushCastEngineBridge.revertSavingsIfRecorded(context, undo.savingsRowId)
+                                                        HushCastEngineBridge.revertSavingsForAdStart(context, undo.adWindow.startMs)
                                                         vm.seek(undo.adWindow.startMs)
                                                         HushCastEngineBridge.clearPendingUndo()
                                                     },
@@ -1246,7 +1246,7 @@ fun MediaPlayerBottomSheet(
                             onUndo = {
                                 haptic.performHapticFeedback(HapticFeedbackType.Confirm)
                                 HushCastEngineBridge.adSkipObserver.bypassAd(undo.adWindow.startMs)
-                                HushCastEngineBridge.revertSavingsIfRecorded(context, undo.savingsRowId)
+                                HushCastEngineBridge.revertSavingsForAdStart(context, undo.adWindow.startMs)
                                 vm.seek(undo.adWindow.startMs)
                                 HushCastEngineBridge.clearPendingUndo()
                             },

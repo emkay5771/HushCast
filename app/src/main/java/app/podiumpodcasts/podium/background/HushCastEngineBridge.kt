@@ -158,7 +158,12 @@ object HushCastEngineBridge {
         return adSkipObserver.getActiveAutoSkipRanges() + skippedChapterRanges
     }
 
+    private val savingsRowIdsByStartMs = java.util.concurrent.ConcurrentHashMap<Long, Long>()
+
     fun notifyAdSkipped(episodeId: String?, event: AdSkipEvent, savingsRowId: Long? = null) {
+        if (savingsRowId != null) {
+            savingsRowIdsByStartMs[event.adWindow.startMs] = savingsRowId
+        }
         _pendingUndoEvent.value = PendingUndoAdSkip(
             episodeId = episodeId,
             event = event,
@@ -166,8 +171,8 @@ object HushCastEngineBridge {
         )
     }
 
-    fun revertSavingsIfRecorded(context: android.content.Context, rowId: Long?) {
-        if (rowId == null) return
+    fun revertSavingsForAdStart(context: android.content.Context, adStartMs: Long) {
+        val rowId = savingsRowIdsByStartMs.remove(adStartMs) ?: return
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             runCatching {
                 app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
