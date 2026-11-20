@@ -300,6 +300,7 @@
     <string name="car_tab_new">Yeni</string>
     <string name="car_tab_podcasts">Podcast\'ler</string>
     <string name="car_tab_downloads">İndirilenler</string>
+    <string name="car_section_now_playing">Şimdi oynatılıyor</string>
     <string name="car_section_continue">Dinlemeye devam et</string>
     <string name="car_section_season">%1$d. sezon</string>
     <string name="car_section_other">Diğer bölümler</string>

@@ -1,3 +1,10 @@
+# HushCast v1.0.50-hushcast
+
+## Fixes
+- **Android Auto Up Next now shows the currently playing episode**: When an episode is already loaded/open on your phone, it appears at the top of the **Up Next** tab under **Now playing** so you can tap it in the car to resume right where you left off.
+
+---
+
 # HushCast v1.0.49-hushcast
 
 ## What's New

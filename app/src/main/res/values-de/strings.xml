@@ -315,6 +315,7 @@
     <string name="car_tab_new">Neu</string>
     <string name="car_tab_podcasts">Podcasts</string>
     <string name="car_tab_downloads">Downloads</string>
+    <string name="car_section_now_playing">Läuft gerade</string>
     <string name="car_section_continue">Weiterhören</string>
     <string name="car_section_season">Staffel %1$d</string>
     <string name="car_section_other">Weitere Episoden</string>
