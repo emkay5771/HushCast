@@ -148,7 +148,10 @@ import app.podiumpodcasts.podium.ui.theme.Typography
 import app.podiumpodcasts.podium.ui.vm.PodcastDetailViewModel
 import coil3.compose.AsyncImagePainter
 import com.materialkolor.ktx.harmonizeWithPrimary
-import dev.chrisbanes.haze.hazeEffect
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.blur.BlurRadiusSpec
+import androidx.compose.ui.graphics.blur.BlurStop
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 
@@ -570,7 +573,16 @@ fun PodcastDetailView(
                                     } else backdropHeightPx
                                     alpha = (1f - offset / backdropHeightPx.coerceAtLeast(1f)).coerceIn(0f, 1f)
                                 }
-                                .hazeEffect(),
+                                .blur(
+                                    blurRadiusSpec = BlurRadiusSpec.verticalGradient(
+                                        listOf(
+                                            BlurStop(fraction = 0f, radius = 0.dp),
+                                            BlurStop(fraction = 0.35f, radius = 4.dp),
+                                            BlurStop(fraction = 1f, radius = 24.dp),
+                                        )
+                                    ),
+                                    edgeTreatment = BlurredEdgeTreatment.Rectangle
+                                ),
 
                             model = podcast.imageUrl,
                             contentDescription = null,
@@ -694,7 +706,7 @@ fun PodcastDetailView(
                                             }
                                         },
 
-                                        colors = ToggleButtonDefaults.toggleButtonColors(
+                                        colors = ToggleButtonDefaults.colors(
                                             containerColor = MaterialTheme.colorScheme.surface
                                         )
                                     ) {

@@ -27,6 +27,7 @@ fun <T> ConnectedSingleChoiceGroup(
     selected: T,
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier.fillMaxWidth(),
+    enabled: Boolean = true,
     contentPadding: PaddingValues = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
     labelContent: @Composable RowScope.(T) -> Unit
 ) {
@@ -44,6 +45,7 @@ fun <T> ConnectedSingleChoiceGroup(
             ToggleButton(
                 checked = selected == option,
                 onCheckedChange = { if (it) onSelect(option) },
+                enabled = enabled,
                 shapes = shapes,
                 contentPadding = contentPadding,
                 modifier = Modifier

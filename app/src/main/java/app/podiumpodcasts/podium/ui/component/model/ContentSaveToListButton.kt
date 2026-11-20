@@ -4,8 +4,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Bookmarks
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.TonalToggleButton
+import androidx.compose.material3.FilledTonalToggleButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
@@ -16,7 +15,6 @@ import app.podiumpodcasts.podium.ui.component.common.ButtonLabelWithIconInset
 import app.podiumpodcasts.podium.ui.dialog.bottomsheet.SaveToListBottomSheet
 import app.podiumpodcasts.podium.ui.helper.LocalDatabase
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun ContentSaveToListButton(
     contentId: String,
@@ -42,7 +40,7 @@ fun ContentSaveToListButton(
             )
         }
     } else {
-        TonalToggleButton(
+        FilledTonalToggleButton(
             checked = isSaved.value,
             onCheckedChange = {
                 showBottomSheet.value = true

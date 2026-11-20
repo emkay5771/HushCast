@@ -92,7 +92,6 @@ import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
 import app.podiumpodcasts.podium.ui.formatEpisodePlayTime
 import app.podiumpodcasts.podium.ui.formatPubDate
 import app.podiumpodcasts.podium.ui.theme.Typography
-import dev.chrisbanes.haze.hazeEffect
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
 @Composable
@@ -261,7 +260,7 @@ fun PodcastEpisodeDetailView(
                 ) {
                     PodcastEpisodePlayButton(
                         bundle = bundle,
-                        colors = ToggleButtonDefaults.toggleButtonColors(
+                        colors = ToggleButtonDefaults.colors(
                             containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                         )
                     )

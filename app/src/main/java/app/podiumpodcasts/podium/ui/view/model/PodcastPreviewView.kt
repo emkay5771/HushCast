@@ -72,7 +72,10 @@ import app.podiumpodcasts.podium.ui.vm.PodcastPreviewState
 import app.podiumpodcasts.podium.ui.vm.PodcastPreviewViewModel
 import coil3.compose.AsyncImagePainter
 import com.materialkolor.DynamicMaterialExpressiveTheme
-import dev.chrisbanes.haze.hazeEffect
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.graphics.blur.BlurRadiusSpec
+import androidx.compose.ui.graphics.blur.BlurStop
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -152,7 +155,16 @@ fun PodcastPreviewView(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(inset.calculateTopPadding() + BACKDROP_SIZE)
-                                        .hazeEffect(),
+                                        .blur(
+                                            blurRadiusSpec = BlurRadiusSpec.verticalGradient(
+                                                listOf(
+                                                    BlurStop(fraction = 0f, radius = 0.dp),
+                                                    BlurStop(fraction = 0.35f, radius = 4.dp),
+                                                    BlurStop(fraction = 1f, radius = 24.dp),
+                                                )
+                                            ),
+                                            edgeTreatment = BlurredEdgeTreatment.Rectangle
+                                        ),
 
                                     model = podcast.imageUrl,
                                     contentDescription = null,

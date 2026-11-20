@@ -322,7 +322,7 @@ fun PodcastEpisodeListItem(
                     }
 
                     Text(
-                        text = overlineText.uppercase(Locale.getDefault()),
+                        text = overlineText.uppercase(androidx.compose.ui.platform.LocalLocale.current.platformLocale),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

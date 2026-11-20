@@ -438,21 +438,17 @@ fun PlayerHushCastSheet(
                 AdAutoSkipScope.HIGH_CONFIDENCE_ONLY to "Confirmed sponsors",
                 AdAutoSkipScope.ALL_DETECTED to "All detected ads"
             )
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                scopeChoices.forEachIndexed { i, (choice, label) ->
-                    SegmentedButton(
-                        selected = autoSkipScope == choice,
-                        onClick = {
-                            scope.launch {
-                                settingsRepository.hushCast.setAdAutoSkipScope(choice)
-                                HushCastEngineBridge.autoSkipScope = choice
-                            }
-                        },
-                        shape = SegmentedButtonDefaults.itemShape(index = i, count = scopeChoices.size)
-                    ) {
-                        Text(label, maxLines = 1)
+            app.podiumpodcasts.podium.ui.component.common.ConnectedSingleChoiceGroup(
+                options = scopeChoices,
+                selected = scopeChoices.firstOrNull { it.first == autoSkipScope } ?: scopeChoices.first(),
+                onSelect = { (choice, _) ->
+                    scope.launch {
+                        settingsRepository.hushCast.setAdAutoSkipScope(choice)
+                        HushCastEngineBridge.autoSkipScope = choice
                     }
                 }
+            ) { (_, label) ->
+                Text(label, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
 
             Spacer(Modifier.height(8.dp))
@@ -481,26 +477,24 @@ fun PlayerHushCastSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(6.dp))
-                    // I10: a single choice, so segmented buttons rather than chips.
-                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                        hushLabels.userModes.forEachIndexed { i, mode ->
-                            SegmentedButton(
-                                selected = hushLabels.sameUserChoice(mode, muteActionMode),
-                                onClick = {
-                                    // "Sound" is the selected custom sound when there is one, else the tone (item 20).
-                                    val target = hushLabels.resolveUserChoice(mode, muteCustomUri)
-                                    HushCastEngineBridge.defaultActionMode = target
-                                    scope.launch(Dispatchers.IO) {
-                                        settingsRepository.hushCast.setMuteActionMode(target)
-                                    }
-                                },
-                                shape = SegmentedButtonDefaults.itemShape(index = i, count = hushLabels.userModes.size),
-                                // Four short labels: no check icon, so none of them is cut off.
-                                icon = {}
-                            ) {
-                                Text(hushLabels.modeLabel(mode), maxLines = 1)
+                    app.podiumpodcasts.podium.ui.component.common.ConnectedSingleChoiceGroup(
+                        options = hushLabels.userModes,
+                        selected = hushLabels.userModes.firstOrNull { hushLabels.sameUserChoice(it, muteActionMode) }
+                            ?: hushLabels.userModes.first(),
+                        onSelect = { mode ->
+                            // "Sound" is the selected custom sound when there is one, else the tone (item 20).
+                            val target = hushLabels.resolveUserChoice(mode, muteCustomUri)
+                            HushCastEngineBridge.defaultActionMode = target
+                            scope.launch(Dispatchers.IO) {
+                                settingsRepository.hushCast.setMuteActionMode(target)
                             }
                         }
+                    ) { mode ->
+                        Text(
+                            hushLabels.modeLabel(mode),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
                     }
 
                     if (app.podiumpodcasts.podium.ui.hushcast.HushCastLabels.isSound(muteActionMode)) {

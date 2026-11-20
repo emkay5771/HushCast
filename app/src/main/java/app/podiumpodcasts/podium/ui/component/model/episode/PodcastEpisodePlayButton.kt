@@ -37,8 +37,8 @@ fun PodcastEpisodePlayButton(
     bundle: PodcastEpisodeBundle,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    colors: ToggleButtonColors = ToggleButtonDefaults.toggleButtonColors(),
-    elevation: ButtonElevation? = ButtonDefaults.buttonElevation(),
+    colors: ToggleButtonColors = ToggleButtonDefaults.colors(),
+    elevation: androidx.compose.material3.ToggleButtonElevation? = ToggleButtonDefaults.elevation(),
     border: BorderStroke? = null,
     contentPadding: PaddingValues = ButtonDefaults.contentPaddingFor(ButtonDefaults.MinHeight),
     interactionSource: MutableInteractionSource? = null

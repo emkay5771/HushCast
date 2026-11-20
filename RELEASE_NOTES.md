@@ -1,3 +1,18 @@
+# HushCast v1.0.40-hushcast
+
+## What's New
+- **Compose 1.13 & Material 3 1.5.0 stable**:
+  - Upgraded Jetpack Compose to `1.13.0` (`composeBom 2026.11.01`), Compose Material 3 to `1.5.0` stable, `materialKolor` to `5.0.1`, `adaptive-navigation3` to `1.3.0`, AGP to `9.1.1`, Gradle to `9.3.1`, and `compileSdk` to `37`.
+  - Updated `ToggleButton`, `FilledTonalToggleButton`, and `ToggleButtonDefaults` usages to their stable `1.5.0` APIs.
+- **Native Compose 1.13 progressive blur**:
+  - Replaced `haze` with Compose's built-in `Modifier.blur(BlurRadiusSpec.verticalGradient(...))` on podcast detail and preview header backdrops, removing the `haze` dependency.
+- **Unified M3 Expressive choice groups**:
+  - Migrated the remaining `SingleChoiceSegmentedButtonRow` controls in the HushCast player sheet and Settings pane to `ConnectedSingleChoiceGroup`.
+- **Lint & locale fix**:
+  - Fixed `NonObservableLocale` in episode list items by reading `LocalLocale.current.platformLocale`.
+
+---
+
 # HushCast v1.0.39-hushcast
 
 ## What's New

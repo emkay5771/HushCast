@@ -551,18 +551,18 @@ fun SettingsHushCastPane(
                         row { pos ->
                             SettingsGroupSurface(position = pos) {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                                        HushCastLabels.userModes.forEachIndexed { idx, mode ->
-                                            SegmentedButton(
-                                                enabled = wordMutingEnabled,
-                                                selected = HushCastLabels.sameUserChoice(mode, selectedActionMode),
-                                                onClick = { chooseMode(mode) },
-                                                shape = SegmentedButtonDefaults.itemShape(idx, HushCastLabels.userModes.size),
-                                                icon = {}
-                                            ) {
-                                                SegmentedButtonLabel(HushCastLabels.modeLabel(mode))
-                                            }
-                                        }
+                                    app.podiumpodcasts.podium.ui.component.common.ConnectedSingleChoiceGroup(
+                                        options = HushCastLabels.userModes,
+                                        selected = HushCastLabels.userModes.firstOrNull { HushCastLabels.sameUserChoice(it, selectedActionMode) }
+                                            ?: HushCastLabels.userModes.first(),
+                                        onSelect = { chooseMode(it) },
+                                        enabled = wordMutingEnabled
+                                    ) { mode ->
+                                        Text(
+                                            HushCastLabels.modeLabel(mode),
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
                                     }
                                     Text(
                                         text = HushCastLabels.modeDescription(selectedActionMode),
@@ -643,18 +643,16 @@ fun SettingsHushCastPane(
                                         AdPolicyMode.MARK_ONLY to "Mark only",
                                         AdPolicyMode.OFF to "Off"
                                     )
-                                    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                                        policies.forEachIndexed { idx, (policy, label) ->
-                                            SegmentedButton(
-                                                selected = selectedAdPolicy == policy,
-                                                onClick = {
-                                                    HushCastEngineBridge.defaultAdPolicy = policy
-                                                    HushCastEngineBridge.adSkipObserver.policyMode = policy
-                                                    scope.launch { settingsRepository.hushCast.setAdPolicyMode(policy) }
-                                                },
-                                                shape = SegmentedButtonDefaults.itemShape(idx, policies.size)
-                                            ) { SegmentedButtonLabel(label, hasIcon = true) }
+                                    app.podiumpodcasts.podium.ui.component.common.ConnectedSingleChoiceGroup(
+                                        options = policies,
+                                        selected = policies.firstOrNull { it.first == selectedAdPolicy } ?: policies.first(),
+                                        onSelect = { (policy, _) ->
+                                            HushCastEngineBridge.defaultAdPolicy = policy
+                                            HushCastEngineBridge.adSkipObserver.policyMode = policy
+                                            scope.launch { settingsRepository.hushCast.setAdPolicyMode(policy) }
                                         }
+                                    ) { (_, label) ->
+                                        Text(label, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                     }
                                     Text(
                                         text = when (selectedAdPolicy) {
@@ -680,18 +678,16 @@ fun SettingsHushCastPane(
                                             AdAutoSkipScope.MODERATE_AND_HIGH to "Balanced",
                                             AdAutoSkipScope.ALL_DETECTED to "All ads"
                                         )
-                                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                                            scopes.forEachIndexed { idx, (scopeVal, label) ->
-                                                SegmentedButton(
-                                                    enabled = skippingOn,
-                                                    selected = selectedAutoSkipScope == scopeVal,
-                                                    onClick = {
-                                                        HushCastEngineBridge.autoSkipScope = scopeVal
-                                                        scope.launch { settingsRepository.hushCast.setAdAutoSkipScope(scopeVal) }
-                                                    },
-                                                    shape = SegmentedButtonDefaults.itemShape(idx, scopes.size)
-                                                ) { SegmentedButtonLabel(label, hasIcon = true) }
-                                            }
+                                        app.podiumpodcasts.podium.ui.component.common.ConnectedSingleChoiceGroup(
+                                            options = scopes,
+                                            selected = scopes.firstOrNull { it.first == selectedAutoSkipScope } ?: scopes.first(),
+                                            onSelect = { (scopeVal, _) ->
+                                                HushCastEngineBridge.autoSkipScope = scopeVal
+                                                scope.launch { settingsRepository.hushCast.setAdAutoSkipScope(scopeVal) }
+                                            },
+                                            enabled = skippingOn
+                                        ) { (_, label) ->
+                                            Text(label, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                         }
                                         Text(
                                             text = when (selectedAutoSkipScope) {
@@ -1246,17 +1242,15 @@ fun SettingsHushCastPane(
                                     DownloadAnalysisMethod.ON_DEVICE to "On-device",
                                     DownloadAnalysisMethod.SKIP_ANALYSIS to "Skip"
                                 )
-                                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                                    autoOptions.forEachIndexed { index, (method, label) ->
-                                        SegmentedButton(
-                                            selected = autoDownloadMethod == method,
-                                            onClick = {
-                                                autoDownloadMethod = method
-                                                HushCastPrefs.setAutoDownloadMethod(context, method)
-                                            },
-                                            shape = SegmentedButtonDefaults.itemShape(index = index, count = autoOptions.size)
-                                        ) { SegmentedButtonLabel(label, hasIcon = true) }
+                                app.podiumpodcasts.podium.ui.component.common.ConnectedSingleChoiceGroup(
+                                    options = autoOptions,
+                                    selected = autoOptions.firstOrNull { it.first == autoDownloadMethod } ?: autoOptions.first(),
+                                    onSelect = { (method, _) ->
+                                        autoDownloadMethod = method
+                                        HushCastPrefs.setAutoDownloadMethod(context, method)
                                     }
+                                ) { (_, label) ->
+                                    Text(label, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                                 }
                             }
                         }

@@ -149,7 +149,7 @@ fun PodcastEpisodeDownloadButton(
             state = animateState.value,
             minimumState = 0f,
             checked = bundle.download != null,
-            colors = ToggleButtonDefaults.tonalToggleButtonColors(),
+            colors = androidx.compose.material3.FilledTonalToggleButtonDefaults.colors(),
             onCheckedChange = { onCheckedChange() },
             content = { inner() }
         )

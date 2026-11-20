@@ -1,7 +1,6 @@
 plugins {
     alias(libs.plugins.aboutLibraries)
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.jetbrains.kotlin.serialization)
     id("kotlin-parcelize")
@@ -11,7 +10,7 @@ plugins {
 android {
     namespace = "app.podiumpodcasts.podium"
     compileSdk {
-        version = release(36)
+        version = release(37)
     }
 
     dependenciesInfo {
@@ -25,8 +24,8 @@ android {
         applicationId = "app.podiumpodcasts.podium"
         minSdk = 34
         targetSdk = 36
-        versionCode = 1000073
-        versionName = "1.0.39-hushcast"
+        versionCode = 1000074
+        versionName = "1.0.40-hushcast"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
@@ -93,15 +92,18 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlinOptions {
-        jvmTarget = "11"
-    }
     buildFeatures {
         compose = true
         buildConfig = true
     }
     lint {
         error += "MissingTranslation"
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11)
     }
 }
 
@@ -144,7 +146,6 @@ dependencies {
 
     // Misc
     implementation(libs.compose.shimmer)
-    implementation(libs.haze)
 
     // Adaptive
     implementation(libs.androidx.compose.material3.adaptive.navigation.suite)
