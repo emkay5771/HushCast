@@ -54,4 +54,18 @@ class AutoMuteMigrationTest {
         assertTrue(executed.any { it.contains("CREATE TABLE IF NOT EXISTS `episode_chunk_checkpoints`") })
         assertTrue(executed.any { it.contains("CREATE TABLE IF NOT EXISTS `episode_offset_map`") })
     }
+
+    @Test
+    fun `migration 4 to 5 adds episode_fingerprints and reclaimed_time tables`() {
+        val executed = mutableListOf<String>()
+        val db = recordingDb(executed)
+
+        assertEquals(4, AutoMuteDatabase.MIGRATION_4_5.startVersion)
+        assertEquals(5, AutoMuteDatabase.MIGRATION_4_5.endVersion)
+
+        AutoMuteDatabase.MIGRATION_4_5.migrate(db)
+
+        assertTrue(executed.any { it.contains("CREATE TABLE IF NOT EXISTS `episode_fingerprints`") })
+        assertTrue(executed.any { it.contains("CREATE TABLE IF NOT EXISTS `reclaimed_time`") })
+    }
 }

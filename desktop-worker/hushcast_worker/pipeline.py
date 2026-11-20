@@ -24,6 +24,13 @@ from .audio import (
     validate_fetch_url,
 )
 from .chapters import generate_chapters_and_summary, release_chat_llm
+from .fingerprint import (
+    FingerprintStore,
+    compute_fingerprint,
+    find_repeated_segments,
+    merge_fingerprint_segments,
+    normalize_podcast_key,
+)
 from .forced_align import MIN_WORD_SCORE, ForcedAligner, count_alignable_words
 from .transcript_repair import build_initial_prompt, repair_hard_cuts, strip_prompt_leak
 from .models import (
@@ -1063,6 +1070,8 @@ class LocalMlBackend:
         cancel_event: Optional[threading.Event] = None,
         episode_title: Optional[str] = None,
         podcast_title: Optional[str] = None,
+        podcast_origin: Optional[str] = None,
+        fingerprint_store: Optional[FingerprintStore] = None,
     ) -> DesktopAnalysisBundle:
         bundle, _ = self.analyze_with_embeddings(
             audio_path=audio_path,
@@ -1078,6 +1087,8 @@ class LocalMlBackend:
             cancel_event=cancel_event,
             episode_title=episode_title,
             podcast_title=podcast_title,
+            podcast_origin=podcast_origin,
+            fingerprint_store=fingerprint_store,
         )
         return bundle
 
@@ -1097,6 +1108,8 @@ class LocalMlBackend:
         cancel_event: Optional[threading.Event] = None,
         episode_title: Optional[str] = None,
         podcast_title: Optional[str] = None,
+        podcast_origin: Optional[str] = None,
+        fingerprint_store: Optional[FingerprintStore] = None,
     ):
         self.whisper_model = self._resolve_whisper_model()
         if not self.ml_imports_ready():
@@ -1331,6 +1344,30 @@ class LocalMlBackend:
             sess = self._get_ort_session()
             probs = sess.run(None, {"emb": emb, "feats": feats})[0][0]
             ad_segments = decode_ad_segments(probs, segments)
+
+            if fingerprint_store is not None and len(pcm_16k) > 0:
+                try:
+                    podcast_key = normalize_podcast_key(podcast_origin, podcast_title)
+                    fp = compute_fingerprint(
+                        pcm_16k,
+                        file_sha256=file_sha256,
+                        podcast_key=podcast_key,
+                    )
+                    refs = fingerprint_store.load_references(
+                        exclude_sha256=file_sha256,
+                        podcast_key=podcast_key,
+                    )
+                    fp_segments = find_repeated_segments(fp, refs)
+                    if fp_segments:
+                        logger.info(
+                            "Fingerprinting detected %d recurring segment(s) for %s",
+                            len(fp_segments),
+                            episode_id,
+                        )
+                        ad_segments = merge_fingerprint_segments(ad_segments, fp_segments)
+                    fingerprint_store.save(fp)
+                except Exception:
+                    logger.warning("Cross-episode fingerprinting failed for %s", episode_id, exc_info=True)
 
             chat_path = self.chat_model_path()
             sum_mode = f"LLM ({chat_path.name})" if (chat_path and chat_path.exists()) else "Extractive summary"

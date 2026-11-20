@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import Callable, Optional
 
+from .fingerprint import FingerprintStore
 from .models import (
     PIPELINE_VERSION,
     DesktopAnalysisBundle,
@@ -204,6 +205,7 @@ class WorkerCache:
         self._index: dict[str, dict] = self._load_index()
         # sha -> (embeddings_matrix, episodeId, list[(startSec, endSec, text)])
         self._search_cache: dict[str, tuple] = {}
+        self.fingerprints = FingerprintStore(self.root_dir)
 
     def _load_index(self) -> dict[str, dict]:
         if not self.index_path.exists():
@@ -659,5 +661,6 @@ class WorkerCache:
                 self._search_cache.clear()
                 self._index = {"by_url": {}, "by_sha": {}}
                 self._save_index()
+                self.fingerprints.clear()
 
         return {"removedFiles": removed_files, "freedBytes": freed_bytes}

@@ -140,7 +140,8 @@ enum class HushCastSettingsSection(val title: String) {
     SPONSORS("Sponsor skipping"),
     WORD_LIST("Word list"),
     PROCESSING("Processing"),
-    ADVANCED("Advanced")
+    ADVANCED("Advanced"),
+    IMPACT("Time reclaimed")
 }
 
 @kotlinx.parcelize.Parcelize
@@ -168,6 +169,8 @@ fun SettingsHushCastPane(
     val modelManager = remember(context) { ModelManager(context) }
 
     val rules by autoMuteDb.dao().observeRules().collectAsStateWithLifecycle(initialValue = emptyList())
+    val reclaimedByCategory by autoMuteDb.dao().observeReclaimedTimeByCategory().collectAsStateWithLifecycle(initialValue = emptyList())
+    val topPodcastsReclaimed by autoMuteDb.dao().observeTopPodcastsReclaimed(8).collectAsStateWithLifecycle(initialValue = emptyList())
     var modelsReady by remember { mutableStateOf(modelManager.areAllModelsReady()) }
     var downloadedMb by remember { mutableStateOf((modelManager.totalDownloadedBytes() / (1024L * 1024L)).toInt()) }
     var downloadProgress by remember { mutableStateOf<ModelDownloadProgress?>(null) }
@@ -464,6 +467,42 @@ fun SettingsHushCastPane(
                                     )
                                 }
                             }
+                        }
+                    }
+
+                    settingsGroup(key = "reclaimed") {
+                        row { pos ->
+                            val totalReclaimedMs = reclaimedByCategory.sumOf { it.totalMs }
+                            val totalSkips = reclaimedByCategory.sumOf { it.totalCount }
+                            val breakdown = buildList {
+                                val adsMs = reclaimedByCategory.firstOrNull { it.category == "sponsor_ad" }?.totalMs ?: 0L
+                                val introOutroMs = reclaimedByCategory.firstOrNull { it.category == "boilerplate" }?.totalMs ?: 0L
+                                val promoMs = reclaimedByCategory.filter {
+                                    it.category == "house_promo" || it.category == "membership_pitch"
+                                }.sumOf { it.totalMs }
+                                if (adsMs > 0L) add("${formatReclaimedDuration(adsMs)} ads")
+                                if (introOutroMs > 0L) add("${formatReclaimedDuration(introOutroMs)} intros/outros")
+                                if (promoMs > 0L) add("${formatReclaimedDuration(promoMs)} promos")
+                            }.joinToString(" · ")
+                            SettingsListItem(
+                                icon = { Icon(Icons.Rounded.Speed, null) },
+                                label = if (totalReclaimedMs > 0L) {
+                                    "${formatReclaimedDuration(totalReclaimedMs)} reclaimed"
+                                } else {
+                                    "Time reclaimed"
+                                },
+                                description = if (totalReclaimedMs > 0L) {
+                                    listOfNotNull(
+                                        breakdown.takeIf { it.isNotBlank() },
+                                        "$totalSkips skipped"
+                                    ).joinToString(" · ")
+                                } else {
+                                    "Tracks ads, promos & intros skipped"
+                                },
+                                index = pos.index,
+                                count = pos.count,
+                                onClick = { onNavigate(SettingsHushCastKey(HushCastSettingsSection.IMPACT)) }
+                            )
                         }
                     }
 
@@ -1617,6 +1656,138 @@ fun SettingsHushCastPane(
                     }
                 }
             }
+
+            HushCastSettingsSection.IMPACT -> {
+                var confirmReset by remember { mutableStateOf(false) }
+                val totalMs = reclaimedByCategory.sumOf { it.totalMs }
+                val totalCount = reclaimedByCategory.sumOf { it.totalCount }
+
+                SettingsLazyColumn(padding) {
+                    settingsGroup(key = "impact_hero", spaceAbove = 0.dp) {
+                        row { pos ->
+                            SettingsGroupSurface(
+                                position = pos,
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                contentPadding = PaddingValues(16.dp)
+                            ) {
+                                Column(Modifier.semantics(mergeDescendants = true) { }) {
+                                    Text(
+                                        text = "Time reclaimed",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = if (totalMs > 0L) formatReclaimedDuration(totalMs) else "0m",
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        text = if (totalCount > 0) {
+                                            "Across $totalCount auto-skipped segments"
+                                        } else {
+                                            "Play an analyzed episode with auto-skip on to start tracking"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    settingsGroup(header = "By category", key = "impact_categories") {
+                        listOf(
+                            "sponsor_ad" to "Sponsors / ads",
+                            "boilerplate" to "Intros / outros",
+                            "house_promo" to "Show promos",
+                            "membership_pitch" to "Membership pitches"
+                        ).forEach { (cat, label) ->
+                            val entry = reclaimedByCategory.firstOrNull { it.category == cat }
+                            val catMs = entry?.totalMs ?: 0L
+                            val catCount = entry?.totalCount ?: 0
+                            row(key = cat) { pos ->
+                                SettingsListItem(
+                                    label = label,
+                                    description = if (catCount > 0) "$catCount skipped" else "None yet",
+                                    trailingContent = {
+                                        Text(
+                                            text = if (catMs > 0L) formatReclaimedDuration(catMs) else "0m",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    },
+                                    index = pos.index,
+                                    count = pos.count
+                                )
+                            }
+                        }
+                    }
+
+                    if (topPodcastsReclaimed.isNotEmpty()) {
+                        settingsGroup(header = "Top shows", key = "impact_shows") {
+                            topPodcastsReclaimed.forEach { show ->
+                                row(key = show.podcastOrigin) { pos ->
+                                    SettingsListItem(
+                                        label = show.podcastTitle.ifBlank { show.podcastOrigin },
+                                        description = "${show.totalCount} skipped",
+                                        trailingContent = {
+                                            Text(
+                                                text = formatReclaimedDuration(show.totalMs),
+                                                style = MaterialTheme.typography.titleSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        },
+                                        index = pos.index,
+                                        count = pos.count
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (totalCount > 0) {
+                        settingsGroup(key = "impact_actions") {
+                            row { pos ->
+                                SettingsListItem(
+                                    icon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
+                                    label = "Reset stats",
+                                    description = "Clear all reclaimed time counters",
+                                    index = pos.index,
+                                    count = pos.count,
+                                    onClick = { confirmReset = true }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (confirmReset) {
+                    AlertDialog(
+                        onDismissRequest = { confirmReset = false },
+                        title = { Text("Reset time reclaimed?") },
+                        text = { Text("This clears your local reclaimed-time history across all shows.") },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    confirmReset = false
+                                    scope.launch(Dispatchers.IO) {
+                                        autoMuteDb.dao().clearReclaimedTime()
+                                    }
+                                }
+                            ) {
+                                Text("Reset")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { confirmReset = false }) {
+                                Text("Cancel")
+                            }
+                        }
+                    )
+                }
+            }
         }
     }
 }
@@ -1825,4 +1996,14 @@ private fun parseWorkerPairingPayload(raw: String): Pair<String, String>? {
         return trimmed.trimEnd('/') to ""
     }
     return null
+}
+
+private fun formatReclaimedDuration(ms: Long): String {
+    val totalSec = (ms / 1000L).coerceAtLeast(0L)
+    if (totalSec < 60L) return "${totalSec}s"
+    val totalMin = totalSec / 60L
+    if (totalMin < 60L) return "${totalMin}m"
+    val hours = totalMin / 60L
+    val mins = totalMin % 60L
+    return if (mins == 0L) "${hours}h" else "${hours}h ${mins}m"
 }

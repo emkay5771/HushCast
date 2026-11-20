@@ -25,7 +25,8 @@ object HushCastEngineBridge {
 
     data class PendingUndoAdSkip(
         val episodeId: String?,
-        val event: AdSkipEvent
+        val event: AdSkipEvent,
+        val savingsRowId: Long? = null
     )
 
     private val _pendingUndoEvent = MutableStateFlow<PendingUndoAdSkip?>(null)
@@ -157,8 +158,23 @@ object HushCastEngineBridge {
         return adSkipObserver.getActiveAutoSkipRanges() + skippedChapterRanges
     }
 
-    fun notifyAdSkipped(episodeId: String?, event: AdSkipEvent) {
-        _pendingUndoEvent.value = PendingUndoAdSkip(episodeId = episodeId, event = event)
+    fun notifyAdSkipped(episodeId: String?, event: AdSkipEvent, savingsRowId: Long? = null) {
+        _pendingUndoEvent.value = PendingUndoAdSkip(
+            episodeId = episodeId,
+            event = event,
+            savingsRowId = savingsRowId
+        )
+    }
+
+    fun revertSavingsIfRecorded(context: android.content.Context, rowId: Long?) {
+        if (rowId == null) return
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching {
+                app.hushcast.automute.storage.AutoMuteDatabase.getInstance(context)
+                    .dao()
+                    .deleteReclaimedTimeById(rowId)
+            }
+        }
     }
 
     fun isUndoValid(

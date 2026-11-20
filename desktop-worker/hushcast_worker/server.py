@@ -540,6 +540,10 @@ def create_app(
             kwargs["episode_title"] = req.title or None
         if "podcast_title" in sig.parameters:
             kwargs["podcast_title"] = req.podcastTitle
+        if "podcast_origin" in sig.parameters:
+            kwargs["podcast_origin"] = req.podcastOrigin
+        if "fingerprint_store" in sig.parameters:
+            kwargs["fingerprint_store"] = cache.fingerprints
         return fn(**kwargs)
 
     async def _run_job(job_id: str, req: DesktopJobRequest, cancel_event: threading.Event) -> None:

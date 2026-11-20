@@ -1087,6 +1087,21 @@ class SettingsRepository(val context: Context) {
             }
         }
 
+        fun podcastAutoSkipClasses(origin: String): Flow<Set<String>?> {
+            val key = androidx.datastore.preferences.core.stringSetPreferencesKey("podcast_auto_skip_classes_${origin.hashCode()}")
+            return dataStore.data.map { preferences ->
+                preferences[key]
+            }
+        }
+
+        suspend fun setPodcastAutoSkipClasses(origin: String, classes: Set<String>?) {
+            val key = androidx.datastore.preferences.core.stringSetPreferencesKey("podcast_auto_skip_classes_${origin.hashCode()}")
+            dataStore.edit { preferences ->
+                if (classes == null) preferences.remove(key)
+                else preferences[key] = classes
+            }
+        }
+
         fun podcastDisableAutoProcess(origin: String): Flow<Boolean> {
             val key = booleanPreferencesKey("podcast_disable_auto_process_${origin.hashCode()}")
             return dataStore.data.map { preferences ->

@@ -166,6 +166,68 @@ data class EpisodeInsightsEntity(
     val updatedAt: Long = System.currentTimeMillis()
 )
 
+@Entity(
+    tableName = "episode_fingerprints",
+    indices = [Index("podcastOrigin"), Index("createdAt")]
+)
+data class EpisodeFingerprintEntity(
+    @PrimaryKey val fileSha256: String,
+    val podcastOrigin: String,
+    val episodeId: String,
+    val durationMs: Long,
+    val fingerprintBlob: ByteArray,
+    val createdAt: Long = System.currentTimeMillis()
+) {
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is EpisodeFingerprintEntity) return false
+        return fileSha256 == other.fileSha256 &&
+            podcastOrigin == other.podcastOrigin &&
+            episodeId == other.episodeId &&
+            durationMs == other.durationMs &&
+            fingerprintBlob.contentEquals(other.fingerprintBlob) &&
+            createdAt == other.createdAt
+    }
+
+    override fun hashCode(): Int {
+        var result = fileSha256.hashCode()
+        result = 31 * result + podcastOrigin.hashCode()
+        result = 31 * result + episodeId.hashCode()
+        result = 31 * result + durationMs.hashCode()
+        result = 31 * result + fingerprintBlob.contentHashCode()
+        result = 31 * result + createdAt.hashCode()
+        return result
+    }
+}
+
+@Entity(
+    tableName = "reclaimed_time",
+    indices = [Index("episodeId"), Index("podcastOrigin"), Index("category")]
+)
+data class ReclaimedTimeEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val podcastOrigin: String,
+    val podcastTitle: String = "",
+    val episodeId: String,
+    val category: String,
+    val savedMs: Long,
+    val segmentCount: Int = 1,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+data class ReclaimedCategorySummary(
+    val category: String,
+    val totalMs: Long,
+    val totalCount: Int
+)
+
+data class ReclaimedPodcastSummary(
+    val podcastOrigin: String,
+    val podcastTitle: String,
+    val totalMs: Long,
+    val totalCount: Int
+)
+
 @Dao
 interface AutoMuteDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -518,6 +580,72 @@ interface AutoMuteDao {
         pruneOrphanMuteSegments()
         pruneOrphanAdSegments()
     }
+
+    // ---- Cross-episode fingerprints ----
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertFingerprint(entity: EpisodeFingerprintEntity)
+
+    @Query(
+        """
+        SELECT * FROM episode_fingerprints
+        WHERE podcastOrigin = :podcastOrigin AND fileSha256 != :excludeSha
+        ORDER BY createdAt DESC LIMIT :limit
+        """
+    )
+    suspend fun getRecentFingerprintsForPodcast(
+        podcastOrigin: String,
+        excludeSha: String,
+        limit: Int = 8
+    ): List<EpisodeFingerprintEntity>
+
+    @Query(
+        """
+        SELECT * FROM episode_fingerprints
+        WHERE podcastOrigin != :podcastOrigin AND fileSha256 != :excludeSha
+        ORDER BY createdAt DESC LIMIT :limit
+        """
+    )
+    suspend fun getRecentFingerprintsOtherPodcasts(
+        podcastOrigin: String,
+        excludeSha: String,
+        limit: Int = 4
+    ): List<EpisodeFingerprintEntity>
+
+    @Query(
+        """
+        DELETE FROM episode_fingerprints
+        WHERE fileSha256 NOT IN (
+            SELECT fileSha256 FROM episode_fingerprints ORDER BY createdAt DESC LIMIT :keepCount
+        )
+        """
+    )
+    suspend fun pruneOldFingerprints(keepCount: Int = 40)
+
+    // ---- Reclaimed time tracking ----
+
+    @Insert
+    suspend fun insertReclaimedTime(entity: ReclaimedTimeEntity): Long
+
+    @Query("DELETE FROM reclaimed_time WHERE id = :id")
+    suspend fun deleteReclaimedTimeById(id: Long)
+
+    @Query("SELECT category, SUM(savedMs) AS totalMs, SUM(segmentCount) AS totalCount FROM reclaimed_time GROUP BY category")
+    fun observeReclaimedTimeByCategory(): Flow<List<ReclaimedCategorySummary>>
+
+    @Query(
+        """
+        SELECT podcastOrigin, MAX(podcastTitle) AS podcastTitle, SUM(savedMs) AS totalMs, SUM(segmentCount) AS totalCount
+        FROM reclaimed_time
+        GROUP BY podcastOrigin
+        ORDER BY totalMs DESC
+        LIMIT :limit
+        """
+    )
+    fun observeTopPodcastsReclaimed(limit: Int = 8): Flow<List<ReclaimedPodcastSummary>>
+
+    @Query("DELETE FROM reclaimed_time")
+    suspend fun clearReclaimedTime()
 }
 
 @Database(
@@ -530,9 +658,11 @@ interface AutoMuteDao {
         EpisodeAnalysisStatusEntity::class,
         EpisodeInsightsEntity::class,
         EpisodeChunkCheckpointEntity::class,
-        EpisodeOffsetMapEntity::class
+        EpisodeOffsetMapEntity::class,
+        EpisodeFingerprintEntity::class,
+        ReclaimedTimeEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 abstract class AutoMuteDatabase : RoomDatabase() {
@@ -609,13 +739,50 @@ abstract class AutoMuteDatabase : RoomDatabase() {
             }
         }
 
+        internal val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `episode_fingerprints` (
+                        `fileSha256` TEXT NOT NULL,
+                        `podcastOrigin` TEXT NOT NULL,
+                        `episodeId` TEXT NOT NULL,
+                        `durationMs` INTEGER NOT NULL,
+                        `fingerprintBlob` BLOB NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`fileSha256`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_episode_fingerprints_podcastOrigin` ON `episode_fingerprints` (`podcastOrigin`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_episode_fingerprints_createdAt` ON `episode_fingerprints` (`createdAt`)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `reclaimed_time` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `podcastOrigin` TEXT NOT NULL,
+                        `podcastTitle` TEXT NOT NULL,
+                        `episodeId` TEXT NOT NULL,
+                        `category` TEXT NOT NULL,
+                        `savedMs` INTEGER NOT NULL,
+                        `segmentCount` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_reclaimed_time_episodeId` ON `reclaimed_time` (`episodeId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_reclaimed_time_podcastOrigin` ON `reclaimed_time` (`podcastOrigin`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_reclaimed_time_category` ON `reclaimed_time` (`category`)")
+            }
+        }
+
         fun getInstance(context: Context): AutoMuteDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     AutoMuteDatabase::class.java,
                     "hushcast_automute.db"
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4).build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5).build().also { INSTANCE = it }
             }
         }
 

@@ -395,6 +395,20 @@ class PlaybackService : MediaLibraryService() {
         }
 
         scope.launch {
+            settingsRepository.hushCast.adAutoSkipClasses.distinctUntilChanged().collect { classes ->
+                val origin = getOrigin()
+                val podcastOverride = if (origin != null) {
+                    withContext(Dispatchers.IO) {
+                        settingsRepository.hushCast.podcastAutoSkipClasses(origin).firstOrNull()
+                    }
+                } else null
+                HushCastEngineBridge.autoSkipClasses = podcastOverride ?: classes
+                checkActiveSkipsNow()
+                schedulePositionCallbacks()
+            }
+        }
+
+        scope.launch {
             settingsRepository.behavior.speedPresets.distinctUntilChanged().collect { speedPresets = it }
         }
         scope.launch {
@@ -412,7 +426,23 @@ class PlaybackService : MediaLibraryService() {
         scope.launch {
             HushCastEngineBridge.adSkipEvents.collect { event ->
                 val epId = mediaSession?.player?.currentMediaItem?.getEpisodeId()
-                HushCastEngineBridge.notifyAdSkipped(epId, event)
+                val savedMs = (event.jumpedToMs - event.jumpedFromMs).coerceAtLeast(0L)
+                val savingsRowId = if (epId != null && savedMs > 0L) {
+                    withContext(Dispatchers.IO) {
+                        val epBundle = db.podcastEpisodes().getSyncNullable(epId)
+                        autoMuteDb.dao().insertReclaimedTime(
+                            app.hushcast.automute.storage.ReclaimedTimeEntity(
+                                podcastOrigin = epBundle?.episode?.origin ?: "",
+                                podcastTitle = epBundle?.podcast?.title ?: "",
+                                episodeId = epId,
+                                category = event.adWindow.adClass,
+                                savedMs = savedMs,
+                                segmentCount = 1
+                            )
+                        )
+                    }
+                } else null
+                HushCastEngineBridge.notifyAdSkipped(epId, event, savingsRowId)
                 HushCastEngineBridge.playSponsorSkipIndicator(this@PlaybackService)
             }
         }
@@ -517,6 +547,10 @@ class PlaybackService : MediaLibraryService() {
             val globalWordMuting = settingsRepository.hushCast.wordMutingEnabled.firstOrNull() ?: true
             val podcastWordMuting = settingsRepository.hushCast.podcastWordMuting(origin).firstOrNull()
             HushCastEngineBridge.autoMuteProcessor.isEnabled = podcastWordMuting ?: globalWordMuting
+
+            val globalSkipClasses = settingsRepository.hushCast.adAutoSkipClasses.firstOrNull() ?: setOf("sponsor_ad")
+            val podcastSkipClasses = settingsRepository.hushCast.podcastAutoSkipClasses(origin).firstOrNull()
+            HushCastEngineBridge.autoSkipClasses = podcastSkipClasses ?: globalSkipClasses
 
             val status = autoMuteDb.dao().getStatus(episodeId)
             val sha = status?.fileSha256?.takeIf { it.isNotBlank() }

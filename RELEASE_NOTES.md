@@ -1,3 +1,15 @@
+# HushCast v1.0.47-hushcast
+
+## What's New
+- **Cross-episode audio fingerprinting (Desktop / Cloud Worker & on-device engine)**:
+  - Detects recurring show intros, outros, and repeated pre-recorded network promos by matching compact spectral fingerprints across episodes in your library—catching music-only theme songs and boilerplate even when there is no speech.
+- **Per-podcast skip category overrides**:
+  - In the player's **HushCast** sheet, **Sponsors / ads**, **Show promos**, **Membership pitches**, and **Intros / outros** now save per podcast (with a **Use global default** reset), so you can skip intros on one show while keeping them on another.
+- **Time reclaimed tracking & Settings dashboard**:
+  - Tracks time saved across skipped sponsors, intros/outros, and promos (automatically reverted if you tap **Undo**), with a **Time reclaimed** summary card in **Settings → HushCast** and a detailed breakdown by category and top shows.
+
+---
+
 # HushCast v1.0.46-hushcast
 
 ## What's New

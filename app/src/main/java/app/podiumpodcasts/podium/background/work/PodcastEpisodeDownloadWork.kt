@@ -459,7 +459,8 @@ class PodcastEpisodeDownloadWork(
                     language = language,
                     force = forceReprocess,
                     reprocessStage = reprocessStage,
-                    podcastTitle = podcastTitle
+                    podcastTitle = podcastTitle,
+                    podcastOrigin = episode.origin
                 )
                 // A retry (constraint stop, process death) re-attaches to the job it started instead
                 // of spawning a second, billed GPU job.

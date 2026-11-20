@@ -87,6 +87,7 @@ class DesktopJobRequest(BaseModel):
     audioUrl: str
     title: str = ""
     podcastTitle: Optional[str] = None
+    podcastOrigin: Optional[str] = None
     language: Optional[str] = None
     feedTranscriptRaw: Optional[str] = None
     feedTranscriptMime: Optional[str] = None

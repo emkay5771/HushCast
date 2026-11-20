@@ -670,27 +670,52 @@ fun PlayerHushCastSheet(
                         }
                     }
 
+                    val podcastAutoSkipClasses by remember(origin) {
+                        settingsRepository.hushCast.podcastAutoSkipClasses(origin)
+                    }.collectAsStateWithLifecycle(initialValue = null)
+                    val effectiveSkipClasses = podcastAutoSkipClasses ?: autoSkipClasses
+                    val hasSkipClassesOverride = podcastAutoSkipClasses != null
+
                     Spacer(Modifier.height(10.dp))
-                    Text(
-                        text = "Skip categories",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (hasSkipClassesOverride) "Skip categories (this show)" else "Skip categories",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (hasSkipClassesOverride) {
+                            TextButton(
+                                onClick = {
+                                    scope.launch {
+                                        settingsRepository.hushCast.setPodcastAutoSkipClasses(origin, null)
+                                        HushCastEngineBridge.autoSkipClasses = autoSkipClasses
+                                    }
+                                }
+                            ) {
+                                Text("Use global default")
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(6.dp))
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(
-                            "sponsor_ad" to "Sponsors",
-                            "self_promo" to "Self-promo",
-                            "intro_outro" to "Intro / Outro"
+                            "sponsor_ad" to "Sponsors / ads",
+                            "house_promo" to "Show promos",
+                            "membership_pitch" to "Membership pitches",
+                            "boilerplate" to "Intros / outros"
                         ).forEach { (cls, label) ->
-                            val selected = cls in autoSkipClasses
+                            val selected = cls in effectiveSkipClasses
                             FilterChip(
                                 selected = selected,
                                 onClick = {
-                                    val updated = if (selected) autoSkipClasses - cls else autoSkipClasses + cls
+                                    val updated = if (selected) effectiveSkipClasses - cls else effectiveSkipClasses + cls
+                                    HushCastEngineBridge.autoSkipClasses = updated
                                     scope.launch {
-                                        settingsRepository.hushCast.setAdAutoSkipClasses(updated)
-                                        HushCastEngineBridge.autoSkipClasses = updated
+                                        settingsRepository.hushCast.setPodcastAutoSkipClasses(origin, updated)
                                     }
                                 },
                                 label = { Text(label) }

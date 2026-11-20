@@ -45,7 +45,9 @@ data class DesktopJobRequest(
     val force: Boolean = false,
     val reprocessStage: String? = null,
     /** Helps the worker's transcription prompt (spellings of names and the show). */
-    val podcastTitle: String? = null
+    val podcastTitle: String? = null,
+    /** Feed origin URL used for cross-episode intro/outro/promo fingerprinting. */
+    val podcastOrigin: String? = null
 )
 
 @Serializable
