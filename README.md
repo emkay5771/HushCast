@@ -18,7 +18,7 @@
   - **Micro-Skip**: Seamlessly splices the word out so you never hear a pause.
   - **Bleep**: Plays a classic censor tone.
   - **Custom Sound Effect**: Pick any audio file on your phone to play instead.
-- **Presets & custom rules**: Built-in **Profanity** and **Explicit Content** presets, masked-word matching (`f***`, `s**t`), plurals, multi-word phrases, and custom rules.
+- **Built-in filters & custom rules**: **Profanity** (**Light** / **Standard** / **Strict** levels, with per-podcast overrides), **Explicit Content**, and **Religious Exclamations** filters, plus your own custom words and regex rules. Smart matching catches compounds, words inside longer words, plurals, hyphenated forms, and asterisk-masked words (`f***`, `s**t`) while leaving similar everyday words and names alone.
 
 ### 📑 Auto-Generated Chapters, Transcripts & Summaries
 - **Jump straight to the topics you care about**: When paired with a Desktop or Cloud Worker, HushCast automatically breaks episodes into timestamped **Chapters**—even for podcasts that don't include chapters in their feed.
@@ -33,6 +33,7 @@
 - **Pocket Casts-style controls**: Compact floating miniplayer with queue count and blocked-content markers, plus a full-screen player with **Player**, **Transcript**, **Chapters**, and **Notes** tabs.
 - **Effortless queue & episode management**: Swipe up for **Up Next** (with swipe-to-remove **Undo**), half-swipe episodes for quick actions, full-swipe for your primary action, or long-press to bulk-manage episodes.
 - **Playback polish**: Speed stepper & presets (`0.5x`–`3.0x`) with live speed shown in Android's media notification, **Trim Silence**, **Volume Boost**, **speed- & skip-adjusted remaining time** (e.g., `-24:10 (-16:07)`), and a **10-second fade-out Sleep Timer**.
+- **Podcasting 2.0 support**: Trailers (`podcast:trailer`), standalone soundbite previews (`podcast:soundbite`), seasons & serial show ordering, hosts/guests (`podcast:person`), funding links, RSS chapters/transcripts, and `podcast:socialInteract` comments.
 - **Adaptive Material 3 Expressive UI**: Artwork-adaptive **Material You** colors, smooth progressive-blurred podcast headers, predictive back gestures, and customizable player action buttons.
 - **Bring your library with you**: Search via **Podcast Index** and **Apple Podcasts**, import `.opml` files (including folders) from Pocket Casts or other apps, start streaming immediately while downloading, sync via **gpodder.net** / **Nextcloud**, and listen in the car with **Android Auto**.
 
