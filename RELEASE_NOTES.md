@@ -1,3 +1,11 @@
+# HushCast v1.0.44-hushcast
+
+## What's New
+- **Auto-download & processing on Play**:
+  - Pressing Play on an episode now triggers auto-download and HushCast audio processing according to your queue/Up Next settings, matching the behavior of adding an episode to the queue.
+
+---
+
 # HushCast v1.0.43-hushcast
 
 ## What's New
