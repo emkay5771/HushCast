@@ -29,6 +29,24 @@ object CarSections {
     }
 
     /**
+     * The Up Next tab: the episode currently loaded in the player (if any) under "Now playing",
+     * followed by the queued episodes under "Up Next" (without repeating the current one).
+     * When nothing is loaded, the queued episodes are returned without a section heading.
+     */
+    fun <T> upNext(
+        current: T?,
+        queued: List<T>,
+        id: (T) -> String,
+        nowPlayingTitle: String,
+        upNextTitle: String
+    ): List<Row<T>> {
+        if (current == null) return queued.map { Row(it, null) }
+        val currentId = id(current)
+        val rest = queued.filter { id(it) != currentId }
+        return listOf(Row(current, nowPlayingTitle)) + rest.map { Row(it, upNextTitle) }
+    }
+
+    /**
      * A serial show, already in season order: "Season 1", "Season 2", then "Other episodes" for
      * those without a season. A show with no seasons at all gets no headings.
      */

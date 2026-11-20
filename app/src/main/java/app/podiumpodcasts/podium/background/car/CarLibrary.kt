@@ -58,10 +58,19 @@ class CarLibrary(
     }
 
     private suspend fun upNext(): List<MediaItem> {
-        val ids = db.playbackQueue().getQueueSync().map { it.episodeId }
-        if (ids.isEmpty()) return emptyList()
-        val byId = db.podcastEpisodes().getByIds(ids).associateBy { it.episode.id }
-        return episodeRows(ids.mapNotNull { byId[it] }, mixed = true)
+        val currentId = currentEpisodeId()
+        val queuedIds = db.playbackQueue().getQueueSync().map { it.episodeId }
+        val allIds = (listOfNotNull(currentId) + queuedIds).distinct()
+        if (allIds.isEmpty()) return emptyList()
+        val byId = db.podcastEpisodes().getByIds(allIds).associateBy { it.episode.id }
+        val rows = CarSections.upNext(
+            current = currentId?.let { byId[it] },
+            queued = queuedIds.mapNotNull { byId[it] },
+            id = { it.episode.id },
+            nowPlayingTitle = items.string(R.string.car_section_now_playing),
+            upNextTitle = items.string(R.string.route_up_next)
+        )
+        return episodeRows(rows, mixed = true)
     }
 
     private suspend fun continuing(): List<PodcastEpisodeBundle> =

@@ -300,6 +300,7 @@
     <string name="car_tab_new">Nouveau</string>
     <string name="car_tab_podcasts">Podcasts</string>
     <string name="car_tab_downloads">Téléchargements</string>
+    <string name="car_section_now_playing">En cours de lecture</string>
     <string name="car_section_continue">Reprendre l\'écoute</string>
     <string name="car_section_season">Saison %1$d</string>
     <string name="car_section_other">Autres épisodes</string>

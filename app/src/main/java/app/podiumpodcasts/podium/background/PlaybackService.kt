@@ -133,9 +133,11 @@ class PlaybackService : MediaLibraryService() {
     private var sessionCallback: MediaLibrarySessionCallback? = null
 
     // Android Auto
+    @Volatile
+    private var currentPlayerEpisodeId: String? = null
     val carItems by lazy { CarMediaItems(this) }
     val carLibrary by lazy {
-        CarLibrary(db, carItems) { HushCastEngineBridge.currentEpisodeId }
+        CarLibrary(db, carItems) { currentPlayerEpisodeId }
     }
     /** Car-mode buttons, subtitle and errors; set once the session exists. */
     var carCommands: CarCommands? = null
@@ -1316,6 +1318,7 @@ class PlaybackService : MediaLibraryService() {
         sessionCallback?.destroy()
         carConnectionWatcher?.stop()
         carCommands?.destroy()
+        currentPlayerEpisodeId = null
         carDebugReceiver?.let { runCatching { unregisterReceiver(it) } }
         carDebugReceiver = null
         job.cancel()

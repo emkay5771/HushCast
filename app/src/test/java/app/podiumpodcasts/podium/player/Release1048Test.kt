@@ -165,6 +165,39 @@ class Release1048Test {
     }
 
     @Test
+    fun `Up Next tab shows currently playing episode first without duplicating it`() {
+        val withCurrentAndQueue = CarSections.upNext(
+            current = "a",
+            queued = listOf("a", "b", "c"),
+            id = { it },
+            nowPlayingTitle = "Now playing",
+            upNextTitle = "Up Next"
+        )
+        assertEquals(listOf("a", "b", "c"), withCurrentAndQueue.map { it.item })
+        assertEquals(listOf("Now playing", "Up Next", "Up Next"), withCurrentAndQueue.map { it.group })
+
+        val withCurrentOnly = CarSections.upNext(
+            current = "a",
+            queued = emptyList(),
+            id = { it },
+            nowPlayingTitle = "Now playing",
+            upNextTitle = "Up Next"
+        )
+        assertEquals(listOf("a"), withCurrentOnly.map { it.item })
+        assertEquals(listOf("Now playing"), withCurrentOnly.map { it.group })
+
+        val withoutCurrent = CarSections.upNext(
+            current = null,
+            queued = listOf("b", "c"),
+            id = { it },
+            nowPlayingTitle = "Now playing",
+            upNextTitle = "Up Next"
+        )
+        assertEquals(listOf("b", "c"), withoutCurrent.map { it.item })
+        assertEquals(listOf(null, null), withoutCurrent.map { it.group })
+    }
+
+    @Test
     fun `New tab shows continuing first and never repeats an episode`() {
         val rows = CarSections.newTab(
             continuing = listOf("a", "b"),
