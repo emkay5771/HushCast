@@ -1,8 +1,8 @@
-# HushCast Desktop Companion Worker (Phase 1)
+# HushCast Desktop & Cloud Companion Worker
 
-A headless LAN companion server for **HushCast** that downloads podcast episodes on your Mac (or desktop GPU machine), runs `whisper.cpp` + `Qwen3-Embedding-0.6B` + `ad_tagger.onnx`, and serves **both the exact audio file and the pre-computed analysis bundle** keyed by `fileSha256` to your Android phone.
+A headless LAN or cloud companion server for **HushCast** that downloads podcast episodes on your Mac (or desktop/cloud GPU machine), runs `whisper.cpp` + `Qwen3-Embedding-0.6B` + `ad_tagger.onnx`, and serves **both the exact audio file and the pre-computed analysis bundle** keyed by `fileSha256` to your Android phone.
 
-Because the Mac downloads the episode first and pushes the exact audio bytes + analysis to the phone, **Dynamic Ad Insertion (DAI) timestamps always match 100%**, and the phone never downloads the audio twice.
+Because the worker downloads the episode first and pushes the exact audio bytes + analysis to the phone, **Dynamic Ad Insertion (DAI) timestamps always match 100%**, and the phone never downloads the audio twice.
 
 ## Quick Start (macOS Apple Silicon)
 
@@ -31,7 +31,7 @@ This downloads `ggml-base.en-q5_1.bin` and `Qwen3-Embedding-0.6B-Q8_0.gguf` into
 hushcast-worker
 ```
 
-It prints your LAN URL, pairing token, and advertises `_hushcast._tcp.local.` over Bonjour/mDNS so the HushCast Android app can discover it in **Settings → HushCast → Desktop Companion**.
+It prints your LAN URL, pairing token, and advertises `_hushcast._tcp.local.` over Bonjour/mDNS so the HushCast Android app can discover it in **Settings → HushCast → Desktop / cloud worker**.
 
 **HTTPS (optional):** `hushcast-worker --tls-cert cert.pem --tls-key key.pem` serves HTTPS and prints the certificate fingerprint to pin on the phone. Both flags are required together.
 
@@ -115,12 +115,12 @@ uv run modal run modal_app.py::pair_qr \
 
 On your phone:
 1. Open **HushCast → Settings → HushCast**.
-2. Enable **Desktop Companion (Mac / GPU)**.
+2. Enable **Desktop / cloud worker**.
 3. Tap **Scan QR** (or scan with your phone's Camera app).
 4. Tap **Test** — you should see `Connected: ... (CUDA) • Models Ready`.
 
 **Option B — Manual Entry:**
-1. Open **HushCast → Settings → HushCast** and enable **Desktop Companion (Mac / GPU)**.
+1. Open **HushCast → Settings → HushCast** and enable **Desktop / cloud worker**.
 2. Paste your deployed `https://<your-modal-username>--hushcast-worker-fastapi-app.modal.run` URL into **Worker URL**.
 3. Paste your `$TOKEN` into **Pairing Token**.
 4. Tap **Test** to verify both connectivity and token authentication.
