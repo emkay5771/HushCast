@@ -140,7 +140,8 @@ interface PodcastEpisodeDao {
         order: PodcastEpisodesOrder,
         filter: Set<PodcastEpisodesFilter>,
         filterNot: Set<PodcastEpisodesFilter>,
-        groupBySeason: Boolean = false
+        groupBySeason: Boolean = false,
+        seasonOrder: PodcastEpisodesOrder = order
     ): SimpleSQLiteQuery {
         val builder = StringBuilder(
             """
@@ -166,7 +167,7 @@ interface PodcastEpisodeDao {
 
         if (groupBySeason) {
             builder.append(
-                " ORDER BY CASE WHEN e.season IS NULL THEN 1 ELSE 0 END ASC, e.season ${order.value}, ${orderBy.value} ${order.value}"
+                " ORDER BY CASE WHEN e.season IS NULL THEN 1 ELSE 0 END ASC, e.season ${seasonOrder.value}, ${orderBy.value} ${order.value}"
             )
         } else {
             builder.append(" ORDER BY ${orderBy.value} ${order.value}")
@@ -354,4 +355,10 @@ interface PodcastEpisodeDao {
     """
     )
     suspend fun _updateNewEpisodesCount(origin: String)
+}
+
+enum class SeasonOrder {
+    MATCH_EPISODE,
+    DESCENDING,
+    ASCENDING
 }

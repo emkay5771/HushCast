@@ -43,12 +43,14 @@ private data class QueryBundle(
     val order: PodcastEpisodesOrder,
     val filter: Set<PodcastEpisodesFilter>,
     val filterNot: Set<PodcastEpisodesFilter>,
-    val groupBySeason: Boolean
+    val groupBySeason: Boolean,
+    val seasonOrder: PodcastEpisodesOrder
 )
 
 class PodcastDetailViewModel(
     val db: AppDatabase,
-    val podcast: PodcastModel
+    val podcast: PodcastModel,
+    val settingsRepository: app.podiumpodcasts.podium.SettingsRepository? = null
 ) : ViewModel() {
 
     val subscriptionManager = SubscriptionManager(
@@ -62,6 +64,17 @@ class PodcastDetailViewModel(
     val hasSeasons = db.podcastEpisodes().hasSeasons(podcast.origin)
 
     init {
+        settingsRepository?.let { repo ->
+            viewModelScope.launch {
+                repo.appearance.episodeListDefaults.collect { defaults ->
+                    searchFilterOrderBarState.applyDefaults(defaults)
+                }
+            }
+        }
+        viewModelScope.launch {
+            hasSeasons.first { it }
+            searchFilterOrderBarState.applySeasonGroupingDefault()
+        }
         // From the stored row, not the model this page opened with: a refresh can bring the
         // show's type (and its seasons) after the page is open, and this view model outlives it.
         viewModelScope.launch {
@@ -82,7 +95,8 @@ class PodcastDetailViewModel(
                 order = searchFilterOrderBarState.order.value,
                 filter = searchFilterOrderBarState.filter.toSet(),
                 filterNot = searchFilterOrderBarState.negativeFilter.toSet(),
-                groupBySeason = searchFilterOrderBarState.groupBySeason.value
+                groupBySeason = searchFilterOrderBarState.groupBySeason.value,
+                seasonOrder = searchFilterOrderBarState.effectiveSeasonOrder
             )
         }
             .distinctUntilChanged()
@@ -96,7 +110,8 @@ class PodcastDetailViewModel(
                         order = q.order,
                         filter = q.filter,
                         filterNot = q.filterNot,
-                        groupBySeason = q.groupBySeason
+                        groupBySeason = q.groupBySeason,
+                        seasonOrder = q.seasonOrder
                     )
 
                     db.podcastEpisodes().queryPaged(query)

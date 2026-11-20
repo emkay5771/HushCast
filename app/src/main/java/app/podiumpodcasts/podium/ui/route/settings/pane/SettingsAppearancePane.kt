@@ -34,8 +34,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.automirrored.rounded.ViewList
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.BlurOn
 import androidx.compose.material.icons.rounded.BrightnessAuto
 import androidx.compose.material.icons.rounded.Colorize
@@ -48,7 +50,9 @@ import androidx.compose.material.icons.rounded.LightMode
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Start
+import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.ViewAgenda
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CenterAlignedTopAppBar
@@ -314,6 +318,8 @@ fun SettingsAppearancePane(
                     scope.launch { appearance.setBottomBarItemsRaw(NavBarItems.serializeList(items)) }
                 }
             )
+
+            podcastPageGroup()
         }
     }
 
@@ -896,6 +902,171 @@ private fun StartupScreenRow(position: SettingsGroupPosition) {
                         ) {
                             RadioButton(selected = selected, onClick = null, modifier = Modifier.padding(12.dp))
                             Text(text = label, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPicker = false }) { Text("Close") }
+            }
+        )
+    }
+}
+
+private fun app.podiumpodcasts.podium.ui.component.common.SettingsListScope.podcastPageGroup() {
+    settingsGroup(header = "Podcast page", key = "podcast_page") {
+        row { pos ->
+            EpisodeDefaultOrderRow(position = pos)
+        }
+        row { pos ->
+            val scope = rememberCoroutineScope()
+            val appearance = LocalSettingsRepository.current.appearance
+            val groupBySeason by appearance.episodesGroupBySeason.collectAsState(false)
+            SettingsSwitchListItem(
+                checked = groupBySeason,
+                onCheckedChange = { checked -> scope.launch { appearance.setEpisodesGroupBySeason(checked) } },
+                icon = { Icon(Icons.Rounded.ViewAgenda, contentDescription = null) },
+                label = "Group by season by default",
+                description = "When a show has seasons",
+                index = pos.index,
+                count = pos.count
+            )
+        }
+        row { pos ->
+            SeasonOrderRow(position = pos)
+        }
+        row { pos ->
+            val scope = rememberCoroutineScope()
+            val appearance = LocalSettingsRepository.current.appearance
+            val serialDefaults by appearance.episodesSerialDefaults.collectAsState(true)
+            SettingsSwitchListItem(
+                checked = serialDefaults,
+                onCheckedChange = { checked -> scope.launch { appearance.setEpisodesSerialDefaults(checked) } },
+                icon = { Icon(Icons.Rounded.AutoAwesome, contentDescription = null) },
+                label = "Serial show defaults",
+                description = "Open serial shows oldest first and grouped by season",
+                index = pos.index,
+                count = pos.count
+            )
+        }
+    }
+}
+
+@Composable
+private fun EpisodeDefaultOrderRow(position: SettingsGroupPosition) {
+    val scope = rememberCoroutineScope()
+    val appearance = LocalSettingsRepository.current.appearance
+    val current by appearance.episodesDefaultOrder.collectAsState(
+        app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder.DESCENDING
+    )
+    var showPicker by remember { mutableStateOf(false) }
+
+    fun labelFor(order: app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder): String = when (order) {
+        app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder.DESCENDING -> "Newest first"
+        app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder.ASCENDING -> "Oldest first"
+    }
+
+    SettingsListItem(
+        icon = { Icon(Icons.AutoMirrored.Rounded.Sort, contentDescription = null) },
+        label = "Default episode order",
+        description = labelFor(current),
+        index = position.index,
+        count = position.count,
+        onClick = { showPicker = true }
+    )
+
+    if (showPicker) {
+        AlertDialog(
+            onDismissRequest = { showPicker = false },
+            title = { Text("Default episode order") },
+            text = {
+                Column(Modifier.selectableGroup()) {
+                    listOf(
+                        app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder.DESCENDING,
+                        app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder.ASCENDING
+                    ).forEach { option ->
+                        val selected = current == option
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .selectable(
+                                    selected = selected,
+                                    role = Role.RadioButton,
+                                    onClick = {
+                                        showPicker = false
+                                        scope.launch { appearance.setEpisodesDefaultOrder(option) }
+                                    }
+                                )
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = selected, onClick = null, modifier = Modifier.padding(12.dp))
+                            Text(text = labelFor(option), style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPicker = false }) { Text("Close") }
+            }
+        )
+    }
+}
+
+@Composable
+private fun SeasonOrderRow(position: SettingsGroupPosition) {
+    val scope = rememberCoroutineScope()
+    val appearance = LocalSettingsRepository.current.appearance
+    val current by appearance.episodesSeasonOrder.collectAsState(
+        app.podiumpodcasts.podium.api.db.dao.SeasonOrder.MATCH_EPISODE
+    )
+    var showPicker by remember { mutableStateOf(false) }
+
+    fun labelFor(order: app.podiumpodcasts.podium.api.db.dao.SeasonOrder): String = when (order) {
+        app.podiumpodcasts.podium.api.db.dao.SeasonOrder.MATCH_EPISODE -> "Match episode order"
+        app.podiumpodcasts.podium.api.db.dao.SeasonOrder.DESCENDING -> "Newest season first"
+        app.podiumpodcasts.podium.api.db.dao.SeasonOrder.ASCENDING -> "Oldest season first"
+    }
+
+    SettingsListItem(
+        icon = { Icon(Icons.Rounded.SwapVert, contentDescription = null) },
+        label = "Season order",
+        description = labelFor(current),
+        index = position.index,
+        count = position.count,
+        onClick = { showPicker = true }
+    )
+
+    if (showPicker) {
+        AlertDialog(
+            onDismissRequest = { showPicker = false },
+            title = { Text("Season order") },
+            text = {
+                Column(Modifier.selectableGroup()) {
+                    listOf(
+                        app.podiumpodcasts.podium.api.db.dao.SeasonOrder.MATCH_EPISODE,
+                        app.podiumpodcasts.podium.api.db.dao.SeasonOrder.DESCENDING,
+                        app.podiumpodcasts.podium.api.db.dao.SeasonOrder.ASCENDING
+                    ).forEach { option ->
+                        val selected = current == option
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .selectable(
+                                    selected = selected,
+                                    role = Role.RadioButton,
+                                    onClick = {
+                                        showPicker = false
+                                        scope.launch { appearance.setEpisodesSeasonOrder(option) }
+                                    }
+                                )
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(selected = selected, onClick = null, modifier = Modifier.padding(12.dp))
+                            Text(text = labelFor(option), style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                 }

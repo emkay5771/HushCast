@@ -117,10 +117,12 @@ fun PodcastOrderBottomSheet(
                         ) {
                             IconButton(
                                 onClick = {
-                                    state.order.value = when(state.order.value) {
-                                        PodcastEpisodesOrder.ASCENDING -> PodcastEpisodesOrder.DESCENDING
-                                        else -> PodcastEpisodesOrder.ASCENDING
-                                    }
+                                    state.setOrder(
+                                        when(state.order.value) {
+                                            PodcastEpisodesOrder.ASCENDING -> PodcastEpisodesOrder.DESCENDING
+                                            else -> PodcastEpisodesOrder.ASCENDING
+                                        }
+                                    )
                                 }
                             ) {
                                 AnimatedContent(
@@ -148,6 +150,38 @@ fun PodcastOrderBottomSheet(
                     }
                 ) {
                     Text(stringResource(item.label))
+                }
+            }
+
+            if (state.groupBySeason.value) {
+                item(key = "season_order") {
+                    val seasonOrder = state.effectiveSeasonOrder
+                    SegmentedListItem(
+                        checked = state.seasonOrderOverride.value != null,
+                        onCheckedChange = { state.toggleSeasonOrder() },
+                        shapes = ListItemDefaults.segmentedShapes(index = 0, count = 1),
+                        leadingContent = {
+                            Icon(
+                                imageVector = when (seasonOrder) {
+                                    PodcastEpisodesOrder.ASCENDING -> Icons.Rounded.ArrowUpward
+                                    PodcastEpisodesOrder.DESCENDING -> Icons.Rounded.ArrowDownward
+                                },
+                                contentDescription = stringResource(R.string.podcast_season_order)
+                            )
+                        },
+                        supportingContent = {
+                            Text(
+                                stringResource(
+                                    when (seasonOrder) {
+                                        PodcastEpisodesOrder.ASCENDING -> R.string.podcast_season_order_oldest
+                                        PodcastEpisodesOrder.DESCENDING -> R.string.podcast_season_order_newest
+                                    }
+                                )
+                            )
+                        }
+                    ) {
+                        Text(stringResource(R.string.podcast_season_order))
+                    }
                 }
             }
         }

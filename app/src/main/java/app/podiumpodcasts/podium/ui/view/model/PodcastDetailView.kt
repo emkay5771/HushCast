@@ -176,11 +176,11 @@ fun PodcastDetailView(
 
     val db = LocalDatabase.current
     val activity = LocalActivity.current as AppActivity
+    val settingsRepositoryForVm = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
 
     val vm = viewModel(key = podcast.origin) {
-        PodcastDetailViewModel(db, podcast)
+        PodcastDetailViewModel(db, podcast, settingsRepositoryForVm)
     }
-    val settingsRepositoryForVm = app.podiumpodcasts.podium.ui.helper.LocalSettingsRepository.current
     val subscriptionsVm = viewModel<app.podiumpodcasts.podium.ui.vm.home.SubscriptionsViewModel>(
         viewModelStoreOwner = activity,
         key = "HOME_SUBSCRIPTIONS"

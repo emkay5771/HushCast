@@ -212,6 +212,15 @@ data class PlayerTabConfig(
     val visible: Boolean = true
 )
 
+data class EpisodeListDefaults(
+    val order: app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder =
+        app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder.DESCENDING,
+    val groupBySeason: Boolean = false,
+    val seasonOrder: app.podiumpodcasts.podium.api.db.dao.SeasonOrder =
+        app.podiumpodcasts.podium.api.db.dao.SeasonOrder.MATCH_EPISODE,
+    val serialDefaults: Boolean = true
+)
+
 object SettingsKeys {
     val APPEARANCE_THEME_MODE = stringPreferencesKey("appearance_theme_mode")
     val APPEARANCE_DARK_THEME_STYLE = stringPreferencesKey("appearance_dark_theme_style")
@@ -227,6 +236,10 @@ object SettingsKeys {
     val APPEARANCE_BOTTOM_BAR_ITEMS = stringPreferencesKey("appearance_bottom_bar_items")
     val APPEARANCE_STARTUP_DESTINATION = stringPreferencesKey("appearance_startup_destination")
     val APPEARANCE_PODCAST_GRID_STATE = stringPreferencesKey("appearance_podcast_grid_state")
+    val APPEARANCE_EPISODES_DEFAULT_ORDER = stringPreferencesKey("appearance_episodes_default_order")
+    val APPEARANCE_EPISODES_GROUP_BY_SEASON = booleanPreferencesKey("appearance_episodes_group_by_season")
+    val APPEARANCE_EPISODES_SEASON_ORDER = stringPreferencesKey("appearance_episodes_season_order")
+    val APPEARANCE_EPISODES_SERIAL_DEFAULTS = booleanPreferencesKey("appearance_episodes_serial_defaults")
 
     val BEHAVIOR_PLAYER_PLAYBACK_SPEED =
         floatPreferencesKey("behavior_player_playback_speed")
@@ -531,6 +544,68 @@ class SettingsRepository(val context: Context) {
         suspend fun setPodcastGridStateRaw(raw: String) = dataStore.edit { preferences ->
             preferences[SettingsKeys.APPEARANCE_PODCAST_GRID_STATE] = raw
         }
+
+        val episodesDefaultOrder: Flow<app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.APPEARANCE_EPISODES_DEFAULT_ORDER]
+                runCatching {
+                    raw?.let { app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder.valueOf(it) }
+                }.getOrNull() ?: app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder.DESCENDING
+            }
+
+        suspend fun setEpisodesDefaultOrder(order: app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder) =
+            dataStore.edit { preferences ->
+                preferences[SettingsKeys.APPEARANCE_EPISODES_DEFAULT_ORDER] = order.name
+            }
+
+        val episodesGroupBySeason: Flow<Boolean> = dataStore.data
+            .map { preferences ->
+                preferences[SettingsKeys.APPEARANCE_EPISODES_GROUP_BY_SEASON] ?: false
+            }
+
+        suspend fun setEpisodesGroupBySeason(enabled: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_EPISODES_GROUP_BY_SEASON] = enabled
+        }
+
+        val episodesSeasonOrder: Flow<app.podiumpodcasts.podium.api.db.dao.SeasonOrder> = dataStore.data
+            .map { preferences ->
+                val raw = preferences[SettingsKeys.APPEARANCE_EPISODES_SEASON_ORDER]
+                runCatching {
+                    raw?.let { app.podiumpodcasts.podium.api.db.dao.SeasonOrder.valueOf(it) }
+                }.getOrNull() ?: app.podiumpodcasts.podium.api.db.dao.SeasonOrder.MATCH_EPISODE
+            }
+
+        suspend fun setEpisodesSeasonOrder(order: app.podiumpodcasts.podium.api.db.dao.SeasonOrder) =
+            dataStore.edit { preferences ->
+                preferences[SettingsKeys.APPEARANCE_EPISODES_SEASON_ORDER] = order.name
+            }
+
+        val episodesSerialDefaults: Flow<Boolean> = dataStore.data
+            .map { preferences ->
+                preferences[SettingsKeys.APPEARANCE_EPISODES_SERIAL_DEFAULTS] ?: true
+            }
+
+        suspend fun setEpisodesSerialDefaults(enabled: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.APPEARANCE_EPISODES_SERIAL_DEFAULTS] = enabled
+        }
+
+        val episodeListDefaults: Flow<EpisodeListDefaults> = dataStore.data
+            .map { preferences ->
+                val order = preferences[SettingsKeys.APPEARANCE_EPISODES_DEFAULT_ORDER]?.let { raw ->
+                    runCatching { app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder.valueOf(raw) }.getOrNull()
+                } ?: app.podiumpodcasts.podium.api.db.dao.PodcastEpisodesOrder.DESCENDING
+                val groupBySeason = preferences[SettingsKeys.APPEARANCE_EPISODES_GROUP_BY_SEASON] ?: false
+                val seasonOrder = preferences[SettingsKeys.APPEARANCE_EPISODES_SEASON_ORDER]?.let { raw ->
+                    runCatching { app.podiumpodcasts.podium.api.db.dao.SeasonOrder.valueOf(raw) }.getOrNull()
+                } ?: app.podiumpodcasts.podium.api.db.dao.SeasonOrder.MATCH_EPISODE
+                val serialDefaults = preferences[SettingsKeys.APPEARANCE_EPISODES_SERIAL_DEFAULTS] ?: true
+                EpisodeListDefaults(
+                    order = order,
+                    groupBySeason = groupBySeason,
+                    seasonOrder = seasonOrder,
+                    serialDefaults = serialDefaults
+                )
+            }
     }
 
     inner class Behavior {

@@ -43,18 +43,26 @@ import app.podiumpodcasts.podium.ui.dialog.bottomsheet.podcast.PodcastOrderBotto
 import kotlinx.coroutines.delay
 
 class PodcastSearchFilterOrderBarState(
-    isSerial: Boolean = false
+    isSerial: Boolean = false,
+    defaults: app.podiumpodcasts.podium.EpisodeListDefaults = app.podiumpodcasts.podium.EpisodeListDefaults()
 ) {
 
     /**
      * The show is `itunes:type` "serial": read oldest first, grouped by season when it has
-     * seasons.  It can become true after the page opened, when a refresh brings the metadata.
+     * seasons (unless the user turned off serial defaults in Settings).  It can become true after
+     * the page opened, when a refresh brings the metadata.
      */
     var isSerial by mutableStateOf(isSerial)
         private set
 
+    private var defaults by mutableStateOf(defaults)
+
     val defaultOrder: PodcastEpisodesOrder
-        get() = if (isSerial) PodcastEpisodesOrder.ASCENDING else PodcastEpisodesOrder.DESCENDING
+        get() = if (isSerial && defaults.serialDefaults) {
+            PodcastEpisodesOrder.ASCENDING
+        } else {
+            defaults.order
+        }
 
     val searchQuery = mutableStateOf("")
 
@@ -64,9 +72,32 @@ class PodcastSearchFilterOrderBarState(
     val orderBy = mutableStateOf(PodcastEpisodesOrderBy.DATE)
     val order = mutableStateOf(defaultOrder)
     val groupBySeason = mutableStateOf(false)
+    val seasonOrderOverride = mutableStateOf<PodcastEpisodesOrder?>(null)
 
     private var defaultGroupBySeason by mutableStateOf(false)
     private var groupBySeasonChanged = false
+    private var orderChanged = false
+    private var hasSeasons = false
+
+    val effectiveSeasonOrder: PodcastEpisodesOrder
+        get() = seasonOrderOverride.value ?: when (defaults.seasonOrder) {
+            app.podiumpodcasts.podium.api.db.dao.SeasonOrder.DESCENDING -> PodcastEpisodesOrder.DESCENDING
+            app.podiumpodcasts.podium.api.db.dao.SeasonOrder.ASCENDING -> PodcastEpisodesOrder.ASCENDING
+            app.podiumpodcasts.podium.api.db.dao.SeasonOrder.MATCH_EPISODE -> order.value
+        }
+
+    fun setOrder(newOrder: PodcastEpisodesOrder) {
+        orderChanged = true
+        order.value = newOrder
+    }
+
+    fun toggleSeasonOrder() {
+        val next = when (effectiveSeasonOrder) {
+            PodcastEpisodesOrder.ASCENDING -> PodcastEpisodesOrder.DESCENDING
+            PodcastEpisodesOrder.DESCENDING -> PodcastEpisodesOrder.ASCENDING
+        }
+        seasonOrderOverride.value = next
+    }
 
     /** The "Group by season" chip.  After this, the automatic default leaves grouping alone. */
     fun setGroupBySeason(enabled: Boolean) {
@@ -74,19 +105,39 @@ class PodcastSearchFilterOrderBarState(
         groupBySeason.value = enabled
     }
 
-    /** The show turned out to be serial: oldest first, unless the order was already changed. */
-    fun applySerialDefault() {
-        if (isSerial) return
-        val orderUnchanged = orderBy.value == PodcastEpisodesOrderBy.DATE &&
-            order.value == PodcastEpisodesOrder.DESCENDING
-        isSerial = true
-        if (orderUnchanged) order.value = PodcastEpisodesOrder.ASCENDING
+    /** Apply updated global defaults from Settings without overriding user choices in this session. */
+    fun applyDefaults(newDefaults: app.podiumpodcasts.podium.EpisodeListDefaults) {
+        val prevDefaultOrder = defaultOrder
+        defaults = newDefaults
+        if (!orderChanged && orderBy.value == PodcastEpisodesOrderBy.DATE && order.value == prevDefaultOrder) {
+            order.value = defaultOrder
+        }
+        if (hasSeasons) {
+            val shouldGroup = newDefaults.groupBySeason || (isSerial && newDefaults.serialDefaults)
+            defaultGroupBySeason = shouldGroup
+            if (!groupBySeasonChanged) groupBySeason.value = shouldGroup
+        }
     }
 
-    /** A serial show with seasons: group by season, unless the chip was already used. */
+    /** The show turned out to be serial: oldest first, unless the order was already changed or serial defaults are off. */
+    fun applySerialDefault() {
+        if (isSerial) return
+        val prevDefaultOrder = defaultOrder
+        val orderUnchanged = !orderChanged &&
+            orderBy.value == PodcastEpisodesOrderBy.DATE &&
+            order.value == prevDefaultOrder
+        isSerial = true
+        if (orderUnchanged && defaults.serialDefaults) {
+            order.value = PodcastEpisodesOrder.ASCENDING
+        }
+    }
+
+    /** A show with seasons (serial or global group-by-season default): group by season, unless the chip was already used. */
     fun applySeasonGroupingDefault() {
-        defaultGroupBySeason = true
-        if (!groupBySeasonChanged) groupBySeason.value = true
+        hasSeasons = true
+        val shouldGroup = defaults.groupBySeason || (isSerial && defaults.serialDefaults)
+        defaultGroupBySeason = shouldGroup
+        if (!groupBySeasonChanged) groupBySeason.value = shouldGroup
     }
 
     @Composable
@@ -99,6 +150,7 @@ class PodcastSearchFilterOrderBarState(
                         && orderBy.value == PodcastEpisodesOrderBy.DATE
                         && order.value == defaultOrder
                         && groupBySeason.value == defaultGroupBySeason
+                        && seasonOrderOverride.value == null
             }
         }
     }
@@ -184,7 +236,9 @@ fun PodcastSearchFilterOrderBar(
                 }
 
                 FilledIconToggleButton(
-                    checked = state.order.value != state.defaultOrder || state.orderBy.value != PodcastEpisodesOrderBy.DATE,
+                    checked = state.order.value != state.defaultOrder ||
+                        state.orderBy.value != PodcastEpisodesOrderBy.DATE ||
+                        state.seasonOrderOverride.value != null,
                     onCheckedChange = {
                         showOrderBottomSheet.value = true
                     }

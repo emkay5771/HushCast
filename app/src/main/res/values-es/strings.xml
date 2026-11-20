@@ -305,4 +305,7 @@
     <string name="action_trailer">Tráiler</string>
     <string name="episode_chapters_show_all">Mostrar los %1$d</string>
     <string name="episode_chapters_show_fewer">Mostrar menos</string>
+    <string name="podcast_season_order">Orden de temporadas</string>
+    <string name="podcast_season_order_newest">Temporada más reciente primero</string>
+    <string name="podcast_season_order_oldest">Temporada más antigua primero</string>
 </resources>

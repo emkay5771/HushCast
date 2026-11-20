@@ -293,4 +293,7 @@
     <string name="action_trailer">Bande-annonce</string>
     <string name="episode_chapters_show_all">Afficher les %1$d</string>
     <string name="episode_chapters_show_fewer">Afficher moins</string>
+    <string name="podcast_season_order">Ordre des saisons</string>
+    <string name="podcast_season_order_newest">Saison la plus récente d\'abord</string>
+    <string name="podcast_season_order_oldest">Saison la plus ancienne d\'abord</string>
 </resources>

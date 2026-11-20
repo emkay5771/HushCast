@@ -293,4 +293,7 @@
     <string name="action_trailer">Fragman</string>
     <string name="episode_chapters_show_all">Tümünü göster (%1$d)</string>
     <string name="episode_chapters_show_fewer">Daha az göster</string>
+    <string name="podcast_season_order">Sezon sırası</string>
+    <string name="podcast_season_order_newest">En yeni sezon önce</string>
+    <string name="podcast_season_order_oldest">En eski sezon önce</string>
 </resources>
