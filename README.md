@@ -4,16 +4,6 @@
 
 **HushCast** is a privacy-first, open-source podcast app for **Android** that automatically mutes or removes unwanted words and skips sponsor reads—using AI that runs **right on your phone**, on your **home Mac/PC**, or on your own **free-tier cloud GPU**.
 
-<p align="center">
-  <img src="images/screenshots/01.png" width="210" alt="Home & Miniplayer" />
-  <img src="images/screenshots/02.png" width="210" alt="Full-Screen Player" />
-  <img src="images/screenshots/06.png" width="210" alt="HushCast Controls" />
-  <br />
-  <img src="images/screenshots/03.png" width="210" alt="Transcript with Collapsed Sponsor Pill" />
-  <img src="images/screenshots/04.png" width="210" alt="Transcript with Muted Words" />
-  <img src="images/screenshots/05.png" width="210" alt="Auto-Generated Chapters" />
-</p>
-
 > [!NOTE]
 > **First-time setup on your phone:** After installing the APK, open **Settings → HushCast** to either download the on-device AI models over Wi-Fi **or** pair a Desktop/Cloud Companion Worker via QR code or local network discovery.
 
@@ -126,3 +116,17 @@ Requires **JDK 17+** and **Android SDK 37** (`platforms;android-37.0`, `build-to
 - Incorporates ideas and capabilities from [**AntennaPod**](https://github.com/AntennaPod/AntennaPod), [**podcast-ad-tagger**](https://github.com/Q726kbXuN/podcast-ad-tagger), [**whisper.cpp**](https://github.com/ggml-org/whisper.cpp), and [**llama.cpp**](https://github.com/ggml-org/llama.cpp)
 
 Licensed under the [**GNU General Public License v3.0 or later**](/LICENSE).
+
+---
+
+## 📸 Screenshots
+
+<p align="center">
+  <img src="images/screenshots/01.png" width="210" alt="Home & Miniplayer" />
+  <img src="images/screenshots/02.png" width="210" alt="Full-Screen Player" />
+  <img src="images/screenshots/06.png" width="210" alt="HushCast Controls" />
+  <br />
+  <img src="images/screenshots/03.png" width="210" alt="Transcript with Collapsed Sponsor Pill" />
+  <img src="images/screenshots/04.png" width="210" alt="Transcript with Muted Words" />
+  <img src="images/screenshots/05.png" width="210" alt="Auto-Generated Chapters" />
+</p>
