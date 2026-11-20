@@ -2,16 +2,48 @@
 
 ![License](https://img.shields.io/github/license/emkay5771/HushCast?style=for-the-badge) ![GitHub release (latest by date)](https://img.shields.io/github/v/release/emkay5771/HushCast?style=for-the-badge)
 
-**HushCast** is a privacy-first, open-source podcast app for **Android** (built in Kotlin & Jetpack Compose with **Material 3 Expressive** design, forked from [podium](https://github.com/aimok04/podium)). It combines a **100% on-device AI audio engine** with an optional **Desktop / Cloud Companion Worker** (`desktop-worker`) to automatically mute/micro-skip unwanted words, skip sponsor reads, and generate transcripts, speaker labels, chapters, and summaries.
+**HushCast** is a privacy-first, open-source podcast app for **Android** that automatically skips sponsor reads and mutes or removes unwanted words—using AI that runs **right on your phone**, on your **home Mac/PC**, or on your own **free-tier cloud GPU**.
+
+<p align="center">
+  <img src="images/screenshots/02.png" width="200" alt="Podcast Detail" />
+  <img src="images/screenshots/03.png" width="200" alt="Full-Screen Player" />
+  <img src="images/screenshots/04.png" width="200" alt="Discover" />
+  <img src="images/screenshots/05.png" width="200" alt="Library" />
+</p>
 
 > [!NOTE]
-> **First-time setup on your phone:** After installing the APK, open **Settings → HushCast** to either download the on-device AI models over Wi-Fi **or** pair a Desktop/Cloud Companion Worker via QR code or Bonjour/mDNS.
+> **First-time setup on your phone:** After installing the APK, open **Settings → HushCast** to either download the on-device AI models over Wi-Fi **or** pair a Desktop/Cloud Companion Worker via QR code or local network discovery.
+
+---
+
+## 🌟 Why HushCast?
+
+### ⏭️ Skip Sponsor Reads Automatically—With a Safety Net
+- **Hands-free ad skipping**: HushCast detects host-read ads and sponsor segments and jumps right past them.
+- **One-tap Undo & indicator chime**: Optionally play a subtle chime when a sponsor is skipped, and tap **Undo** in the player if you ever want to hear a segment back.
+- **See what's coming**: Detected sponsor spans and muted words appear directly on the player scrubber and miniplayer progress bar, and collapse into neat pills in the transcript view.
+
+### 🔇 Mute, Duck, Bleep, or Snip Out Any Word
+- **Five ways to handle matched words**:
+  - **Hard Silence**: Cleanly mutes the word with smooth fade ramps.
+  - **Volume Duck**: Lowers volume to 10% during the word.
+  - **Micro-Skip**: Seamlessly splices the word out so you never hear a pause.
+  - **Bleep**: Plays a classic censor tone.
+  - **Custom Sound Effect**: Pick any audio file on your phone to play instead.
+- **Presets & custom rules**: Built-in **Profanity** and **Explicit Content** presets, masked-word matching (`f***`, `s**t`), plurals, multi-word phrases, and custom rules.
+
+### 🎧 A Fast, Tactile Podcast Player
+- **Pocket Casts-style controls**: Compact floating miniplayer with queue count and blocked-content markers, plus a full-screen player with **Player**, **Transcript**, **Chapters**, and **Notes** tabs.
+- **Effortless queue & episode management**: Swipe up for **Up Next** (with swipe-to-remove **Undo**), half-swipe episodes for quick actions, full-swipe for your primary action, or long-press to bulk-manage episodes.
+- **Playback polish**: Speed stepper & presets (`0.5x`–`3.0x`) with live speed shown in Android's media notification, **Trim Silence**, **Volume Boost**, **speed- & skip-adjusted remaining time** (e.g., `-24:10 (-16:07)`), and a **10-second fade-out Sleep Timer**.
+- **Adaptive Material 3 Expressive UI**: Artwork-adaptive **Material You** colors, smooth progressive-blurred podcast headers, predictive back gestures, and customizable player action buttons.
+- **Bring your library with you**: Search via **Podcast Index** and **Apple Podcasts**, import `.opml` files (including folders) from Pocket Casts or other apps, start streaming immediately while downloading, sync via **gpodder.net** / **Nextcloud**, and listen in the car with **Android Auto**.
 
 ---
 
 ## ⚡ Choosing a Processing Method (Practical Comparison)
 
-HushCast can analyze episodes in three ways. You can switch or combine them anytime in **Settings → HushCast** (under **Automatic downloads**, choose **Auto** to prefer your paired worker and fall back to your phone, **On-device** to always use your phone, or **Skip** to download audio without analyzing).
+HushCast can analyze episodes in three ways. Switch anytime in **Settings → HushCast** (under **Automatic downloads**, pick **Auto** to prefer your paired worker and fall back to your phone, **On-device** to always use your phone, or **Skip** to download audio without analyzing).
 
 | What matters to you | 📱 On-Device (Phone Only) | 🖥️ Desktop Worker (Your Mac / PC) | ☁️ Cloud Worker (Modal) |
 | :--- | :--- | :--- | :--- |
@@ -25,45 +57,23 @@ HushCast can analyze episodes in three ways. You can switch or combine them anyt
 
 ---
 
-## ✨ Features
+## 🧠 How the AI Engine Works (Technical Overview)
 
-### 🔇 Word & Profanity Muting
-- **On-Device Transcription & Alignment**: Powered by `whisper.cpp` (with DTW word-level timestamps) and Silero VAD, plus fast-path support for Podcasting 2.0, SRT, and VTT transcripts with 30-second audio spot-check verification.
-- **Five Mute Modes**:
-  - **Hard Silence**: Cleanly mutes matched words with smooth 8ms cosine fade ramps.
-  - **Volume Duck**: Drops volume to 10% during matched words.
-  - **Sample-Drop Micro-Skip**: Cleanly splices out matched words with 12ms cosine crossfades.
-  - **Bleep**: Replaces matched words with a classic 1 kHz censor tone.
-  - **Custom Sound Effect**: Pick any local audio file to play over matched words.
-- **Custom Dictionary & Presets**: Includes built-in **Profanity** and **Explicit Content** presets, masked-profanity matching (`f***`, `s**t`), plurals, compound phrases, and regex rules.
+Under the hood, HushCast runs a two-stage pipeline so even mid-range phones stay within safe memory limits:
 
-### ⏭️ Ad & Sponsor Skipping
-- **AI Ad Detection**: Runs `Qwen3-Embedding-0.6B` (`llama.cpp`) + an ONNX `ad_tagger.onnx` classifier sequentially after transcription to keep peak RAM low.
-- **Auto-Skip with Indicator & One-Tap Undo**: Automatically skips high-confidence sponsor segments, optionally plays a **Sponsor Skip Indicator** chime (or custom sound), and shows an instant **Undo** banner in the player without shifting playback controls.
-- **Annotated Scrubber & Miniplayer Markers**: Displays detected ad spans and muted-word ticks directly on both the full-screen scrubber and the miniplayer's bottom progress bar, with collapsed sponsor pills in the transcript view.
+1. **Speech-to-Text & Word Alignment**
+   - **Fast-path transcripts**: If a podcast provides Podcasting 2.0 JSON, SRT, or VTT transcripts, HushCast runs a 30-second audio spot-check to verify timing before skipping full transcription.
+   - **On-device fallback**: Otherwise, `whisper.cpp` (with DTW word-level timestamps) and Silero VAD transcribe the audio into exact word start/end milliseconds.
+   - **Real-time audio DSP**: During playback, a custom Media3 `AudioProcessor` applies 8ms cosine fade ramps (for Hard Silence / Duck / Bleep) or 12ms cosine crossfades (for Sample-Drop Micro-Skip) directly to the PCM audio stream.
 
-### 🖥️ Desktop / Cloud Companion Worker (`desktop-worker`)
-- **Zero-Drift DAI Sync**: Your Mac (Apple Silicon Metal), desktop GPU (CUDA/CPU), or serverless [Modal](desktop-worker/README.md) GPU downloads the episode first, runs `whisper.cpp` (`large-v3-turbo` / `base.en`) + `Qwen3-Embedding-0.6B` + `ad_tagger.onnx`, and serves **both the exact audio bytes and the analysis bundle** keyed by `fileSha256` to your phone.
-- **Easy Pairing & Discovery**: Advertises `_hushcast._tcp.local.` over Bonjour/mDNS and prints a scannable `hushcast://pair?...` QR code in the terminal.
-- **Live CLI Progress & Cache Management**: Shows per-stage terminal progress bars and detailed logs, supports **Refresh on Desktop / Cloud** (`force=true` reprocessing), and includes `--clear-cache` / `--clear-audio-cache` (`DELETE /v1/cache`).
-- **AI Episode Insights**:
-  - **Speaker Diarization**: Acoustic MFCC + F0 pitch clustering labels speakers (`Speaker 1`, `Speaker 2`, …) in the synced transcript.
-  - **Grounded Auto-Chapters & Summaries**: Embedding topic-shift boundaries lock chapters to exact transcript timestamps across the full episode, with TF-IDF or local LLM (`Qwen2.5-3B-Instruct-Q4_K_M.gguf`) titles and episode summaries.
-  - **Semantic Transcript Search**: Search across all desktop-analyzed episodes by meaning via `POST /v1/search`.
+2. **Ad & Sponsor Detection**
+   - Once transcription finishes, Whisper is unloaded from RAM before loading `Qwen3-Embedding-0.6B` (`llama.cpp`) + `ad_tagger.onnx` sequentially. This detects host-read sponsor boundaries without spiking peak memory.
 
-### 🎨 Material 3 Expressive & Player Experience
-- **Built on Compose 1.13 & Material 3 1.5.0 Stable**: Uses M3 Expressive theming, unified `ConnectedSingleChoiceGroup` controls, shape-morphing Play/Pause & Skip buttons with spring feedback, and native Compose 1.13 progressive blur on podcast header backdrops.
-- **Pocket Casts-Style M3E Miniplayer**: Uncluttered floating miniplayer with rounded-square artwork, centered Skip Back / Play-Pause / Skip Forward controls, a queue count pill, and blocked-content markers on the bottom progress bar.
-- **Tabbed Full-Screen Player**: Smooth `HorizontalPager` across **Player**, **Transcript**, **Chapters**, and **Notes** with a swipe-following tab indicator, swipe-up to open **Up Next** (with swipe-to-remove **Undo**), and a **customizable action bar** (up to 4 shortcuts + **More** overflow).
-- **Playback Effects**: Speed `-`/`+` stepper & presets (`0.5x`–`3.0x`), **Trim Silence**, **Volume Boost**, and **speed- & skip-adjusted remaining time** (e.g., `-24:10 (-16:07)`).
-- **System Media Player Speed Badge**: Android's system media notification displays the live playback speed value (`1.0x`, `1.2x`, `1.5x`, etc.) and updates immediately when cycled.
-- **Predictive Back & Swipe Actions**: Native Android predictive back animations across all navigation routes, detail panes, and Settings sub-panes; Pocket Casts-style half-swipe 2-option trays and full-swipe primary triggers on episode lists; long-press multi-select for bulk **Play Next / Play Last / Mark Played**.
-- **Processing & Download Clarity**: Distinct processing badges (**`Desktop AI`**, **`Cloud AI`**, **`On-Device AI`**, **`Word-Mute`**, **`Audio Only`**), 24-hour played cache protection, high-contrast dark-mode transcript highlighting, **Material You** artwork-adaptive colors, and a **10s fade-out Sleep Timer**.
-
-### 🔍 Discovery, Sync & Playback
-- **Podcast Discovery & OPML Import**: Search via **Podcast Index** and **Apple Podcasts**, or import subscriptions from Pocket Casts and other apps (including nested/foldered `.opml` files).
-- **Seamless Stream-to-Download Swap**: Start streaming immediately while downloading—playback swaps to the local file at the exact position as soon as the download completes.
-- **Sync & Android Auto**: Supports [**gpodder.net**](https://gpodder.net), [**nextcloud-gpodder**](https://github.com/thrillfall/nextcloud-gpodder), and **Android Auto**.
+3. **Desktop / Cloud Companion Worker (`desktop-worker`)**
+   - **Zero-Drift DAI Sync**: Dynamic Ad Insertion (DAI) shifts timestamps between downloads. To prevent drift, the worker downloads the episode first, runs `whisper.cpp` (`large-v3-turbo` or `base.en`) + `Qwen3-Embedding-0.6B` + `ad_tagger.onnx`, and serves **both the exact audio bytes and the analysis bundle** keyed by `fileSha256` to your phone.
+   - **Speaker Diarization**: Acoustic MFCC + F0 pitch clustering labels speakers (`Speaker 1`, `Speaker 2`, …) in the synced transcript.
+   - **Grounded Auto-Chapters & Summaries**: Embedding topic-shift boundaries lock chapters to exact transcript timestamps across the full episode, with TF-IDF or local LLM (`Qwen2.5-3B-Instruct-Q4_K_M.gguf`) titles and episode summaries.
+   - **Discovery & Search**: Advertises `_hushcast._tcp.local.` over Bonjour/mDNS, prints a scannable `hushcast://pair?...` QR code, supports **Refresh on Desktop / Cloud** (`force=true`), cache cleanup (`--clear-cache` / `--clear-audio-cache` / `DELETE /v1/cache`), and semantic transcript search via `POST /v1/search`.
 
 ---
 
