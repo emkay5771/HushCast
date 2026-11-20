@@ -81,7 +81,7 @@ fun SettingsPane(
                         NavigationIcon()
                     }
                 },
-                onNavigate = { onPane(it) }
+                onNavigate = { onOpenPane(it) }
             )
         }
 
