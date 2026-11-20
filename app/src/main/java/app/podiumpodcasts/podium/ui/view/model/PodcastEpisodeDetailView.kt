@@ -713,7 +713,7 @@ fun PodcastEpisodeDetailView(
                                         )
                                     ),
                                     if (episode.commentsUrl.isNotBlank()) DetailsListItemModel(
-                                        icon = androidx.compose.material.icons.Icons.Rounded.Forum,
+                                        icon = Icons.Rounded.Link,
                                         label = R.string.common_comments,
                                         value = episode.commentsUrl,
                                         onClick = {

@@ -14,6 +14,7 @@ import app.podiumpodcasts.podium.background.notification.DebugUpdateNotification
 import app.podiumpodcasts.podium.background.notification.NewPodcastEpisodeNotification
 import app.podiumpodcasts.podium.manager.DownloadManager
 import app.podiumpodcasts.podium.utils.rss.computeEpisodeId
+import app.podiumpodcasts.podium.utils.rss.toPodcast
 import app.podiumpodcasts.podium.utils.rss.toPodcastEpisode
 import coil3.Bitmap
 import coil3.SingletonImageLoader

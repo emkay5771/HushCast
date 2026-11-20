@@ -803,6 +803,7 @@ fun PodcastDetailView(
                             podcastDetailViewEpisodesDestination(
                                 vm = vm,
                                 scope = scope,
+                                hasSeasons = hasSeasons,
                                 episodePager = episodePager,
                                 selectedEpisodeIds = selectedEpisodeIds,
                                 playerVm = playerVm,
