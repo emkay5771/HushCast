@@ -43,7 +43,10 @@ object CarSections {
         if (current == null) return queued.map { Row(it, null) }
         val currentId = id(current)
         val rest = queued.filter { id(it) != currentId }
-        return listOf(Row(current, nowPlayingTitle)) + rest.map { Row(it, upNextTitle) }
+        return buildList {
+            add(Row(current, nowPlayingTitle))
+            rest.forEach { add(Row(it, upNextTitle)) }
+        }
     }
 
     /**
