@@ -689,6 +689,8 @@ class GpuWorker:
                 cancel_event=cancel_event,
                 episode_title=req.title or None,
                 podcast_title=req.podcastTitle,
+                podcast_origin=req.podcastOrigin,
+                fingerprint_store=self.cache.fingerprints,
             )
             self.cache.save_episode(
                 sha256=sha256,

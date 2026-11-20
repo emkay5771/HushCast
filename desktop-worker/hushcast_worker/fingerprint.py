@@ -369,20 +369,35 @@ class FingerprintStore:
         self.max_per_show = max_per_show
         self.max_total = max_total
         self._lock = threading.Lock()
+        self._index_mtime: Optional[float] = None
         self._index: dict[str, dict] = self._load_index()
 
     def _load_index(self) -> dict[str, dict]:
         try:
+            self._index_mtime = self.index_path.stat().st_mtime
             data = json.loads(self.index_path.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) else {}
         except (OSError, ValueError):
+            self._index_mtime = None
             return {}
+
+    def _refresh_index_locked(self) -> None:
+        try:
+            mtime = self.index_path.stat().st_mtime
+        except OSError:
+            return
+        if self._index_mtime is None or mtime != self._index_mtime:
+            self._index = self._load_index()
 
     def _save_index(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
         tmp = self.index_path.with_name(self.index_path.name + ".tmp")
         tmp.write_text(json.dumps(self._index, indent=1, sort_keys=True), encoding="utf-8")
         os.replace(tmp, self.index_path)
+        try:
+            self._index_mtime = self.index_path.stat().st_mtime
+        except OSError:
+            pass
 
     def _fp_path(self, file_sha256: str) -> Path:
         safe = hashlib.sha256(file_sha256.encode("utf-8")).hexdigest()[:32] if len(file_sha256) < 16 else file_sha256[:64]
@@ -392,6 +407,7 @@ class FingerprintStore:
         if not fp.file_sha256 or len(fp.hashes) == 0:
             return
         with self._lock:
+            self._refresh_index_locked()
             self.root.mkdir(parents=True, exist_ok=True)
             path = self._fp_path(fp.file_sha256)
             tmp = path.with_name(path.name + ".tmp")
@@ -443,6 +459,7 @@ class FingerprintStore:
         max_cross_show: int = 6,
     ) -> list[EpisodeFingerprint]:
         with self._lock:
+            self._refresh_index_locked()
             same: list[tuple[int, str, dict]] = []
             other: list[tuple[int, str, dict]] = []
             for sha, meta in self._index.items():
