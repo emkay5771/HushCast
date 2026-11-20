@@ -1,3 +1,12 @@
+# HushCast v1.0.41-hushcast
+
+## What's New
+- **Support link & documentation updates**:
+  - Updated the in-app Ko-fi support link and Settings label for HushCast.
+  - Updated project documentation.
+
+---
+
 # HushCast v1.0.40-hushcast
 
 ## What's New
