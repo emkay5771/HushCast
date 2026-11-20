@@ -38,7 +38,7 @@ class PodcastManager(
         if(response !is FetchPodcastClientResult.Success)
             throw Exception(response.toString())
 
-        val podcast = response.rssChannel.toPodcast(origin, response.fileSize, null, response.extras.language)
+        val podcast = response.rssChannel.toPodcast(origin, response.fileSize, null, response.extras.language, response.extras)
         val episodes = response.rssChannel.items.map { item ->
             item.toPodcastEpisode(podcast = podcast, extras = response.extras)
                 .withFeedExtras(response.extras.lookup(item))

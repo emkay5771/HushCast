@@ -164,4 +164,59 @@ class RssFeedParserTest {
         assertTrue(item.description!!.contains("bold"))
         assertTrue(item.description!!.endsWith("end"))
     }
+
+    @Test
+    fun `parses podcasting 2_0 and itunes channel and item metadata`() {
+        val xml = """
+            <rss version="2.0"
+                 xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+                 xmlns:podcast="https://podcastindex.org/namespace/1.0">
+              <channel>
+                <title>Serial Show</title>
+                <itunes:type>serial</itunes:type>
+                <itunes:explicit>yes</itunes:explicit>
+                <itunes:category text="Technology" />
+                <itunes:new-feed-url>https://new.example/feed.xml</itunes:new-feed-url>
+                <podcast:funding url="https://ko-fi.com/show">Support on Ko-fi</podcast:funding>
+                <podcast:person role="host" img="https://cdn.example/host.jpg" href="https://host.example">Alice</podcast:person>
+                <podcast:trailer url="https://cdn.example/trailer.mp3" season="1">Season 1 Trailer</podcast:trailer>
+                <item>
+                  <title>Pilot</title>
+                  <comments>https://forum.example/ep1</comments>
+                  <itunes:season>1</itunes:season>
+                  <itunes:episode>1</itunes:episode>
+                  <itunes:episodeType>full</itunes:episodeType>
+                  <itunes:explicit>true</itunes:explicit>
+                  <podcast:person role="guest">Bob</podcast:person>
+                  <podcast:soundbite startTime="12.5" duration="30">Best moment</podcast:soundbite>
+                  <enclosure url="https://cdn.example/ep1.mp3" type="audio/mpeg" length="1000"/>
+                </item>
+              </channel>
+            </rss>
+        """.trimIndent()
+
+        val parsed = RssFeedParser.parse(xml)!!
+        assertEquals("serial", parsed.channel.itunesChannelData?.type)
+        assertEquals(listOf("Technology"), parsed.channel.itunesChannelData?.categories)
+        assertEquals("https://new.example/feed.xml", parsed.channel.itunesChannelData?.newsFeedUrl)
+        assertTrue(parsed.extras.explicit)
+        assertEquals(1, parsed.extras.funding.size)
+        assertEquals("https://ko-fi.com/show", parsed.extras.funding[0].url)
+        assertEquals("Support on Ko-fi", parsed.extras.funding[0].label)
+        assertEquals("Alice", parsed.extras.persons.single().name)
+        assertEquals("https://cdn.example/trailer.mp3", parsed.extras.trailer?.url)
+        assertEquals("Season 1 Trailer", parsed.extras.trailer?.title)
+
+        val item = parsed.channel.items.single()
+        assertEquals("https://forum.example/ep1", item.commentsUrl)
+        assertEquals("1", item.itunesItemData?.season)
+        assertEquals("1", item.itunesItemData?.episode)
+        assertEquals("full", item.itunesItemData?.episodeType)
+        val epExtras = parsed.extras.lookup(item)!!
+        assertTrue(epExtras.explicit)
+        assertEquals("Bob", epExtras.persons.single().name)
+        assertEquals(12.5, epExtras.soundbites.single().startTimeSec, 0.01)
+        assertEquals(30.0, epExtras.soundbites.single().durationSec, 0.01)
+        assertEquals("Best moment", epExtras.soundbites.single().title)
+    }
 }

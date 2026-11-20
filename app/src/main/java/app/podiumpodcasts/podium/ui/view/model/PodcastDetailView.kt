@@ -213,6 +213,7 @@ fun PodcastDetailView(
     }
 
     val subscription = vm.subscription.collectAsStateWithLifecycle(initialValue = cachedSubModel)
+    val hasSeasons by vm.hasSeasons.collectAsStateWithLifecycle(initialValue = false)
     val episodePager = vm.episodePager.collectAsLazyPagingItems()
     val selectedEpisodeIds = remember(podcast.origin) { androidx.compose.runtime.mutableStateListOf<String>() }
     val inSelectionMode = selectedEpisodeIds.isNotEmpty()
@@ -880,6 +881,7 @@ fun PodcastDetailView(
 fun LazyListScope.podcastDetailViewEpisodesDestination(
     vm: PodcastDetailViewModel,
     scope: CoroutineScope,
+    hasSeasons: Boolean,
     episodePager: LazyPagingItems<PodcastEpisodeBundle>,
     selectedEpisodeIds: MutableList<String>,
     playerVm: MediaPlayerViewModel,
@@ -986,6 +988,17 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                     },
                     label = { Text("In progress") }
                 )
+
+                if (hasSeasons) {
+                    val groupBySeason = vm.searchFilterOrderBarState.groupBySeason.value
+                    FilterChip(
+                        selected = groupBySeason,
+                        onClick = {
+                            vm.searchFilterOrderBarState.groupBySeason.value = !groupBySeason
+                        },
+                        label = { Text("Group by season") }
+                    )
+                }
             }
         }
     }
@@ -1040,6 +1053,45 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
             episodePager[it]?.let { episodeBundle ->
                 val isSelected = episodeBundle.episode.id in selectedEpisodeIds
                 val inQueue = episodeBundle.episode.id in queueEpisodeIds
+                val groupBySeason = hasSeasons && vm.searchFilterOrderBarState.groupBySeason.value
+                val currentSeason = episodeBundle.episode.season
+                val prevLoaded = if (it > 0) episodePager.peek(it - 1) else null
+                val nextLoaded = if (it < episodePager.itemCount - 1) episodePager.peek(it + 1) else null
+                val isFirstInSeason = groupBySeason && (it == 0 || (prevLoaded != null && prevLoaded.episode.season != currentSeason))
+                val isLastInSeason = groupBySeason && (it == episodePager.itemCount - 1 || (nextLoaded != null && nextLoaded.episode.season != currentSeason))
+                val rowIndex = if (!groupBySeason) {
+                    it
+                } else when {
+                    isFirstInSeason && isLastInSeason -> 0
+                    isFirstInSeason -> 0
+                    isLastInSeason -> 2
+                    else -> 1
+                }
+                val rowCount = if (!groupBySeason) {
+                    episodePager.itemCount
+                } else if (isFirstInSeason && isLastInSeason) {
+                    1
+                } else {
+                    3
+                }
+
+                Column {
+                    if (isFirstInSeason) {
+                        Text(
+                            text = if (currentSeason != null) "Season $currentSeason" else "Other episodes",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .padding(
+                                    start = 20.dp,
+                                    end = 20.dp,
+                                    top = if (it == 0) 8.dp else 16.dp,
+                                    bottom = 6.dp
+                                )
+                                .semantics { heading() }
+                        )
+                    }
+
                 Box(
                     Modifier.padding(
                         top = 2.dp,
@@ -1055,7 +1107,7 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                     SwipeableItem(
                         snackbarHostState = vm.snackbarHostState,
                         scope = scope,
-                        shape = app.podiumpodcasts.podium.ui.component.model.episode.episodeRowShape(it, episodePager.itemCount),
+                        shape = app.podiumpodcasts.podium.ui.component.model.episode.episodeRowShape(rowIndex, rowCount),
 
                         startAction = app.podiumpodcasts.podium.ui.component.common.swipeable.buildEpisodeSwipeAction(
                             actionType = itemSwipeRightAction,
@@ -1116,8 +1168,8 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                         content = {
                             PodcastEpisodeListItem(
                                 bundle = episodeBundle,
-                                index = it,
-                                count = episodePager.itemCount,
+                                index = rowIndex,
+                                count = rowCount,
                                 isSelected = isSelected,
                                 showArtwork = false,
                                 inQueue = inQueue,
@@ -1135,6 +1187,7 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                             )
                         },
                     )
+                }
                 }
             }
         }
@@ -1192,34 +1245,79 @@ fun LazyListScope.podcastDetailViewInfoDestination(
                     }
                 }
 
+                val categories = remember(podcast.categoriesJson) {
+                    app.podiumpodcasts.podium.api.rss.PodcastMetadataJson.decodeStrings(podcast.categoriesJson)
+                }
+                val persons = remember(podcast.personsJson) {
+                    app.podiumpodcasts.podium.api.rss.PodcastMetadataJson.decodePersons(podcast.personsJson)
+                }
+                val funding = remember(podcast.fundingJson) {
+                    app.podiumpodcasts.podium.api.rss.PodcastMetadataJson.decodeFunding(podcast.fundingJson)
+                }
+
+                if (categories.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    app.podiumpodcasts.podium.ui.component.model.podcast.PodcastCategoriesRow(
+                        categories = categories
+                    )
+                }
+
+                if (persons.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    app.podiumpodcasts.podium.ui.component.model.podcast.PodcastPersonsRow(
+                        persons = persons,
+                        onClickUrl = { uriHandler.openUri(it) }
+                    )
+                }
+
                 Spacer(Modifier.height(16.dp))
 
                 DetailsList(
-                    items = listOf(
-                        DetailsListItemModel(
-                            icon = Icons.Rounded.Link,
-                            label = R.string.common_source,
-                            value = podcast.link,
-                            onClick = {
-                                uriHandler.openUri(podcast.link)
-                            }
-                        ),
-                        DetailsListItemModel(
-                            icon = Icons.Rounded.RssFeed,
-                            label = R.string.common_rss_feed,
-                            value = podcast.origin
-                        ),
-                        DetailsListItemModel(
-                            icon = Icons.Rounded.Language,
-                            label = R.string.common_language_code,
-                            value = podcast.languageCode
-                        ),
-                        DetailsListItemModel(
-                            icon = Icons.Rounded.DataUsage,
-                            label = R.string.common_data_usage_per_update,
-                            value = formatFileSize(podcast.fileSize)
+                    items = buildList {
+                        funding.forEach { item ->
+                            add(
+                                DetailsListItemModel(
+                                    icon = Icons.Rounded.Favorite,
+                                    label = R.string.common_support,
+                                    value = item.label.ifBlank { item.url },
+                                    onClick = {
+                                        uriHandler.openUri(item.url)
+                                    }
+                                )
+                            )
+                        }
+                        add(
+                            DetailsListItemModel(
+                                icon = Icons.Rounded.Link,
+                                label = R.string.common_source,
+                                value = podcast.link,
+                                onClick = {
+                                    uriHandler.openUri(podcast.link)
+                                }
+                            )
                         )
-                    )
+                        add(
+                            DetailsListItemModel(
+                                icon = Icons.Rounded.RssFeed,
+                                label = R.string.common_rss_feed,
+                                value = podcast.fetchFeedUrl()
+                            )
+                        )
+                        add(
+                            DetailsListItemModel(
+                                icon = Icons.Rounded.Language,
+                                label = R.string.common_language_code,
+                                value = podcast.languageCode
+                            )
+                        )
+                        add(
+                            DetailsListItemModel(
+                                icon = Icons.Rounded.DataUsage,
+                                label = R.string.common_data_usage_per_update,
+                                value = formatFileSize(podcast.fileSize)
+                            )
+                        )
+                    }
                 )
             }
         }

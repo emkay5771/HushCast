@@ -650,6 +650,24 @@ fun PodcastEpisodeDetailView(
 
             // Show notes expanded by default (Pocket Casts style)
             Column(Modifier.padding(16.dp)) {
+                val soundbites = remember(episode.soundbitesJson) {
+                    app.podiumpodcasts.podium.api.rss.PodcastMetadataJson.decodeSoundbites(episode.soundbitesJson)
+                }
+                val episodePersons = remember(episode.personsJson) {
+                    app.podiumpodcasts.podium.api.rss.PodcastMetadataJson.decodePersons(episode.personsJson)
+                }
+
+                if (soundbites.isNotEmpty()) {
+                    val soundbiteContext = LocalContext.current
+                    app.podiumpodcasts.podium.ui.component.model.podcast.EpisodeSoundbitesRow(
+                        soundbites = soundbites,
+                        onPlaySoundbite = { sb ->
+                            detailMediaVm.playSoundbite(soundbiteContext, bundle, sb)
+                        }
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
+
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
@@ -669,6 +687,14 @@ fun PodcastEpisodeDetailView(
                     }
                 }
 
+                if (episodePersons.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    app.podiumpodcasts.podium.ui.component.model.podcast.PodcastPersonsRow(
+                        persons = episodePersons,
+                        onClickUrl = { uriHandler.openUri(it) }
+                    )
+                }
+
                             Spacer(Modifier.height(16.dp))
 
                             DetailsList(
@@ -686,6 +712,14 @@ fun PodcastEpisodeDetailView(
                                             duration = episode.duration
                                         )
                                     ),
+                                    if (episode.commentsUrl.isNotBlank()) DetailsListItemModel(
+                                        icon = androidx.compose.material.icons.Icons.Rounded.Forum,
+                                        label = R.string.common_comments,
+                                        value = episode.commentsUrl,
+                                        onClick = {
+                                            uriHandler.openUri(episode.commentsUrl)
+                                        }
+                                    ) else null,
                                     DetailsListItemModel(
                                         icon = Icons.Rounded.Link,
                                         label = R.string.common_source,

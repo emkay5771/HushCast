@@ -85,4 +85,23 @@ class AppDatabaseMigrationTest {
         assertTrue(executed.any { it.contains("CREATE TABLE IF NOT EXISTS `episodeChapter`") })
         assertTrue(executed.any { it.contains("index_episodeChapter_episodeId") })
     }
+
+    @Test
+    fun `migration 21 to 22 adds podcast and episode metadata columns`() {
+        val executed = mutableListOf<String>()
+        val db = recordingDb(executed)
+
+        assertEquals(21, MIGRATION_21_22.startVersion)
+        assertEquals(22, MIGRATION_21_22.endVersion)
+
+        MIGRATION_21_22.migrate(db)
+
+        assertTrue(executed.any { it.contains("ALTER TABLE `podcast` ADD COLUMN `feedUrl`") })
+        assertTrue(executed.any { it.contains("ALTER TABLE `podcast` ADD COLUMN `itunesType`") })
+        assertTrue(executed.any { it.contains("ALTER TABLE `podcast` ADD COLUMN `fundingJson`") })
+        assertTrue(executed.any { it.contains("ALTER TABLE `podcast` ADD COLUMN `trailerUrl`") })
+        assertTrue(executed.any { it.contains("ALTER TABLE `podcastEpisode` ADD COLUMN `season` INTEGER") })
+        assertTrue(executed.any { it.contains("ALTER TABLE `podcastEpisode` ADD COLUMN `episodeNumber` INTEGER") })
+        assertTrue(executed.any { it.contains("ALTER TABLE `podcastEpisode` ADD COLUMN `soundbitesJson`") })
+    }
 }

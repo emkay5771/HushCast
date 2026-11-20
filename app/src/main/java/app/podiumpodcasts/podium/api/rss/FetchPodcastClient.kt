@@ -20,7 +20,10 @@ data class RssEpisodeExtras(
     val chaptersType: String = "",
     val inlineChapters: List<app.podiumpodcasts.podium.api.chapters.PodcastChapter> = emptyList(),
     /** Every other `<podcast:transcript>` of the item, best first (T5 fall-through). */
-    val transcriptAlternates: List<TranscriptRef> = emptyList()
+    val transcriptAlternates: List<TranscriptRef> = emptyList(),
+    val persons: List<PodcastPerson> = emptyList(),
+    val soundbites: List<PodcastSoundbite> = emptyList(),
+    val explicit: Boolean = false
 ) {
     /** [transcriptAlternates] as stored in `podcastEpisode.transcriptAlternatesJson`. */
     val transcriptAlternatesJson: String
@@ -29,6 +32,10 @@ data class RssEpisodeExtras(
 
 data class RssPodcastExtras(
     val language: String = "",
+    val funding: List<PodcastFunding> = emptyList(),
+    val persons: List<PodcastPerson> = emptyList(),
+    val trailer: PodcastTrailer? = null,
+    val explicit: Boolean = false,
     val byItemKey: Map<String, RssEpisodeExtras> = emptyMap(),
     /** Exact per-item extras from the single parse (identity keys: the parsed RssItem objects). */
     val byItem: Map<RssItem, RssEpisodeExtras> = emptyMap(),

@@ -93,13 +93,41 @@ interface PodcastEpisodeDao {
         return SimpleSQLiteQuery(builder.toString())
     }
 
+    @Query("SELECT EXISTS(SELECT 1 FROM podcastEpisode WHERE origin = :origin AND season IS NOT NULL)")
+    fun hasSeasons(origin: String): Flow<Boolean>
+
+    @Query(
+        """
+        UPDATE podcastEpisode
+        SET season = COALESCE(season, :season),
+            episodeNumber = COALESCE(episodeNumber, :episodeNumber),
+            episodeType = CASE WHEN episodeType = '' THEN :episodeType ELSE episodeType END,
+            explicit = CASE WHEN explicit = 0 THEN :explicit ELSE explicit END,
+            commentsUrl = CASE WHEN commentsUrl = '' THEN :commentsUrl ELSE commentsUrl END,
+            personsJson = CASE WHEN personsJson = '' THEN :personsJson ELSE personsJson END,
+            soundbitesJson = CASE WHEN soundbitesJson = '' THEN :soundbitesJson ELSE soundbitesJson END
+        WHERE id = :id
+        """
+    )
+    suspend fun updateMetadataFromFeed(
+        id: String,
+        season: Int?,
+        episodeNumber: Int?,
+        episodeType: String,
+        explicit: Boolean,
+        commentsUrl: String,
+        personsJson: String,
+        soundbitesJson: String
+    )
+
     fun buildQuery(
         origin: String,
         searchQuery: String?,
         orderBy: PodcastEpisodesOrderBy,
         order: PodcastEpisodesOrder,
         filter: Set<PodcastEpisodesFilter>,
-        filterNot: Set<PodcastEpisodesFilter>
+        filterNot: Set<PodcastEpisodesFilter>,
+        groupBySeason: Boolean = false
     ): SimpleSQLiteQuery {
         val builder = StringBuilder(
             """
@@ -123,7 +151,13 @@ interface PodcastEpisodeDao {
         filter.forEach { builder.append(" AND ${it.condition}") }
         filterNot.forEach { builder.append(" AND NOT( ${it.condition} )") }
 
-        builder.append(" ORDER BY ${orderBy.value} ${order.value}")
+        if (groupBySeason) {
+            builder.append(
+                " ORDER BY CASE WHEN e.season IS NULL THEN 1 ELSE 0 END ASC, e.season ${order.value}, ${orderBy.value} ${order.value}"
+            )
+        } else {
+            builder.append(" ORDER BY ${orderBy.value} ${order.value}")
+        }
         return SimpleSQLiteQuery(builder.toString(), bindArgs.toTypedArray())
     }
 

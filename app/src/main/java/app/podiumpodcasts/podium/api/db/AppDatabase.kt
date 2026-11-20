@@ -47,7 +47,7 @@ import app.podiumpodcasts.podium.api.db.model.statistics.UpdatePodcastRunModel
         QueueItemModel::class,
         ChapterSkipModel::class,
         app.podiumpodcasts.podium.api.db.model.EpisodeChapterModel::class
-    ], version = 21, exportSchema = true
+    ], version = 22, exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun podcasts(): PodcastDao
@@ -399,6 +399,27 @@ val MIGRATION_20_21 = object : Migration(20, 21) {
     }
 }
 
+val MIGRATION_21_22 = object : Migration(21, 22) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `podcast` ADD COLUMN `feedUrl` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `podcast` ADD COLUMN `itunesType` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `podcast` ADD COLUMN `categoriesJson` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `podcast` ADD COLUMN `explicit` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `podcast` ADD COLUMN `fundingJson` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `podcast` ADD COLUMN `personsJson` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `podcast` ADD COLUMN `trailerUrl` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `podcast` ADD COLUMN `trailerTitle` TEXT NOT NULL DEFAULT ''")
+
+        db.execSQL("ALTER TABLE `podcastEpisode` ADD COLUMN `season` INTEGER")
+        db.execSQL("ALTER TABLE `podcastEpisode` ADD COLUMN `episodeNumber` INTEGER")
+        db.execSQL("ALTER TABLE `podcastEpisode` ADD COLUMN `episodeType` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `podcastEpisode` ADD COLUMN `explicit` INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE `podcastEpisode` ADD COLUMN `commentsUrl` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `podcastEpisode` ADD COLUMN `personsJson` TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE `podcastEpisode` ADD COLUMN `soundbitesJson` TEXT NOT NULL DEFAULT ''")
+    }
+}
+
 val ALL_MIGRATIONS = arrayOf(
     MIGRATION_1_2,
     MIGRATION_2_3,
@@ -419,5 +440,6 @@ val ALL_MIGRATIONS = arrayOf(
     MIGRATION_17_18,
     MIGRATION_18_19,
     MIGRATION_19_20,
-    MIGRATION_20_21
+    MIGRATION_20_21,
+    MIGRATION_21_22
 )

@@ -55,17 +55,17 @@ class AppDatabaseMigration21Test {
         assertEquals(20, MIGRATION_20_21.startVersion)
         assertEquals(21, MIGRATION_20_21.endVersion)
         assertTrue(ALL_MIGRATIONS.contains(MIGRATION_20_21))
-        // A contiguous chain 1 -> 21, so every older install can upgrade in place.
+        // A contiguous chain 1 -> 22, so every older install can upgrade in place.
         ALL_MIGRATIONS.toList().zipWithNext().forEach { (a, b) -> assertEquals(a.endVersion, b.startVersion) }
         assertEquals(1, ALL_MIGRATIONS.first().startVersion)
-        assertEquals(21, ALL_MIGRATIONS.last().endVersion)
-        assertEquals(21, MAX_APP_DB_VERSION)
+        assertEquals(22, ALL_MIGRATIONS.last().endVersion)
+        assertEquals(22, MAX_APP_DB_VERSION)
     }
 
     @Test
-    fun `latest exported schema is version 21`() {
+    fun `latest exported schema is version 22`() {
         val latest = schemaDir().listFiles()!!.mapNotNull { it.nameWithoutExtension.toIntOrNull() }.max()
-        assertEquals(21, latest)
+        assertEquals(22, latest)
     }
 
     @Test

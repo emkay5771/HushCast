@@ -321,14 +321,39 @@ fun PodcastEpisodeListItem(
                         )
                     }
 
+                    val epTypeLabel = when (bundle.episode.episodeType) {
+                        "trailer" -> "TRAILER"
+                        "bonus" -> "BONUS"
+                        else -> null
+                    }
+                    if (epTypeLabel != null) {
+                        Text(
+                            text = epTypeLabel,
+                            style = Typography.labelSmallEmphasized,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
+
+                    val formattedOverline = buildString {
+                        bundle.episode.episodeNumber?.takeIf { it > 0 }?.let {
+                            append("EP. $it · ")
+                        }
+                        append(overlineText)
+                    }
+
                     Text(
-                        text = overlineText.uppercase(androidx.compose.ui.platform.LocalLocale.current.platformLocale),
+                        text = formattedOverline.uppercase(androidx.compose.ui.platform.LocalLocale.current.platformLocale),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
                     )
+
+                    if (bundle.episode.explicit) {
+                        app.podiumpodcasts.podium.ui.component.model.podcast.ExplicitBadge()
+                    }
                 }
 
                 Text(

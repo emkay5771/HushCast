@@ -40,7 +40,11 @@ import app.podiumpodcasts.podium.ui.dialog.bottomsheet.podcast.PodcastFilterBott
 import app.podiumpodcasts.podium.ui.dialog.bottomsheet.podcast.PodcastOrderBottomSheet
 import kotlinx.coroutines.delay
 
-class PodcastSearchFilterOrderBarState {
+class PodcastSearchFilterOrderBarState(
+    isSerial: Boolean = false
+) {
+
+    val defaultOrder = if (isSerial) PodcastEpisodesOrder.ASCENDING else PodcastEpisodesOrder.DESCENDING
 
     val searchQuery = mutableStateOf("")
 
@@ -48,7 +52,8 @@ class PodcastSearchFilterOrderBarState {
     val negativeFilter = mutableStateSetOf<PodcastEpisodesFilter>()
 
     val orderBy = mutableStateOf(PodcastEpisodesOrderBy.DATE)
-    val order = mutableStateOf(PodcastEpisodesOrder.DESCENDING)
+    val order = mutableStateOf(defaultOrder)
+    val groupBySeason = mutableStateOf(false)
 
     @Composable
     fun isDefault(): State<Boolean> {
@@ -58,7 +63,8 @@ class PodcastSearchFilterOrderBarState {
                         && filter.isEmpty()
                         && negativeFilter.isEmpty()
                         && orderBy.value == PodcastEpisodesOrderBy.DATE
-                        && order.value == PodcastEpisodesOrder.DESCENDING
+                        && order.value == defaultOrder
+                        && !groupBySeason.value
             }
         }
     }
@@ -144,7 +150,7 @@ fun PodcastSearchFilterOrderBar(
                 }
 
                 FilledIconToggleButton(
-                    checked = state.order.value != PodcastEpisodesOrder.DESCENDING || state.orderBy.value != PodcastEpisodesOrderBy.DATE,
+                    checked = state.order.value != state.defaultOrder || state.orderBy.value != PodcastEpisodesOrderBy.DATE,
                     onCheckedChange = {
                         showOrderBottomSheet.value = true
                     }

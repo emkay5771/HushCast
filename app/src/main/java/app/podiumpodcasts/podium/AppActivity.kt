@@ -115,6 +115,7 @@ class AppActivity : ComponentActivity() {
                 withFrameNanos { }
                 withFrameNanos { }
                 uiReady = true
+                requestNotificationPermissionIfNeeded()
             }
 
             CompositionLocalProvider(

@@ -81,7 +81,7 @@ class PodcastUpdateWork(
                             // podcast (per extras version) skip the conditional headers.
                             val fullFetch = subscription.subscription.extrasVersion < FEED_EXTRAS_VERSION
                             val response = fetchPodcastClient.fetch(
-                                origin = origin,
+                                origin = subscription.podcast.fetchFeedUrl(),
                                 lastModified = if (fullFetch) "" else subscription.subscription.cacheLastModified,
                                 eTag = if (fullFetch) "" else subscription.subscription.cacheETag,
                                 contentLength = subscription.subscription.cacheContentLength
@@ -97,7 +97,14 @@ class PodcastUpdateWork(
                                     updatedPodcasts.incrementAndGet()
 
                                     val episodeIds = db.podcastEpisodes().getEpisodeIds(origin).toHashSet()
-                                    val podcast = subscription.podcast
+                                    val podcast = response.rssChannel.toPodcast(
+                                        origin = origin,
+                                        fileSize = response.fileSize,
+                                        oldPodcast = subscription.podcast,
+                                        languageCode = response.extras.language,
+                                        extras = response.extras
+                                    )
+                                    db.podcasts().update(podcast)
 
                                     val candidateEpisodes = response.rssChannel.items
                                         .filter { !episodeIds.contains(it.computeEpisodeId(origin)) }
@@ -111,6 +118,29 @@ class PodcastUpdateWork(
                                             podcast.origin, *candidateEpisodes.toTypedArray()
                                         )
                                     newEpisodes.addAndGet(inserted.size)
+
+                                    response.rssChannel.items.forEach { item ->
+                                        val id = item.computeEpisodeId(origin)
+                                        if (episodeIds.contains(id)) {
+                                            val mapped = item.toPodcastEpisode(podcast = podcast, new = false, extras = response.extras)
+                                            if (mapped.season != null || mapped.episodeNumber != null ||
+                                                mapped.episodeType.isNotEmpty() || mapped.explicit ||
+                                                mapped.commentsUrl.isNotEmpty() || mapped.personsJson.isNotEmpty() ||
+                                                mapped.soundbitesJson.isNotEmpty()
+                                            ) {
+                                                db.podcastEpisodes().updateMetadataFromFeed(
+                                                    id = id,
+                                                    season = mapped.season,
+                                                    episodeNumber = mapped.episodeNumber,
+                                                    episodeType = mapped.episodeType,
+                                                    explicit = mapped.explicit,
+                                                    commentsUrl = mapped.commentsUrl,
+                                                    personsJson = mapped.personsJson,
+                                                    soundbitesJson = mapped.soundbitesJson
+                                                )
+                                            }
+                                        }
+                                    }
 
                                     // DB writes only (one transaction); the chapter URLs to fetch are
                                     // collected and fetched at the very end.

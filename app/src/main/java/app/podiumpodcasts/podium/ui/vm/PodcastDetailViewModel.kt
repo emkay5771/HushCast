@@ -41,7 +41,8 @@ private data class QueryBundle(
     val orderBy: PodcastEpisodesOrderBy,
     val order: PodcastEpisodesOrder,
     val filter: Set<PodcastEpisodesFilter>,
-    val filterNot: Set<PodcastEpisodesFilter>
+    val filterNot: Set<PodcastEpisodesFilter>,
+    val groupBySeason: Boolean
 )
 
 class PodcastDetailViewModel(
@@ -53,7 +54,19 @@ class PodcastDetailViewModel(
         db = db
     )
 
-    val searchFilterOrderBarState = PodcastSearchFilterOrderBarState()
+    val isSerial = podcast.itunesType.equals("serial", ignoreCase = true)
+    val searchFilterOrderBarState = PodcastSearchFilterOrderBarState(isSerial = isSerial)
+
+    val hasSeasons = db.podcastEpisodes().hasSeasons(podcast.origin)
+
+    init {
+        if (isSerial) {
+            viewModelScope.launch {
+                hasSeasons.first { it }
+                searchFilterOrderBarState.groupBySeason.value = true
+            }
+        }
+    }
 
     @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
     val episodePager =
@@ -63,7 +76,8 @@ class PodcastDetailViewModel(
                 orderBy = searchFilterOrderBarState.orderBy.value,
                 order = searchFilterOrderBarState.order.value,
                 filter = searchFilterOrderBarState.filter.toSet(),
-                filterNot = searchFilterOrderBarState.negativeFilter.toSet()
+                filterNot = searchFilterOrderBarState.negativeFilter.toSet(),
+                groupBySeason = searchFilterOrderBarState.groupBySeason.value
             )
         }
             .distinctUntilChanged()
@@ -76,7 +90,8 @@ class PodcastDetailViewModel(
                         orderBy = q.orderBy,
                         order = q.order,
                         filter = q.filter,
-                        filterNot = q.filterNot
+                        filterNot = q.filterNot,
+                        groupBySeason = q.groupBySeason
                     )
 
                     db.podcastEpisodes().queryPaged(query)

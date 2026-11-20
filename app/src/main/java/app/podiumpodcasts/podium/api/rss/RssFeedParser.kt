@@ -101,22 +101,39 @@ object RssFeedParser {
 
         // ---- extras state ----
         private var channelLang = ""
+        private val channelFunding = ArrayList<PodcastFunding>()
+        private val channelPersons = ArrayList<PodcastPerson>()
+        private var channelTrailer: PodcastTrailer? = null
+        private var channelExplicit = false
+
         private var itemDepth = -1
         private var inInlineChapters = false
         private val transcripts = ArrayList<TranscriptRef>()
         private var chaptersUrl = ""
         private var chaptersType = ""
         private val inlineChapters = ArrayList<PodcastChapter>()
+        private val itemPersons = ArrayList<PodcastPerson>()
+        private val itemSoundbites = ArrayList<PodcastSoundbite>()
+        private var itemExplicit = false
 
         private val byItemKey = HashMap<String, RssEpisodeExtras>()
         private val byItem = IdentityHashMap<RssItem, RssEpisodeExtras>()
         private val parsedItems: MutableSet<RssItem> = java.util.Collections.newSetFromMap(IdentityHashMap())
+
+        private fun isExplicitValue(raw: String?): Boolean {
+            val v = raw?.trim()?.lowercase() ?: return false
+            return v == "true" || v == "yes" || v == "explicit"
+        }
 
         fun result(): ParsedFeed {
             return ParsedFeed(
                 channel = channelBuilder.build(),
                 extras = RssPodcastExtras(
                     language = channelLang,
+                    funding = channelFunding.toList(),
+                    persons = channelPersons.toList(),
+                    trailer = channelTrailer,
+                    explicit = channelExplicit,
                     byItemKey = byItemKey,
                     byItem = byItem,
                     parsedItems = parsedItems
@@ -357,18 +374,75 @@ object RssFeedParser {
                     chaptersUrl = ""
                     chaptersType = ""
                     inlineChapters.clear()
+                    itemPersons.clear()
+                    itemSoundbites.clear()
+                    itemExplicit = false
                 }
                 insideChannel && !insideItem && local == "language" && channelLang.isBlank() -> {
                     capture(CAPTURE_TEXT) { if (channelLang.isBlank()) channelLang = it.orEmpty() }
                 }
-                itemDepth >= 0 && depth == itemDepth + 1 -> when (local) {
-                    "transcript" -> {
+                insideChannel && !insideItem && is_(name, "itunes:explicit") -> {
+                    capture(CAPTURE_TEXT) { text ->
+                        channelExplicit = isExplicitValue(text)
+                        channelBuilder.itExplicit = text
+                    }
+                }
+                insideChannel && !insideItem && is_(name, "podcast:funding") -> {
+                    val url = attr(attrs, "url")?.trim().orEmpty()
+                    if (url.isNotBlank()) {
+                        capture(CAPTURE_TEXT) { label ->
+                            channelFunding += PodcastFunding(
+                                url = url,
+                                label = label?.trim().orEmpty()
+                            )
+                        }
+                    }
+                }
+                insideChannel && !insideItem && is_(name, "podcast:person") -> {
+                    val role = attr(attrs, "role")?.trim().orEmpty()
+                    val group = attr(attrs, "group")?.trim().orEmpty()
+                    val img = attr(attrs, "img")?.trim().orEmpty()
+                    val href = attr(attrs, "href")?.trim().orEmpty()
+                    capture(CAPTURE_TEXT) { personName ->
+                        val clean = personName?.trim().orEmpty()
+                        if (clean.isNotBlank()) {
+                            channelPersons += PodcastPerson(
+                                name = clean,
+                                role = role,
+                                group = group,
+                                img = img,
+                                href = href
+                            )
+                        }
+                    }
+                }
+                insideChannel && !insideItem && is_(name, "podcast:trailer") -> {
+                    val url = attr(attrs, "url")?.trim().orEmpty()
+                    if (url.isNotBlank() && channelTrailer == null) {
+                        val pubDate = attr(attrs, "pubdate")?.trim().orEmpty()
+                        val length = attr(attrs, "length")?.trim()?.toLongOrNull() ?: 0L
+                        val type = attr(attrs, "type")?.trim().orEmpty()
+                        val season = attr(attrs, "season")?.trim()?.toIntOrNull()
+                        capture(CAPTURE_TEXT) { title ->
+                            channelTrailer = PodcastTrailer(
+                                url = url,
+                                title = title?.trim().orEmpty(),
+                                pubDate = pubDate,
+                                length = length,
+                                type = type,
+                                season = season
+                            )
+                        }
+                    }
+                }
+                itemDepth >= 0 && depth == itemDepth + 1 -> when {
+                    local == "transcript" -> {
                         val url = attr(attrs, "url")?.trim().orEmpty()
                         if (url.isNotBlank()) {
                             transcripts += TranscriptRef(url, attr(attrs, "type")?.trim().orEmpty())
                         }
                     }
-                    "chapters" -> {
+                    local == "chapters" -> {
                         val url = attr(attrs, "url")?.trim().orEmpty()
                         val type = attr(attrs, "type")?.trim().orEmpty()
                         if (url.isNotBlank()) {
@@ -378,6 +452,43 @@ object RssFeedParser {
                             }
                         } else {
                             inInlineChapters = true
+                        }
+                    }
+                    is_(name, "itunes:explicit") -> {
+                        capture(CAPTURE_TEXT) { text ->
+                            itemExplicit = isExplicitValue(text)
+                            articleBuilder.itExplicit = text
+                        }
+                    }
+                    is_(name, "podcast:person") -> {
+                        val role = attr(attrs, "role")?.trim().orEmpty()
+                        val group = attr(attrs, "group")?.trim().orEmpty()
+                        val img = attr(attrs, "img")?.trim().orEmpty()
+                        val href = attr(attrs, "href")?.trim().orEmpty()
+                        capture(CAPTURE_TEXT) { personName ->
+                            val clean = personName?.trim().orEmpty()
+                            if (clean.isNotBlank()) {
+                                itemPersons += PodcastPerson(
+                                    name = clean,
+                                    role = role,
+                                    group = group,
+                                    img = img,
+                                    href = href
+                                )
+                            }
+                        }
+                    }
+                    is_(name, "podcast:soundbite") -> {
+                        val startTime = attr(attrs, "startTime")?.trim()?.toDoubleOrNull()
+                        val duration = attr(attrs, "duration")?.trim()?.toDoubleOrNull()
+                        if (startTime != null && duration != null && startTime >= 0.0 && duration > 0.0) {
+                            capture(CAPTURE_TEXT) { title ->
+                                itemSoundbites += PodcastSoundbite(
+                                    startTimeSec = startTime,
+                                    durationSec = duration,
+                                    title = title?.trim().orEmpty()
+                                )
+                            }
                         }
                     }
                 }
@@ -402,7 +513,8 @@ object RssFeedParser {
         private fun finishItemExtras(item: RssItem) {
             resetItemExtras()
             val ordered = TranscriptRanking.order(transcripts)
-            if (ordered.isEmpty() && chaptersUrl.isBlank() && inlineChapters.isEmpty()) return
+            if (ordered.isEmpty() && chaptersUrl.isBlank() && inlineChapters.isEmpty() &&
+                itemPersons.isEmpty() && itemSoundbites.isEmpty() && !itemExplicit) return
             val primary = ordered.firstOrNull()
             val extra = RssEpisodeExtras(
                 transcriptUrl = primary?.url.orEmpty(),
@@ -410,7 +522,10 @@ object RssFeedParser {
                 chaptersUrl = chaptersUrl,
                 chaptersType = chaptersType,
                 inlineChapters = inlineChapters.sortedBy { it.startTimeMs },
-                transcriptAlternates = if (ordered.size > 1) ordered.drop(1) else emptyList()
+                transcriptAlternates = if (ordered.size > 1) ordered.drop(1) else emptyList(),
+                persons = itemPersons.toList(),
+                soundbites = itemSoundbites.toList(),
+                explicit = itemExplicit
             )
             byItem[item] = extra
             // The same keys RssPodcastExtras.lookup() tries, from the same parsed values.

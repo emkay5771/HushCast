@@ -294,4 +294,6 @@
     <string name="view_podcast_settings_subscription_enable_notifications">Enable notifications</string>
     <string name="view_podcast_settings_subscription_enable_notifications_description">Receive notifications when new episodes get released</string>
     <string name="common_error">Error</string>
+    <string name="common_support" translatable="false">Support</string>
+    <string name="common_comments" translatable="false">Comments</string>
 </resources>

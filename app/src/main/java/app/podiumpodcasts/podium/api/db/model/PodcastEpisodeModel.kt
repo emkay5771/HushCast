@@ -87,7 +87,21 @@ data class PodcastEpisodeModel(
     val chaptersFetchFailures: Int = 0,
     /** Epoch ms before which a refresh doesn't retry the chapters URL. */
     @ColumnInfo("chaptersRetryAfter", defaultValue = "0")
-    val chaptersRetryAfter: Long = 0L
+    val chaptersRetryAfter: Long = 0L,
+    @ColumnInfo("season")
+    val season: Int? = null,
+    @ColumnInfo("episodeNumber")
+    val episodeNumber: Int? = null,
+    @ColumnInfo("episodeType", defaultValue = "")
+    val episodeType: String = "",
+    @ColumnInfo("explicit", defaultValue = "0")
+    val explicit: Boolean = false,
+    @ColumnInfo("commentsUrl", defaultValue = "")
+    val commentsUrl: String = "",
+    @ColumnInfo("personsJson", defaultValue = "")
+    val personsJson: String = "",
+    @ColumnInfo("soundbitesJson", defaultValue = "")
+    val soundbitesJson: String = ""
 ) {
     @android.annotation.SuppressLint("RestrictedApi")
     fun createMediaItem(

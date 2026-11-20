@@ -1,3 +1,20 @@
+# HushCast v1.0.43-hushcast
+
+## What's New
+- **Notification permission on initial open**:
+  - Restored the `POST_NOTIFICATIONS` permission prompt on first launch (Android 13+) once the UI is ready.
+- **Season grouping & serial podcast defaults**:
+  - Added a **Group by season** filter chip for podcasts with `itunes:season` metadata, complete with season section headers and segmented card groups.
+  - Podcasts marked `itunes:type="serial"` now default to oldest-first ordering and automatically enable season grouping when seasons are available.
+- **Richer RSS & Podcasting 2.0 support**:
+  - **Trailers (`podcast:trailer`)**: Play a show's trailer directly from the podcast header.
+  - **Soundbites (`podcast:soundbite`)**: Playable preview clip chips on episode detail pages.
+  - **People (`podcast:person`), Categories (`itunes:category`), & Funding (`podcast:funding`)**: Host/guest chips with avatars, category tags, and creator support links in the podcast Info tab and episode details.
+  - **Episode numbers, types, explicit badges, & comments**: Subtle `EP. X`, `TRAILER`/`BONUS`, and `E` (explicit) badges in episode lists, plus clickable episode `comments` links in episode details.
+  - **Feed URL migration (`itunes:new-feed-url`)**: Automatically follows new feed URLs on refresh without breaking existing subscriptions, history, or cached HushCast data.
+
+---
+
 # HushCast v1.0.42-hushcast
 
 ## What's New

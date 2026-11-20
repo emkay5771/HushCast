@@ -26,7 +26,7 @@ class SingularPodcastUpdateWork(
     ): Result<Int> {
         return try {
             val episodeIds = db.podcastEpisodes().getEpisodeIds(oldPodcast.origin).toHashSet()
-            val response = fetchPodcastClient.fetchNoCache(oldPodcast.origin)
+            val response = fetchPodcastClient.fetchNoCache(oldPodcast.fetchFeedUrl())
 
             if (response !is FetchPodcastClientResult.Success) {
                 val err = (response as? FetchPodcastClientResult.Failure)?.e
@@ -35,7 +35,7 @@ class SingularPodcastUpdateWork(
             }
 
             val podcast =
-                response.rssChannel.toPodcast(oldPodcast.origin, response.fileSize, oldPodcast, response.extras.language)
+                response.rssChannel.toPodcast(oldPodcast.origin, response.fileSize, oldPodcast, response.extras.language, response.extras)
             db.podcasts().update(podcast)
 
             val candidateEpisodes = response.rssChannel.items
@@ -49,6 +49,29 @@ class SingularPodcastUpdateWork(
                 .insertAllAndUpdateNewEpisodesCount(
                     podcast.origin, *candidateEpisodes.toTypedArray()
                 )
+
+            response.rssChannel.items.forEach { item ->
+                val id = item.computeEpisodeId(podcast.origin)
+                if (episodeIds.contains(id)) {
+                    val mapped = item.toPodcastEpisode(podcast = podcast, new = false, extras = response.extras)
+                    if (mapped.season != null || mapped.episodeNumber != null ||
+                        mapped.episodeType.isNotEmpty() || mapped.explicit ||
+                        mapped.commentsUrl.isNotEmpty() || mapped.personsJson.isNotEmpty() ||
+                        mapped.soundbitesJson.isNotEmpty()
+                    ) {
+                        db.podcastEpisodes().updateMetadataFromFeed(
+                            id = id,
+                            season = mapped.season,
+                            episodeNumber = mapped.episodeNumber,
+                            episodeType = mapped.episodeType,
+                            explicit = mapped.explicit,
+                            commentsUrl = mapped.commentsUrl,
+                            personsJson = mapped.personsJson,
+                            soundbitesJson = mapped.soundbitesJson
+                        )
+                    }
+                }
+            }
 
             // DB writes only; the chapter URLs worth fetching come back for the end.
             val chapterCandidates = runCatching {

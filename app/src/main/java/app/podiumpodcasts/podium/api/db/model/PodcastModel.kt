@@ -34,7 +34,23 @@ data class PodcastModel(
     @ColumnInfo("skipBeginning")
     val skipBeginning: Int = 0,
     @ColumnInfo("skipEnding")
-    val skipEnding: Int = 0
+    val skipEnding: Int = 0,
+    @ColumnInfo("feedUrl", defaultValue = "")
+    val feedUrl: String = "",
+    @ColumnInfo("itunesType", defaultValue = "")
+    val itunesType: String = "",
+    @ColumnInfo("categoriesJson", defaultValue = "")
+    val categoriesJson: String = "",
+    @ColumnInfo("explicit", defaultValue = "0")
+    val explicit: Boolean = false,
+    @ColumnInfo("fundingJson", defaultValue = "")
+    val fundingJson: String = "",
+    @ColumnInfo("personsJson", defaultValue = "")
+    val personsJson: String = "",
+    @ColumnInfo("trailerUrl", defaultValue = "")
+    val trailerUrl: String = "",
+    @ColumnInfo("trailerTitle", defaultValue = "")
+    val trailerTitle: String = ""
 ) {
     fun createMediaItem(): MediaItem {
         return MediaItem.Builder()
@@ -57,12 +73,16 @@ data class PodcastModel(
         return overrideTitle.ifBlank { title }
     }
 
+    fun fetchFeedUrl(): String {
+        return feedUrl.ifBlank { origin }
+    }
+
     fun toOpmlOutline(): OpmlOutline {
         return OpmlOutline(
             title = title,
             text = title,
             type = "rss",
-            xmlUrl = origin,
+            xmlUrl = fetchFeedUrl(),
             htmlUrl = link
         )
     }
