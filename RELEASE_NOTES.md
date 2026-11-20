@@ -1,3 +1,12 @@
+# HushCast v1.0.42-hushcast
+
+## What's New
+- **Podcast detail layout & miniplayer clearance**:
+  - Enlarged podcast artwork in the header and anchored it closer to the title to better fill the top space and remove excess blank space beneath it.
+  - Added bottom system bar inset padding to the podcast episode list so the floating miniplayer no longer covers the bottom-most (oldest/first) episode when scrolled.
+
+---
+
 # HushCast v1.0.41-hushcast
 
 ## What's New

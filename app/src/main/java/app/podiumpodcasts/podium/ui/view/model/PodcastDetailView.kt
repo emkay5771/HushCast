@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -595,7 +596,10 @@ fun PodcastDetailView(
                         state = if(episodePager.itemCount != 0)
                             vm.lazyListState
                         else
-                            rememberLazyListState()
+                            rememberLazyListState(),
+                        contentPadding = PaddingValues(
+                            bottom = inset.calculateBottomPadding()
+                        )
                     ) {
                         item(
                             key = "BACKDROP"
@@ -615,8 +619,9 @@ fun PodcastDetailView(
                             ) {
                                 ShimmerAsyncImage(
                                     modifier = Modifier
-                                        .align(Alignment.Center)
-                                        .size(128.dp)
+                                        .align(Alignment.BottomCenter)
+                                        .padding(bottom = 8.dp)
+                                        .size(192.dp)
                                         .shadow(
                                             elevation = 8.dp,
                                             shape = RoundedCornerShape(16.dp),
@@ -648,7 +653,7 @@ fun PodcastDetailView(
                                 color = MaterialTheme.colorScheme.surfaceContainer
                             ) {
                                 Column {
-                                    Spacer(Modifier.height(16.dp))
+                                    Spacer(Modifier.height(8.dp))
 
                                     SelectionContainer(
                                         Modifier

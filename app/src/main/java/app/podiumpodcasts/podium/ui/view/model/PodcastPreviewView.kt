@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -174,7 +175,10 @@ fun PodcastPreviewView(
 
                                 LazyColumn(
                                     state = vm.listState,
-                                    overscrollEffect = null
+                                    overscrollEffect = null,
+                                    contentPadding = PaddingValues(
+                                        bottom = inset.calculateBottomPadding()
+                                    )
                                 ) {
                                     item(
                                         key = "BACKDROP"
@@ -194,8 +198,9 @@ fun PodcastPreviewView(
                                         ) {
                                             ShimmerAsyncImage(
                                                 modifier = Modifier
-                                                    .align(Alignment.Center)
-                                                    .size(128.dp)
+                                                    .align(Alignment.BottomCenter)
+                                                    .padding(bottom = 8.dp)
+                                                    .size(192.dp)
                                                     .shadow(
                                                         elevation = 8.dp,
                                                         shape = RoundedCornerShape(16.dp),
@@ -224,7 +229,7 @@ fun PodcastPreviewView(
                                             color = MaterialTheme.colorScheme.surfaceContainer
                                         ) {
                                             Column {
-                                                Spacer(Modifier.height(16.dp))
+                                                Spacer(Modifier.height(8.dp))
 
                                                 SelectionContainer(
                                                     Modifier
