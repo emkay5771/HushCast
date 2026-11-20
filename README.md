@@ -27,6 +27,7 @@
 
 ### 🎧 A Fast, Tactile Podcast Player
 - **Pocket Casts-style controls**: Compact floating miniplayer with queue count and blocked-content markers, plus a full-screen player with **Player**, **Transcript**, **Chapters**, and **Notes** tabs.
+- **Auto-generated chapters, transcripts & summaries**: When paired with a Desktop or Cloud Worker, HushCast automatically generates timestamped **Chapters**, **speaker-labeled transcripts**, and **episode summaries**—even for podcasts that don't include chapters in their feed.
 - **Effortless queue & episode management**: Swipe up for **Up Next** (with swipe-to-remove **Undo**), half-swipe episodes for quick actions, full-swipe for your primary action, or long-press to bulk-manage episodes.
 - **Playback polish**: Speed stepper & presets (`0.5x`–`3.0x`) with live speed shown in Android's media notification, **Trim Silence**, **Volume Boost**, **speed- & skip-adjusted remaining time** (e.g., `-24:10 (-16:07)`), and a **10-second fade-out Sleep Timer**.
 - **Adaptive Material 3 Expressive UI**: Artwork-adaptive **Material You** colors, smooth progressive-blurred podcast headers, predictive back gestures, and customizable player action buttons.
