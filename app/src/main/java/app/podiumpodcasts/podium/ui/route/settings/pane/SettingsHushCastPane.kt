@@ -21,6 +21,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.FormatListBulleted
 import androidx.compose.material.icons.automirrored.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Visibility
+import androidx.compose.material.icons.rounded.VoiceOverOff
+import androidx.compose.material.icons.rounded.Explicit
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.Cloud
@@ -30,6 +33,7 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Memory
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.NotificationsActive
@@ -106,7 +110,6 @@ import app.hushcast.automute.engine.HushCastPrefs
 import app.hushcast.automute.engine.ModelDownloadProgress
 import app.hushcast.automute.engine.ModelManager
 import app.hushcast.automute.engine.MuteTimingPrecision
-import app.hushcast.automute.matcher.PresetDictionaries
 import app.hushcast.automute.storage.AutoMuteDatabase
 import app.hushcast.automute.storage.MuteRuleEntity
 import app.hushcast.automute.worker.EpisodeAnalysisWorker
@@ -172,6 +175,9 @@ fun SettingsHushCastPane(
 
     val wordMutingEnabled by settingsRepository.hushCast.wordMutingEnabled.collectAsStateWithLifecycle(
         initialValue = HushCastEngineBridge.wordMutingEnabled
+    )
+    val previewMuting by settingsRepository.hushCast.previewMuting.collectAsStateWithLifecycle(
+        initialValue = false
     )
     val selectedActionMode by settingsRepository.hushCast.muteActionMode.collectAsStateWithLifecycle(
         initialValue = HushCastEngineBridge.defaultActionMode
@@ -491,10 +497,17 @@ fun SettingsHushCastPane(
                             )
                         }
                         row { pos ->
+                            val hubFilters by remember(context) { HushCastPrefs.filterSettingsFlow(context) }
+                                .collectAsStateWithLifecycle(initialValue = HushCastPrefs.getFilterSettings(context))
                             SettingsListItem(
                                 icon = { Icon(Icons.AutoMirrored.Rounded.FormatListBulleted, null) },
                                 label = "Word list",
-                                description = "${rules.size} rules",
+                                description = buildList {
+                                    add("Profanity: " + FilterLabels.level(hubFilters.profanity))
+                                    if (hubFilters.explicit) add("Explicit")
+                                    if (hubFilters.religious) add("Religious")
+                                    if (rules.isNotEmpty()) add("${rules.size} of your words")
+                                }.joinToString(" · "),
                                 index = pos.index,
                                 count = pos.count,
                                 onClick = { onNavigate(SettingsHushCastKey(HushCastSettingsSection.WORD_LIST)) }
@@ -541,6 +554,20 @@ fun SettingsHushCastPane(
                                 icon = { Icon(Icons.AutoMirrored.Rounded.VolumeOff, contentDescription = null) },
                                 label = "Word auto-muting",
                                 description = "Mute the words on your word list while you listen",
+                                index = pos.index,
+                                count = pos.count
+                            )
+                        }
+                        row { pos ->
+                            SettingsSwitchListItem(
+                                checked = previewMuting,
+                                onCheckedChange = {
+                                    scope.launch { settingsRepository.hushCast.setPreviewMuting(it) }
+                                },
+                                icon = { Icon(Icons.Rounded.GraphicEq, contentDescription = null) },
+                                label = "Mute words in previews",
+                                description = "For soundbites of episodes HushCast has already processed",
+                                enabled = wordMutingEnabled,
                                 index = pos.index,
                                 count = pos.count
                             )
@@ -779,47 +806,54 @@ fun SettingsHushCastPane(
                 var newPattern by remember { mutableStateOf("") }
                 var isRegex by remember { mutableStateOf(false) }
                 var searchQuery by remember { mutableStateOf("") }
+                var shownSheet by remember { mutableStateOf<FilterWordsSheetKind?>(null) }
+
+                // The built-in filters (1.0.45): a profanity level, Explicit content, religious
+                // exclamations.  They live in the engine's preferences, which the matcher reads.
+                val filters by remember(context) { HushCastPrefs.filterSettingsFlow(context) }
+                    .collectAsStateWithLifecycle(initialValue = HushCastPrefs.getFilterSettings(context))
+                // The level to come back to when profanity muting is switched on again.
+                var lastLevel by androidx.compose.runtime.saveable.rememberSaveable {
+                    mutableStateOf(
+                        filters.profanity.takeIf { it != app.hushcast.automute.matcher.ProfanityLevel.OFF }
+                            ?: app.hushcast.automute.matcher.ProfanityLevel.STANDARD
+                    )
+                }
+
+                fun updateFilters(next: app.hushcast.automute.matcher.FilterSettings) {
+                    HushCastPrefs.setFilterSettings(context, next)
+                    if (next.profanity != app.hushcast.automute.matcher.ProfanityLevel.OFF) lastLevel = next.profanity
+                    RuleReevaluationWorker.enqueue(context = context, defaultActionMode = selectedActionMode)
+                }
 
                 val filteredRules = remember(rules, searchQuery) {
                     val q = searchQuery.trim()
                     if (q.isEmpty()) rules
-                    else rules.filter {
-                        it.pattern.contains(q, ignoreCase = true) ||
-                            it.category.contains(q, ignoreCase = true)
-                    }
+                    else rules.filter { it.pattern.contains(q, ignoreCase = true) }
                 }
 
                 val reevalInfos by androidx.work.WorkManager.getInstance(context)
                     .getWorkInfosForUniqueWorkFlow(RuleReevaluationWorker.UNIQUE_NAME)
                     .collectAsStateWithLifecycle(initialValue = emptyList())
+                val updating = reevalInfos.any { !it.state.isFinished }
 
-                val existingKeys = remember(rules) {
-                    rules.map { it.pattern.trim().lowercase() to it.isRegex }.toSet()
-                }
-                val profanityAdded = remember(existingKeys, selectedActionMode) {
-                    PresetDictionaries.profanityRules(selectedActionMode).all {
-                        (it.pattern.trim().lowercase() to it.isRegex) in existingKeys
-                    }
-                }
-                val explicitAdded = remember(existingKeys, selectedActionMode) {
-                    PresetDictionaries.explicitRules(selectedActionMode).all {
-                        (it.pattern.trim().lowercase() to it.isRegex) in existingKeys
-                    }
-                }
-
-                fun addPreset(presetRules: List<app.hushcast.automute.matcher.MuteRule>) {
+                fun addWord() {
+                    val pat = newPattern.trim()
+                    if (pat.isEmpty()) return
+                    newPattern = ""
                     scope.launch {
-                        val entities = presetRules.map {
+                        autoMuteDb.dao().upsertRuleIfNew(
                             MuteRuleEntity(
-                                pattern = it.pattern,
-                                isRegex = it.isRegex,
-                                matchPlurals = it.matchPlurals,
-                                actionMode = if (it.useDefaultMode) app.hushcast.automute.storage.DEFAULT_RULE_MODE else it.actionMode.name,
-                                category = it.category
+                                pattern = pat,
+                                isRegex = isRegex,
+                                // Follow the global mute mode, so changing it applies.
+                                actionMode = app.hushcast.automute.storage.DEFAULT_RULE_MODE
                             )
-                        }
-                        autoMuteDb.dao().upsertRulesIfNew(entities)
-                        RuleReevaluationWorker.enqueue(context = context, defaultActionMode = selectedActionMode)
+                        )
+                        RuleReevaluationWorker.enqueue(
+                            context = context,
+                            defaultActionMode = selectedActionMode
+                        )
                     }
                 }
 
@@ -847,10 +881,102 @@ fun SettingsHushCastPane(
 
                 SettingsLazyColumn(padding, Modifier.focusTarget()) {
                     settingsGroup(
-                        header = "Add word or pattern",
-                        description = if (reevalInfos.any { !it.state.isFinished }) "Updating episodes…" else null,
-                        key = "add",
+                        header = "Profanity",
+                        description = if (updating) "Updating episodes…" else null,
+                        key = "profanity",
                         spaceAbove = 0.dp
+                    ) {
+                        row { pos ->
+                            SettingsSwitchListItem(
+                                checked = filters.profanity != app.hushcast.automute.matcher.ProfanityLevel.OFF,
+                                onCheckedChange = { on ->
+                                    updateFilters(
+                                        filters.copy(
+                                            profanity = if (on) lastLevel else app.hushcast.automute.matcher.ProfanityLevel.OFF
+                                        )
+                                    )
+                                },
+                                icon = { Icon(Icons.AutoMirrored.Rounded.VolumeOff, contentDescription = null) },
+                                label = "Mute profanity",
+                                description = FilterLabels.levelDescription(filters.profanity),
+                                index = pos.index,
+                                count = pos.count
+                            )
+                        }
+                        if (filters.profanity != app.hushcast.automute.matcher.ProfanityLevel.OFF) {
+                            row { pos ->
+                                SettingsGroupSurface(position = pos) {
+                                    app.podiumpodcasts.podium.ui.component.common.ConnectedSingleChoiceGroup(
+                                        options = FilterLabels.levels,
+                                        selected = filters.profanity,
+                                        onSelect = { updateFilters(filters.copy(profanity = it)) }
+                                    ) { level ->
+                                        Text(
+                                            FilterLabels.level(level),
+                                            maxLines = 1,
+                                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        row { pos ->
+                            val shownCount = app.hushcast.automute.matcher.Severity.entries
+                                .filter { filters.profanity.mutes(it) }
+                                .sumOf { app.hushcast.automute.matcher.BuiltInFilters.shownProfanity(it).size }
+                            SettingsListItem(
+                                icon = { Icon(Icons.Rounded.Visibility, contentDescription = null) },
+                                label = "See what's muted",
+                                description = if (shownCount == 0) {
+                                    "Every word, and the level that mutes it"
+                                } else {
+                                    "$shownCount words, and their variations"
+                                },
+                                index = pos.index,
+                                count = pos.count,
+                                onClick = { shownSheet = FilterWordsSheetKind.PROFANITY }
+                            )
+                        }
+                    }
+
+                    settingsGroup(header = "Other filters", key = "filters") {
+                        row { pos ->
+                            SettingsSwitchListItem(
+                                checked = filters.explicit,
+                                onCheckedChange = { updateFilters(filters.copy(explicit = it)) },
+                                icon = { Icon(Icons.Rounded.Explicit, contentDescription = null) },
+                                label = "Explicit content",
+                                description = "Sexual terms",
+                                index = pos.index,
+                                count = pos.count
+                            )
+                        }
+                        row { pos ->
+                            SettingsSwitchListItem(
+                                checked = filters.religious,
+                                onCheckedChange = { updateFilters(filters.copy(religious = it)) },
+                                icon = { Icon(Icons.Rounded.VoiceOverOff, contentDescription = null) },
+                                label = "Religious exclamations",
+                                description = "Phrases like “oh my God”, never “God” on its own",
+                                index = pos.index,
+                                count = pos.count
+                            )
+                        }
+                        row { pos ->
+                            SettingsListItem(
+                                icon = { Icon(Icons.Rounded.Visibility, contentDescription = null) },
+                                label = "See these words and phrases",
+                                index = pos.index,
+                                count = pos.count,
+                                onClick = { shownSheet = FilterWordsSheetKind.OTHER }
+                            )
+                        }
+                    }
+
+                    settingsGroup(
+                        header = "Your words",
+                        description = "Words and phrases you add are always muted",
+                        key = "add"
                     ) {
                         row { pos ->
                             SettingsGroupSurface(position = pos) {
@@ -861,92 +987,54 @@ fun SettingsHushCastPane(
                                     OutlinedTextField(
                                         value = newPattern,
                                         onValueChange = { newPattern = it },
-                                        label = { Text("Word, phrase, or regex") },
+                                        label = { Text(if (isRegex) "Regex" else "Word or phrase") },
+                                        supportingText = if (isRegex) {
+                                            { Text("Tip: \\bword\\b matches the whole word only") }
+                                        } else null,
+                                        trailingIcon = {
+                                            // Regex is for the few who need it: a toggle in the field,
+                                            // not a row of its own.
+                                            androidx.compose.material3.IconToggleButton(
+                                                checked = isRegex,
+                                                onCheckedChange = { isRegex = it }
+                                            ) {
+                                                Icon(
+                                                    Icons.Rounded.Code,
+                                                    contentDescription = "Treat as regex",
+                                                    tint = if (isRegex) MaterialTheme.colorScheme.primary
+                                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                        },
                                         singleLine = true,
                                         modifier = Modifier.weight(1f)
                                     )
                                     Button(
                                         enabled = newPattern.isNotBlank(),
-                                        onClick = {
-                                            val pat = newPattern.trim()
-                                            newPattern = ""
-                                            scope.launch {
-                                                autoMuteDb.dao().upsertRuleIfNew(
-                                                    MuteRuleEntity(
-                                                        pattern = pat,
-                                                        isRegex = isRegex,
-                                                        // Follow the global mute mode, so changing it applies.
-                                                        actionMode = app.hushcast.automute.storage.DEFAULT_RULE_MODE
-                                                    )
-                                                )
-                                                RuleReevaluationWorker.enqueue(
-                                                    context = context,
-                                                    defaultActionMode = selectedActionMode
-                                                )
-                                            }
-                                        }
+                                        onClick = { addWord() }
                                     ) {
-                                        Icon(Icons.Rounded.Add, contentDescription = "Add to word list")
+                                        Icon(Icons.Rounded.Add, contentDescription = "Add to your words")
                                     }
                                 }
                             }
                         }
-                        row { pos ->
-                            SettingsSwitchListItem(
-                                checked = isRegex,
-                                onCheckedChange = { isRegex = it },
-                                icon = { Icon(Icons.Rounded.Code, contentDescription = null) },
-                                label = "Treat as regex",
-                                description = "Tip: use \\bword\\b for exact whole-word matching",
-                                index = pos.index,
-                                count = pos.count
-                            )
-                        }
-                    }
-
-                    settingsGroup(header = "Presets", key = "presets") {
-                        row { pos ->
-                            SettingsListItem(
-                                icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-                                label = if (profanityAdded) "Profanity preset added" else "Add profanity preset",
-                                description = "Common swear words",
-                                enabled = !profanityAdded,
-                                index = pos.index,
-                                count = pos.count,
-                                onClick = { addPreset(PresetDictionaries.profanityRules(selectedActionMode)) }
-                            )
-                        }
-                        row { pos ->
-                            SettingsListItem(
-                                icon = { Icon(Icons.Rounded.Add, contentDescription = null) },
-                                label = if (explicitAdded) "Explicit preset added" else "Add explicit preset",
-                                description = "Sexual and explicit terms",
-                                enabled = !explicitAdded,
-                                index = pos.index,
-                                count = pos.count,
-                                onClick = { addPreset(PresetDictionaries.explicitRules(selectedActionMode)) }
-                            )
-                        }
-                    }
-
-                    if (rules.isNotEmpty()) {
-                        settingsGroup(header = "Rules", key = "search") {
+                        if (rules.size > 8) {
                             row { _ ->
                                 OutlinedTextField(
                                     value = searchQuery,
                                     onValueChange = { searchQuery = it },
                                     leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-                                    label = { Text("Search ${rules.size} rules") },
+                                    label = { Text("Search ${rules.size} words") },
                                     singleLine = true,
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(bottom = 8.dp)
+                                        .padding(top = 8.dp)
                                 )
                             }
                         }
                     }
 
-                    settingsGroup(key = "rules", spaceAbove = 0.dp) {
+                    settingsGroup(key = "rules", spaceAbove = 8.dp) {
                         filteredRules.forEach { rule ->
                             row(key = rule.id) { pos ->
                                 val dismissState = rememberSwipeToDismissBoxState(
@@ -974,10 +1062,10 @@ fun SettingsHushCastPane(
                                     // keeps the row's corners while it's dragged.
                                     modifier = Modifier
                                         .animateItem(
-    fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
-    placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
-    fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
-)
+                                            fadeInSpec = MaterialTheme.motionScheme.defaultEffectsSpec(),
+                                            placementSpec = MaterialTheme.motionScheme.defaultSpatialSpec(),
+                                            fadeOutSpec = MaterialTheme.motionScheme.defaultEffectsSpec()
+                                        )
                                         .clip(settingsGroupShape(pos)),
                                     backgroundContent = {
                                         val direction = dismissState.dismissDirection
@@ -1003,7 +1091,7 @@ fun SettingsHushCastPane(
                                         }
                                     }
                                 ) {
-                                    // The whole row toggles the rule and is announced as a switch;
+                                    // The whole row toggles the word and is announced as a switch;
                                     // the Switch only shows the state.
                                     SettingsListItem(
                                         modifier = Modifier.semantics {
@@ -1013,7 +1101,7 @@ fun SettingsHushCastPane(
                                         content = {
                                             Text(rule.pattern, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                         },
-                                        description = "${rule.category} • $modeLabel${if (rule.isRegex) " • Regex" else ""}",
+                                        description = modeLabel + if (rule.isRegex) " • Regex" else "",
                                         trailingContent = {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Switch(
@@ -1021,7 +1109,7 @@ fun SettingsHushCastPane(
                                                     onCheckedChange = null
                                                 )
                                                 IconButton(onClick = { deleteRuleWithUndo(rule) }) {
-                                                    Icon(Icons.Rounded.Delete, contentDescription = "Delete rule ${rule.pattern}")
+                                                    Icon(Icons.Rounded.Delete, contentDescription = "Delete ${rule.pattern}")
                                                 }
                                             }
                                         },
@@ -1043,6 +1131,10 @@ fun SettingsHushCastPane(
                             }
                         }
                     }
+                }
+
+                shownSheet?.let { kind ->
+                    FilterWordsSheet(kind = kind, filters = filters, onDismiss = { shownSheet = null })
                 }
             }
 

@@ -27,6 +27,10 @@ interface PodcastDao {
     @Query("SELECT * FROM podcast WHERE origin=:origin")
     fun get(origin: String): Flow<PodcastModel>
 
+    /** The show's `itunes:type` ("serial", "episodic" or ""); null once the podcast is gone. */
+    @Query("SELECT itunesType FROM podcast WHERE origin = :origin")
+    fun observeItunesType(origin: String): Flow<String?>
+
     @Query("SELECT * FROM podcast WHERE origin=:origin")
     suspend fun getSync(origin: String): PodcastModel?
 

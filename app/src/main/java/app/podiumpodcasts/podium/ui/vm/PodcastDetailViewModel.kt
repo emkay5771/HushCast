@@ -55,17 +55,21 @@ class PodcastDetailViewModel(
         db = db
     )
 
-    val isSerial = podcast.itunesType.equals("serial", ignoreCase = true)
-    val searchFilterOrderBarState = PodcastSearchFilterOrderBarState(isSerial = isSerial)
+    val searchFilterOrderBarState = PodcastSearchFilterOrderBarState(
+        isSerial = podcast.itunesType.equals("serial", ignoreCase = true)
+    )
 
     val hasSeasons = db.podcastEpisodes().hasSeasons(podcast.origin)
 
     init {
-        if (isSerial) {
-            viewModelScope.launch {
-                hasSeasons.first { it }
-                searchFilterOrderBarState.groupBySeason.value = true
-            }
+        // From the stored row, not the model this page opened with: a refresh can bring the
+        // show's type (and its seasons) after the page is open, and this view model outlives it.
+        viewModelScope.launch {
+            db.podcasts().observeItunesType(podcast.origin)
+                .first { it.equals("serial", ignoreCase = true) }
+            searchFilterOrderBarState.applySerialDefault()
+            hasSeasons.first { it }
+            searchFilterOrderBarState.applySeasonGroupingDefault()
         }
     }
 

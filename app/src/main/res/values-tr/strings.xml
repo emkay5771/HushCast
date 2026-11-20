@@ -279,4 +279,18 @@
     <string name="snackbar_removed_from_hear_later">» Daha sonra dinle « listesinden kaldırıldı</string>
     <string name="snackbar_reset_progress">İlerleme sıfırlandı</string>
     <string name="common_error">Hata</string>
+    <string name="common_support">Destekle</string>
+    <string name="common_comments">Yorumlar</string>
+    <string name="podcast_group_by_season">Sezona göre grupla</string>
+    <string name="podcast_season_number">Sezon %1$d</string>
+    <string name="podcast_other_episodes">Diğer bölümler</string>
+    <string name="episode_number_short">BÖL. %1$d</string>
+    <string name="episode_type_trailer">Fragman</string>
+    <string name="episode_type_bonus">Bonus</string>
+    <string name="content_explicit">Müstehcen</string>
+    <string name="preview_clip">Ön izleme</string>
+    <string name="preview_playing">Ön izleme oynatılıyor</string>
+    <string name="action_trailer">Fragman</string>
+    <string name="episode_chapters_show_all">Tümünü göster (%1$d)</string>
+    <string name="episode_chapters_show_fewer">Daha az göster</string>
 </resources>

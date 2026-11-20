@@ -1,3 +1,36 @@
+# HushCast v1.0.45-hushcast
+
+## What's New
+- **Podcasting 2.0, finished properly**:
+  - **Trailers**: shows with a `podcast:trailer` now have a **Trailer** button on the podcast header's author line. 1.0.43 promised it, but it never appeared.
+  - **Soundbites are real previews**: they play on their own, so a preview no longer replaces what's playing, joins Up Next, saves progress, or starts a download or HushCast processing. The button counts down while it plays; tap again to stop.
+  - **Mute words in previews** (Settings → HushCast → Muting, off by default): applies your word muting to soundbite previews of episodes HushCast has already processed.
+  - **Your existing subscriptions get the new info**: seasons, people, categories, funding, trailers and explicit flags now load for podcasts you subscribed to before 1.0.43, on the next refresh. Before, they only appeared once a show published something new.
+  - **Feed moves (`itunes:new-feed-url`) work for existing subscriptions too**, and the new feed is read right away.
+  - **Live episodes no longer rename the show**: a `podcast:liveItem` in a feed (Podcasting 2.0 itself has them) replaced the show's title and description.
+  - **Episode info stays current**: a corrected season or episode number, a guest added later, or an episode no longer marked explicit now updates on refresh.
+  - **More feeds supported**: `podcast:season` and `podcast:episode` are used when a feed has no iTunes season or number, and `podcast:socialInteract` (a Mastodon post, for example) becomes the Comments link when there's no `<comments>`.
+- **Tidier podcast and episode pages**:
+  - Serial shows switch to oldest first and season grouping as soon as their info arrives, not only after reopening the app.
+  - "Group by season" is the first filter chip when a show has seasons (it sat off the edge of the screen).
+  - **Episode pages put the show notes first**: soundbite previews and hosts/guests (one swipeable line each) come right before the notes, and the transcript button and chapters come after them. Long chapter lists show the first three with **Show all**.
+  - Categories are a single line of text on the Info tab instead of greyed-out chips.
+  - The explicit badge also shows on the podcast header and the episode page.
+  - The new labels are translated (German, Spanish, French, Italian, Turkish).
+- **Word filters, reorganized** (Settings → HushCast → Word list):
+  - **Profanity is a built-in filter with three levels**: Light (the strongest words only), Standard (strong and moderate words) and Strict (mild words too). **See what's muted** lists the words for each level, hidden behind asterisks unless you choose to show them.
+  - **Explicit content** and **religious exclamations** (phrases like "oh my God", never "God" on its own) are their own switches.
+  - **Your words** keep their own list; regex is a small toggle in the add field.
+  - **Each podcast can have its own level**, or word muting off, from the player's HushCast sheet.
+  - Everything starts off on a new install. If you added the presets in an earlier version, your level is chosen so nothing you muted becomes unmuted, and any preset words outside it stay in your words.
+- **Improved profanity matching**:
+  - Word muting now catches more variations of the words it mutes: longer words and compounds that contain them, more plural forms, hyphenated spellings, and words the transcript shows with asterisks.
+  - Everyday words, names, and Torah and Bible terms that only look similar are left alone.
+  - Strict also covers a few more mild words.
+  - Episodes you've already processed are checked again once, without re-transcribing.
+
+---
+
 # HushCast v1.0.44-hushcast
 
 ## What's New

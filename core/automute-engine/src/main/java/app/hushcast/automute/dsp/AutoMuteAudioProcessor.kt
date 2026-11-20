@@ -75,6 +75,20 @@ class AutoMuteAudioProcessor : BaseAudioProcessor() {
         customSoundSampleRateHz = sampleRateHz.coerceAtLeast(8000)
     }
 
+    /**
+     * Copies the user's mute settings (on/off, mode, bleep, custom sound, boost, encoder delay)
+     * from [other], typically the main player's processor.  Not the windows or the timeline.
+     */
+    fun copySettingsFrom(other: AutoMuteAudioProcessor) {
+        isEnabled = other.isEnabled
+        defaultActionMode = other.defaultActionMode
+        volumeBoostEnabled = other.volumeBoostEnabled
+        bleepStyle = other.bleepStyle
+        encoderDelayOffsetMs = other.encoderDelayOffsetMs
+        customSoundPcm = other.customSoundPcm
+        customSoundSampleRateHz = other.customSoundSampleRateHz
+    }
+
     fun updateWindows(newWindows: List<MuteWindow>) {
         val cleaned = newWindows.filter { it.enabled && it.endMs > it.startMs }.sortedBy { it.startMs }
         pendingWindows.set(cleaned)

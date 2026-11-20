@@ -86,6 +86,12 @@ object RssFeedParser {
 
         // ---- text capture ----
         private var depth = 0
+
+        /**
+         * Depth of a subtree being skipped (a `<podcast:liveItem>`), or -1.  A live item has its
+         * own `<title>`, `<description>`, people and so on; none of them are the show's.
+         */
+        private var skipDepth = -1
         private var captureMode = CAPTURE_NONE
         private var captureDepth = -1
         private var captureHadChild = false
@@ -115,6 +121,10 @@ object RssFeedParser {
         private val itemPersons = ArrayList<PodcastPerson>()
         private val itemSoundbites = ArrayList<PodcastSoundbite>()
         private var itemExplicit = false
+        private var itemPodcastSeason: Int? = null
+        private var itemPodcastEpisode: Int? = null
+        private var itemSocialUrl = ""
+        private var itemSocialPriority = Int.MAX_VALUE
 
         private val byItemKey = HashMap<String, RssEpisodeExtras>()
         private val byItem = IdentityHashMap<RssItem, RssEpisodeExtras>()
@@ -164,6 +174,9 @@ object RssFeedParser {
                 return
             }
 
+            // Inside a skipped subtree: nothing in it is handled.
+            if (skipDepth >= 0) return
+
             if (captureMode != CAPTURE_NONE) {
                 // Children of an element being read as text are not handled on their own.
                 captureHadChild = true
@@ -183,6 +196,11 @@ object RssFeedParser {
                     // RssParser steps over this first child's start tag without handling it.
                     return
                 }
+            }
+
+            if (insideChannel && !insideItem && is_(name, "podcast:liveItem")) {
+                skipDepth = depth
+                return
             }
 
             handleExtrasStart(name, attrs)
@@ -377,6 +395,10 @@ object RssFeedParser {
                     itemPersons.clear()
                     itemSoundbites.clear()
                     itemExplicit = false
+                    itemPodcastSeason = null
+                    itemPodcastEpisode = null
+                    itemSocialUrl = ""
+                    itemSocialPriority = Int.MAX_VALUE
                 }
                 insideChannel && !insideItem && local == "language" && channelLang.isBlank() -> {
                     capture(CAPTURE_TEXT) { if (channelLang.isBlank()) channelLang = it.orEmpty() }
@@ -478,6 +500,30 @@ object RssFeedParser {
                             }
                         }
                     }
+                    // The Podcasting 2.0 season and episode, used where the iTunes ones are missing.
+                    is_(name, "podcast:season") -> capture(CAPTURE_TEXT) { text ->
+                        itemPodcastSeason = text?.trim()?.toIntOrNull()?.takeIf { it >= 0 }
+                    }
+                    is_(name, "podcast:episode") -> capture(CAPTURE_TEXT) { text ->
+                        // Decimals ("1.5") are allowed; only whole numbers make an "EP. n" badge.
+                        val number = text?.trim()?.toDoubleOrNull()
+                        itemPodcastEpisode = number?.takeIf { it >= 1.0 && it % 1.0 == 0.0 }?.toInt()
+                    }
+                    // Where the episode is discussed (a Mastodon post, for example): the comments
+                    // link when the item has no <comments>.  Lowest priority number wins.
+                    is_(name, "podcast:socialInteract") -> {
+                        val protocol = attr(attrs, "protocol")?.trim().orEmpty()
+                        val uri = attr(attrs, "uri")?.trim().orEmpty()
+                        val priority = attr(attrs, "priority")?.trim()?.toIntOrNull() ?: (Int.MAX_VALUE - 1)
+                        val isWebLink = uri.startsWith("https://", ignoreCase = true) ||
+                            uri.startsWith("http://", ignoreCase = true)
+                        if (!protocol.equals("disabled", ignoreCase = true) && isWebLink &&
+                            priority < itemSocialPriority
+                        ) {
+                            itemSocialUrl = uri
+                            itemSocialPriority = priority
+                        }
+                    }
                     is_(name, "podcast:soundbite") -> {
                         val startTime = attr(attrs, "startTime")?.trim()?.toDoubleOrNull()
                         val duration = attr(attrs, "duration")?.trim()?.toDoubleOrNull()
@@ -514,7 +560,9 @@ object RssFeedParser {
             resetItemExtras()
             val ordered = TranscriptRanking.order(transcripts)
             if (ordered.isEmpty() && chaptersUrl.isBlank() && inlineChapters.isEmpty() &&
-                itemPersons.isEmpty() && itemSoundbites.isEmpty() && !itemExplicit) return
+                itemPersons.isEmpty() && itemSoundbites.isEmpty() && !itemExplicit &&
+                itemPodcastSeason == null && itemPodcastEpisode == null && itemSocialUrl.isBlank()
+            ) return
             val primary = ordered.firstOrNull()
             val extra = RssEpisodeExtras(
                 transcriptUrl = primary?.url.orEmpty(),
@@ -525,7 +573,10 @@ object RssFeedParser {
                 transcriptAlternates = if (ordered.size > 1) ordered.drop(1) else emptyList(),
                 persons = itemPersons.toList(),
                 soundbites = itemSoundbites.toList(),
-                explicit = itemExplicit
+                explicit = itemExplicit,
+                season = itemPodcastSeason,
+                episode = itemPodcastEpisode,
+                socialInteractUrl = itemSocialUrl
             )
             byItem[item] = extra
             // The same keys RssPodcastExtras.lookup() tries, from the same parsed values.
@@ -558,6 +609,11 @@ object RssFeedParser {
         override fun endElement(uri: String?, localName: String?, qName: String?) {
             val name = qName?.takeIf { it.isNotEmpty() } ?: localName.orEmpty()
             try {
+                if (skipDepth >= 0) {
+                    if (depth == skipDepth) skipDepth = -1
+                    return
+                }
+
                 if (captureMode != CAPTURE_NONE) {
                     if (depth != captureDepth) return
                     val mode = captureMode

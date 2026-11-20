@@ -91,11 +91,11 @@ fun RssItem.toPodcastEpisode(
         chaptersUrl = epExtras?.chaptersUrl ?: "",
         chaptersType = epExtras?.chaptersType ?: "",
         transcriptAlternatesJson = epExtras?.transcriptAlternatesJson ?: "",
-        season = itunesItemData?.season?.trim()?.toIntOrNull()?.takeIf { it >= 0 },
-        episodeNumber = itunesItemData?.episode?.trim()?.toIntOrNull()?.takeIf { it > 0 },
+        season = itunesItemData?.season?.trim()?.toIntOrNull()?.takeIf { it >= 0 } ?: epExtras?.season,
+        episodeNumber = itunesItemData?.episode?.trim()?.toIntOrNull()?.takeIf { it > 0 } ?: epExtras?.episode,
         episodeType = itunesItemData?.episodeType?.trim()?.lowercase().orEmpty(),
         explicit = explicitFlag,
-        commentsUrl = commentsUrl?.trim().orEmpty(),
+        commentsUrl = commentsUrl?.trim().orEmpty().ifBlank { epExtras?.socialInteractUrl.orEmpty() },
         personsJson = PodcastMetadataJson.encodePersons(epExtras?.persons.orEmpty()),
         soundbitesJson = PodcastMetadataJson.encodeSoundbites(epExtras?.soundbites.orEmpty())
     )

@@ -281,6 +281,7 @@ object SettingsKeys {
         intPreferencesKey("behavior_delete_downloads_after_seconds")
 
     val HUSHCAST_WORD_MUTING_ENABLED = booleanPreferencesKey("hushcast_word_muting_enabled")
+    val HUSHCAST_PREVIEW_MUTING = booleanPreferencesKey("hushcast_preview_muting")
     val HUSHCAST_MUTE_ACTION_MODE = stringPreferencesKey("hushcast_mute_action_mode")
     val HUSHCAST_MUTE_CUSTOM_SOUND_URI = stringPreferencesKey("hushcast_mute_custom_sound_uri")
     val HUSHCAST_SPONSOR_SKIP_SOUND_ENABLED = booleanPreferencesKey("hushcast_sponsor_skip_sound_enabled")
@@ -888,6 +889,18 @@ class SettingsRepository(val context: Context) {
 
         suspend fun setWordMutingEnabled(enabled: Boolean) = dataStore.edit { preferences ->
             preferences[SettingsKeys.HUSHCAST_WORD_MUTING_ENABLED] = enabled
+        }
+
+        /**
+         * Apply word muting to soundbite previews of episodes HushCast has already processed.
+         * Off by default: previews play as published, and never download or process anything.
+         */
+        val previewMuting: Flow<Boolean> = dataStore.data.map { preferences ->
+            preferences[SettingsKeys.HUSHCAST_PREVIEW_MUTING] ?: false
+        }
+
+        suspend fun setPreviewMuting(enabled: Boolean) = dataStore.edit { preferences ->
+            preferences[SettingsKeys.HUSHCAST_PREVIEW_MUTING] = enabled
         }
 
         val muteActionMode: Flow<app.hushcast.automute.dsp.MuteActionMode> = dataStore.data.map { preferences ->

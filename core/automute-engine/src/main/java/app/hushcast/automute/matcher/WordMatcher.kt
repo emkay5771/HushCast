@@ -18,6 +18,11 @@ data class MuteRule(
     val useDefaultMode: Boolean = false
 )
 
+/**
+ * The preset lists as 1.0.44 and earlier copied them into the word list.  Since 1.0.45 the
+ * built-in filters ([BuiltInFilters]) replace them; these stay so the one-time migration can
+ * recognize copied presets, and as fixed word sets for tests.
+ */
 object PresetDictionaries {
     val PROFANITY_PRESET = listOf(
         "fuck", "fucking", "fucked", "fucker", "f***", "f**k",
@@ -76,6 +81,13 @@ object PresetDictionaries {
  */
 object WordMatcher {
 
+    /**
+     * Bumped whenever matching changes what it catches, so episodes already analyzed are matched
+     * again once after an update (see App).  2: words inside longer words, compounds, any
+     * asterisk-masked word, "-ies" plurals, hyphenated words, names guarded ([WordForms]).
+     */
+    const val MATCHER_VERSION = 2
+
     private val MASKED_PROFANITY_MAP = mapOf(
         "f***" to "fuck",
         "f**k" to "fuck",
@@ -114,10 +126,55 @@ object WordMatcher {
         internal val compoundByFirstToken: Map<String, List<Pair<List<String>, MuteRule>>>,
         internal val combinedRegex: Regex?,
         internal val regexRules: List<Pair<Regex, MuteRule>>,
-        internal val defaultActionMode: MuteActionMode
+        internal val defaultActionMode: MuteActionMode,
+        /** Stems matched inside longer words, each with the rule of the list word that enabled it. */
+        internal val embeddedStems: List<Pair<WordForms.EmbeddedStem, MuteRule>> = emptyList(),
+        /** The rule for a masked word that spells none of the list words exactly. */
+        internal val maskFallback: MuteRule? = null
     ) {
         val isEmpty: Boolean
             get() = exactSet.isEmpty() && compoundByFirstToken.isEmpty() && regexRules.isEmpty()
+
+        /** For a word with no exact match: its hyphenated parts, a masked spelling, or a stem inside it. */
+        internal fun extraFormRule(norm: String): MuteRule? {
+            if ('-' in norm) {
+                for (part in norm.split('-')) {
+                    if (part.isNotEmpty()) exactSet[part]?.let { return it }
+                }
+            }
+            if ('*' in norm) {
+                if (!WordForms.isMasked(norm)) return null
+                val pattern = WordForms.maskPattern(norm)
+                return exactSet.entries.firstOrNull { pattern.matches(it.key) }?.value ?: maskFallback
+            }
+            for ((stem, rule) in embeddedStems) {
+                if (stem.stem in norm && stem.exceptions?.containsMatchIn(norm) != true) return rule
+            }
+            return null
+        }
+    }
+
+    /** The word and its plural (-s / -es, and -ies for a consonant + y: "pussy" -> "pussies"). */
+    private fun putWithPlurals(
+        exactSet: HashMap<String, MuteRule>,
+        base: String,
+        rule: MuteRule,
+        plurals: Boolean,
+        iesPlural: Boolean = true
+    ) {
+        exactSet.putIfAbsent(base, rule)
+        if (!plurals) return
+        if (base.endsWith("s") || base.endsWith("x") || base.endsWith("z") ||
+            base.endsWith("ch") || base.endsWith("sh")
+        ) {
+            exactSet.putIfAbsent("${base}es", rule)
+        } else {
+            exactSet.putIfAbsent("${base}s", rule)
+            exactSet.putIfAbsent("${base}es", rule)
+            if (iesPlural && base.length > 2 && base.endsWith("y") && base[base.length - 2] !in "aeiou") {
+                exactSet.putIfAbsent("${base.dropLast(1)}ies", rule)
+            }
+        }
     }
 
     fun compileRules(
@@ -139,18 +196,7 @@ object WordMatcher {
                     .map { normalizeToken(it) }
                     .filter { it.isNotEmpty() }
                 if (tokens.size == 1) {
-                    val base = tokens[0]
-                    exactSet.putIfAbsent(base, rule)
-                    if (rule.matchPlurals) {
-                        if (base.endsWith("s") || base.endsWith("x") || base.endsWith("z") ||
-                            base.endsWith("ch") || base.endsWith("sh")
-                        ) {
-                            exactSet.putIfAbsent("${base}es", rule)
-                        } else {
-                            exactSet.putIfAbsent("${base}s", rule)
-                            exactSet.putIfAbsent("${base}es", rule)
-                        }
-                    }
+                    putWithPlurals(exactSet, tokens[0], rule, rule.matchPlurals)
                 } else if (tokens.size > 1) {
                     compoundByFirst.getOrPut(tokens[0]) { ArrayList(2) }.add(tokens to rule)
                 }
@@ -166,7 +212,21 @@ object WordMatcher {
             }.getOrNull()
         } else null
 
-        return CompiledRules(exactSet, compoundByFirst, combinedRegex, regexRules, defaultActionMode)
+        // Compounds and inflections of list words that can't be matched inside other words.
+        for ((base, forms) in WordForms.DERIVED_FORMS) {
+            val rule = exactSet[base] ?: continue
+            // No -ies plurals of forms: "crappy" -> "crappies" is a fish.
+            for (form in forms) putWithPlurals(exactSet, form, rule, plurals = true, iesPlural = false)
+        }
+        val embedded = WordForms.EMBEDDED_STEMS.mapNotNull { stem ->
+            stem.activatedBy.firstNotNullOfOrNull { exactSet[it] }?.let { stem to it }
+        }
+        // Transcribers mask only profanity, so an unknown masked word uses a profanity-list rule.
+        val maskFallback = activeRules.firstOrNull { !it.isRegex && it.category == "Profanity" }
+
+        return CompiledRules(
+            exactSet, compoundByFirst, combinedRegex, regexRules, defaultActionMode, embedded, maskFallback
+        )
     }
 
     fun matchWords(
@@ -249,7 +309,11 @@ object WordMatcher {
             val norm = normalizedWords[i]
             if (norm.isEmpty()) continue
 
-            val exactRule = exactSet[norm]
+            val exactRule = if (WordForms.isNameUse(norm, words, i)) {
+                null
+            } else {
+                exactSet[norm] ?: compiled.extraFormRule(norm)
+            }
             if (exactRule != null) {
                 rawWindows.add(
                     neighborBoundedWindow(

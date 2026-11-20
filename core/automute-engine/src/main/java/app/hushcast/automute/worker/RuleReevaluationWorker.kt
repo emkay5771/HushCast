@@ -31,8 +31,19 @@ class RuleReevaluationWorker(
 
         val db = AutoMuteDatabase.getInstance(applicationContext)
         val analyzer = AutoMuteAnalyzer(applicationContext, db)
-        val rules = db.dao().getEnabledRules().map { it.toDomain() }
-        val compiled = app.hushcast.automute.matcher.WordMatcher.compileRules(rules, defaultActionMode)
+        val customRules = db.dao().getEnabledRules().map { it.toDomain() }
+        // The user's words plus the built-in filter words, per episode: a podcast can have its
+        // own profanity level.  One compiled set per distinct setting.
+        val compiledBySettings = HashMap<app.hushcast.automute.matcher.FilterSettings, app.hushcast.automute.matcher.WordMatcher.CompiledRules>()
+        fun compiledFor(episodeId: String): app.hushcast.automute.matcher.WordMatcher.CompiledRules {
+            val settings = app.hushcast.automute.engine.HushCastPrefs.effectiveFilterSettings(applicationContext, episodeId)
+            return compiledBySettings.getOrPut(settings) {
+                app.hushcast.automute.matcher.WordMatcher.compileRules(
+                    customRules + app.hushcast.automute.matcher.BuiltInFilters.rulesFor(settings),
+                    defaultActionMode
+                )
+            }
+        }
         val refs = db.dao().getAllWordIndexRefs()
         val currentSha = db.dao().getAllStatuses().associate { it.episodeId to it.fileSha256 }
         for (ref in refs) {
@@ -47,7 +58,7 @@ class RuleReevaluationWorker(
                 episodeId = ref.episodeId,
                 prePadMs = prePadMs,
                 postPadMs = postPadMs,
-                compiled = compiled
+                compiled = compiledFor(ref.episodeId)
             )
         }
         return Result.success()

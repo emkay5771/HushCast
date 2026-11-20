@@ -25,6 +25,7 @@ import app.hushcast.automute.matcher.WordMatcher
 import app.hushcast.automute.storage.AdSegmentEntity
 import app.hushcast.automute.storage.AutoMuteDatabase
 import app.hushcast.automute.storage.BlobCodec
+import app.hushcast.automute.storage.effectiveRules
 import app.hushcast.automute.storage.EpisodeAnalysisStatusEntity
 import app.hushcast.automute.storage.EpisodeChunkCheckpointEntity
 import app.hushcast.automute.storage.EpisodeOffsetMapEntity
@@ -270,7 +271,7 @@ class AutoMuteAnalyzer(
                 val durSec = AudioDecoder.probeDurationSec(audioFile.absolutePath)
                 if (durSec >= MIN_FEED_CHECK_DUR_SEC) {
                     writeStatus(5, "Aligning publisher transcript", ReadinessBadge.ANALYZING)
-                    val enabledRules = dao.getEnabledRules().map { it.toDomain() }
+                    val enabledRules = dao.effectiveRules(context, episodeId)
                     val transcriber = Transcriber(
                         modelPath = whisperModelPath,
                         threads = threads,
@@ -652,7 +653,7 @@ class AutoMuteAnalyzer(
         approxSpans: List<ApproxSpan> = emptyList(),
         saveIndex: EpisodeWordIndexEntity? = null
     ): Int {
-        val rules = dao.getEnabledRules().map { it.toDomain() }
+        val rules = dao.effectiveRules(context, episodeId)
         val rulesById = rules.associateBy { it.id }
         val windows = CueRealigner.widenApproximate(
             WordMatcher.matchWords(words, rules, prePadMs, postPadMs, defaultActionMode),
@@ -720,7 +721,7 @@ class AutoMuteAnalyzer(
         val index = dao.getWordIndex(sha) ?: return false
         val blob = BlobCodec.decompress(index.compressedBlob)
         if (blob.approxSpans.isEmpty()) return false
-        val compiled = WordMatcher.compileRules(dao.getEnabledRules().map { it.toDomain() }, defaultActionMode)
+        val compiled = WordMatcher.compileRules(dao.effectiveRules(context, episodeId), defaultActionMode)
         return CueRealigner.spansNeedingRealign(blob.words, blob.approxSpans, compiled).isNotEmpty()
     }
 
@@ -737,7 +738,7 @@ class AutoMuteAnalyzer(
         shouldAbort: () -> Boolean
     ): WordIndexBlob {
         if (blob.approxSpans.isEmpty() || !audioFile.exists()) return blob
-        val rules: List<MuteRule> = dao.getEnabledRules().map { it.toDomain() }
+        val rules: List<MuteRule> = dao.effectiveRules(context, index.episodeId)
         val compiled = WordMatcher.compileRules(rules, defaultActionMode)
         if (CueRealigner.spansNeedingRealign(blob.words, blob.approxSpans, compiled).isEmpty()) return blob
         if (!modelManager.areWordMuteModelsReady()) return blob

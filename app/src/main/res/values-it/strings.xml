@@ -294,4 +294,18 @@
     <string name="route_up_next">In coda</string>
     <string name="snackbar_marked_as_unplayed">Segnato come non riprodotto</string>
     <string name="common_error">Errore</string>
+    <string name="common_support">Sostieni</string>
+    <string name="common_comments">Commenti</string>
+    <string name="podcast_group_by_season">Raggruppa per stagione</string>
+    <string name="podcast_season_number">Stagione %1$d</string>
+    <string name="podcast_other_episodes">Altri episodi</string>
+    <string name="episode_number_short">EP. %1$d</string>
+    <string name="episode_type_trailer">Trailer</string>
+    <string name="episode_type_bonus">Bonus</string>
+    <string name="content_explicit">Esplicito</string>
+    <string name="preview_clip">Anteprima</string>
+    <string name="preview_playing">Anteprima in riproduzione</string>
+    <string name="action_trailer">Trailer</string>
+    <string name="episode_chapters_show_all">Mostra tutti i %1$d</string>
+    <string name="episode_chapters_show_fewer">Mostra meno</string>
 </resources>

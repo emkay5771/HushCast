@@ -1,45 +1,63 @@
 package app.podiumpodcasts.podium.ui.component.model.podcast
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
-import androidx.compose.material3.AssistChip
+import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalToggleButton
+import androidx.compose.material3.FilledTonalToggleButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.ToggleButtonSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.podiumpodcasts.podium.R
+import app.podiumpodcasts.podium.api.db.model.PodcastEpisodeModel
+import app.podiumpodcasts.podium.api.db.model.PodcastModel
 import app.podiumpodcasts.podium.api.rss.PodcastPerson
 import app.podiumpodcasts.podium.api.rss.PodcastSoundbite
+import app.podiumpodcasts.podium.background.PreviewPlayer
 import app.podiumpodcasts.podium.ui.dialog.ShimmerAsyncImage
-import kotlin.math.roundToInt
+import kotlin.math.ceil
 
 @Composable
 fun ExplicitBadge(
     modifier: Modifier = Modifier
 ) {
+    val description = stringResource(R.string.content_explicit)
     Surface(
-        modifier = modifier.semantics { contentDescription = "Explicit" },
+        modifier = modifier.semantics { contentDescription = description },
         shape = RoundedCornerShape(4.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         contentColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -53,35 +71,28 @@ fun ExplicitBadge(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * The show's categories as one quiet line ("Technology · Society & Culture · Documentary").
+ * They aren't actions, so they aren't chips: disabled chips looked broken and read as
+ * "disabled" to TalkBack.
+ */
 @Composable
-fun PodcastCategoriesRow(
+fun PodcastCategoriesText(
     categories: List<String>,
     modifier: Modifier = Modifier
 ) {
     if (categories.isEmpty()) return
-    FlowRow(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
-    ) {
-        categories.forEach { category ->
-            SuggestionChip(
-                onClick = {},
-                enabled = false,
-                label = {
-                    Text(
-                        text = category,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            )
-        }
-    }
+    Text(
+        text = categories.joinToString(" · "),
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier
+    )
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/** Hosts and guests on one line that scrolls sideways, so many people never take more room. */
 @Composable
 fun PodcastPersonsRow(
     persons: List<PodcastPerson>,
@@ -89,10 +100,9 @@ fun PodcastPersonsRow(
     modifier: Modifier = Modifier
 ) {
     if (persons.isEmpty()) return
-    FlowRow(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+    Row(
+        modifier = modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         persons.forEach { person ->
             val clickableModifier = if (person.href.isNotBlank()) {
@@ -119,7 +129,7 @@ fun PodcastPersonsRow(
                                 .size(28.dp)
                                 .clip(CircleShape),
                             model = person.img,
-                            contentDescription = person.name,
+                            contentDescription = null,
                             contentScale = ContentScale.Crop,
                             targetSizePx = 64
                         )
@@ -161,43 +171,138 @@ fun PodcastPersonsRow(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
+/** "1:05" from milliseconds, rounding up so a countdown never shows 0:00 while still playing. */
+internal fun formatPreviewClock(ms: Long): String {
+    val totalSeconds = ceil(ms.coerceAtLeast(0L) / 1000.0).toLong()
+    return "%d:%02d".format(totalSeconds / 60, totalSeconds % 60)
+}
+
+/**
+ * Play / stop for a preview (M3E toggle button: its shape morphs while checked).  While it
+ * plays, the label counts down and the icon becomes Stop, or the loading indicator while the
+ * audio buffers.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun PreviewToggleButton(
+    checked: Boolean,
+    buffering: Boolean,
+    label: String,
+    time: String?,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+    buttonSize: ToggleButtonSize = FilledTonalToggleButtonDefaults.size
+) {
+    val playingDescription = stringResource(R.string.preview_playing)
+    val iconSize = ButtonDefaults.iconSizeFor(buttonSize.height)
+    FilledTonalToggleButton(
+        checked = checked,
+        onCheckedChange = { onToggle() },
+        modifier = modifier
+            .widthIn(max = 320.dp)
+            .semantics { if (checked) stateDescription = playingDescription },
+        buttonSize = buttonSize,
+        icon = {
+            when {
+                checked && buffering -> LoadingIndicator(Modifier.size(iconSize))
+                checked -> Icon(Icons.Rounded.Stop, contentDescription = null, modifier = Modifier.size(iconSize))
+                else -> Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(iconSize))
+            }
+        }
+    ) {
+        Text(
+            text = if (time != null) "$label · $time" else label,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+/**
+ * An episode's soundbites as preview buttons on one line.  A preview plays on its own player
+ * (see [PreviewPlayer]): it never becomes Now Playing, joins Up Next, saves progress or starts
+ * a download.  Leaving the episode stops its preview.
+ */
 @Composable
 fun EpisodeSoundbitesRow(
+    episode: PodcastEpisodeModel,
     soundbites: List<PodcastSoundbite>,
-    onPlaySoundbite: (PodcastSoundbite) -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (soundbites.isEmpty()) return
-    FlowRow(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+    val context = LocalContext.current
+    val preview by PreviewPlayer.state.collectAsStateWithLifecycle()
+    // The downloaded file when there is one, otherwise the stream (the same choice as playback).
+    val uri = remember(episode.id) {
+        episode.createMediaItem(context).localConfiguration?.uri?.toString()
+    }
+    val idPrefix = "soundbite:${episode.id}:"
+    DisposableEffect(episode.id) {
+        onDispose { PreviewPlayer.stopIf { it.startsWith(idPrefix) } }
+    }
+    val untitled = stringResource(R.string.preview_clip)
+
+    Row(
+        modifier = modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        soundbites.forEach { soundbite ->
-            val secs = soundbite.durationSec.roundToInt().coerceAtLeast(1)
-            val labelText = if (soundbite.title.isNotBlank()) {
-                "${soundbite.title} · ${secs}s"
-            } else {
-                "Preview clip · ${secs}s"
-            }
-            AssistChip(
-                onClick = { onPlaySoundbite(soundbite) },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Rounded.PlayArrow,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                },
-                label = {
-                    Text(
-                        text = labelText,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+        soundbites.forEachIndexed { index, soundbite ->
+            val id = PreviewPlayer.soundbiteId(episode.id, index)
+            val state = preview?.takeIf { it.id == id }
+            val startMs = (soundbite.startTimeSec * 1000.0).toLong().coerceAtLeast(0L)
+            val lengthMs = (soundbite.durationSec * 1000.0).toLong().coerceAtLeast(1000L)
+            PreviewToggleButton(
+                checked = state != null,
+                buffering = state?.buffering == true,
+                label = soundbite.title.ifBlank { untitled },
+                time = formatPreviewClock(state?.remainingMs ?: lengthMs),
+                buttonSize = ToggleButtonSize.ExtraSmall,
+                onToggle = {
+                    if (uri == null) return@PreviewToggleButton
+                    PreviewPlayer.toggle(
+                        context,
+                        PreviewPlayer.Request(
+                            id = id,
+                            uri = uri,
+                            startMs = startMs,
+                            endMs = startMs + lengthMs,
+                            episodeId = episode.id,
+                            podcastOrigin = episode.origin
+                        )
                     )
                 }
             )
         }
     }
+}
+
+/**
+ * The show's trailer (`podcast:trailer`) as a preview, at the end of the podcast header's author
+ * line (extra small, like the soundbites).  Nothing when the feed has no trailer.
+ */
+@Composable
+fun PodcastTrailerButton(
+    podcast: PodcastModel,
+    modifier: Modifier = Modifier
+) {
+    val url = podcast.trailerUrl.trim()
+    if (url.isBlank()) return
+    val context = LocalContext.current
+    val preview by PreviewPlayer.state.collectAsStateWithLifecycle()
+    val id = PreviewPlayer.trailerId(podcast.origin)
+    val state = preview?.takeIf { it.id == id }
+    DisposableEffect(id) {
+        onDispose { PreviewPlayer.stopIf { it == id } }
+    }
+    PreviewToggleButton(
+        checked = state != null,
+        buffering = state?.buffering == true,
+        label = stringResource(R.string.action_trailer),
+        time = state?.remainingMs?.let(::formatPreviewClock),
+        modifier = modifier,
+        buttonSize = ToggleButtonSize.ExtraSmall,
+        onToggle = {
+            PreviewPlayer.toggle(context, PreviewPlayer.Request(id = id, uri = url))
+        }
+    )
 }

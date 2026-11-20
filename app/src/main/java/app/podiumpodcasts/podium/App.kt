@@ -14,6 +14,7 @@ import coil3.request.crossfade
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import app.hushcast.automute.storage.migratePresetsToBuiltInFiltersOnce
 import app.hushcast.automute.storage.migrateRulesToDefaultModeOnce
 
 class App : Application(), SingletonImageLoader.Factory {
@@ -39,6 +40,26 @@ class App : Application(), SingletonImageLoader.Factory {
             runCatching {
                 val dao = app.hushcast.automute.storage.AutoMuteDatabase.getInstance(this@App).dao()
                 dao.migrateRulesToDefaultModeOnce(this@App)
+            }
+        }
+        MainScope().launch(kotlinx.coroutines.Dispatchers.IO) {
+            // 1.0.45: presets copied into the word list become the built-in filters (profanity
+            // level, Explicit content), and the matcher catches more forms (words inside longer
+            // words, compounds, masked words).  Match the stored transcripts again once; nothing
+            // is transcribed again.
+            runCatching {
+                val dao = app.hushcast.automute.storage.AutoMuteDatabase.getInstance(this@App).dao()
+                val movedPresets = dao.migratePresetsToBuiltInFiltersOnce(this@App)
+                val matcherVersion = app.hushcast.automute.matcher.WordMatcher.MATCHER_VERSION
+                if (movedPresets ||
+                    app.hushcast.automute.engine.HushCastPrefs.getMatcherVersion(this@App) < matcherVersion
+                ) {
+                    app.hushcast.automute.worker.RuleReevaluationWorker.enqueue(
+                        context = this@App,
+                        defaultActionMode = settingsRepository.hushCast.muteActionMode.first()
+                    )
+                    app.hushcast.automute.engine.HushCastPrefs.setMatcherVersion(this@App, matcherVersion)
+                }
             }
         }
 

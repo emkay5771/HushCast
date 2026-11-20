@@ -13,6 +13,7 @@ import app.hushcast.automute.dsp.ReadinessBadge
 import app.hushcast.automute.engine.Segment
 import app.hushcast.automute.engine.Word
 import app.hushcast.automute.storage.AdSegmentEntity
+import app.hushcast.automute.storage.effectiveRules
 import app.hushcast.automute.storage.AutoMuteDatabase
 import app.hushcast.automute.storage.BlobCodec
 import app.hushcast.automute.storage.EpisodeAnalysisStatusEntity
@@ -514,7 +515,7 @@ class PlayerScreenViewModel(application: Application) : AndroidViewModel(applica
                 val sha = autoMuteDb.dao().getStatus(epId)?.fileSha256
                 if (!sha.isNullOrBlank()) {
                     val precision = app.hushcast.automute.engine.HushCastPrefs.getMuteTimingPrecision(getApplication())
-                    val rules = autoMuteDb.dao().getEnabledRules().map { it.toDomain() }
+                    val rules = autoMuteDb.dao().effectiveRules(getApplication(), epId)
                     val compiled = app.hushcast.automute.matcher.WordMatcher.compileRules(rules, actionMode)
                     app.hushcast.automute.pipeline.AutoMuteAnalyzer(getApplication(), autoMuteDb)
                         .reevaluateMuteRulesWithCompiled(

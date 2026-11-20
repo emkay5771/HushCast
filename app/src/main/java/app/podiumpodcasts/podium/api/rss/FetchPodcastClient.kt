@@ -23,7 +23,13 @@ data class RssEpisodeExtras(
     val transcriptAlternates: List<TranscriptRef> = emptyList(),
     val persons: List<PodcastPerson> = emptyList(),
     val soundbites: List<PodcastSoundbite> = emptyList(),
-    val explicit: Boolean = false
+    val explicit: Boolean = false,
+    /** `<podcast:season>`: the season when the item has no `<itunes:season>`. */
+    val season: Int? = null,
+    /** `<podcast:episode>` when it's a whole number: the number when there's no `<itunes:episode>`. */
+    val episode: Int? = null,
+    /** The preferred `<podcast:socialInteract>` web link: the comments link when there's no `<comments>`. */
+    val socialInteractUrl: String = ""
 ) {
     /** [transcriptAlternates] as stored in `podcastEpisode.transcriptAlternatesJson`. */
     val transcriptAlternatesJson: String

@@ -279,4 +279,18 @@
     <string name="route_up_next">À suivre</string>
     <string name="snackbar_marked_as_unplayed">Marqué comme non lu</string>
     <string name="common_error">Erreur</string>
+    <string name="common_support">Soutenir</string>
+    <string name="common_comments">Commentaires</string>
+    <string name="podcast_group_by_season">Grouper par saison</string>
+    <string name="podcast_season_number">Saison %1$d</string>
+    <string name="podcast_other_episodes">Autres épisodes</string>
+    <string name="episode_number_short">ÉP. %1$d</string>
+    <string name="episode_type_trailer">Bande-annonce</string>
+    <string name="episode_type_bonus">Bonus</string>
+    <string name="content_explicit">Explicite</string>
+    <string name="preview_clip">Extrait</string>
+    <string name="preview_playing">Extrait en lecture</string>
+    <string name="action_trailer">Bande-annonce</string>
+    <string name="episode_chapters_show_all">Afficher les %1$d</string>
+    <string name="episode_chapters_show_fewer">Afficher moins</string>
 </resources>

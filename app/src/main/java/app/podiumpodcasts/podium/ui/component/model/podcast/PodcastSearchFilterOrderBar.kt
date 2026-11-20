@@ -22,9 +22,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateSetOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,7 +46,15 @@ class PodcastSearchFilterOrderBarState(
     isSerial: Boolean = false
 ) {
 
-    val defaultOrder = if (isSerial) PodcastEpisodesOrder.ASCENDING else PodcastEpisodesOrder.DESCENDING
+    /**
+     * The show is `itunes:type` "serial": read oldest first, grouped by season when it has
+     * seasons.  It can become true after the page opened, when a refresh brings the metadata.
+     */
+    var isSerial by mutableStateOf(isSerial)
+        private set
+
+    val defaultOrder: PodcastEpisodesOrder
+        get() = if (isSerial) PodcastEpisodesOrder.ASCENDING else PodcastEpisodesOrder.DESCENDING
 
     val searchQuery = mutableStateOf("")
 
@@ -55,6 +65,30 @@ class PodcastSearchFilterOrderBarState(
     val order = mutableStateOf(defaultOrder)
     val groupBySeason = mutableStateOf(false)
 
+    private var defaultGroupBySeason by mutableStateOf(false)
+    private var groupBySeasonChanged = false
+
+    /** The "Group by season" chip.  After this, the automatic default leaves grouping alone. */
+    fun setGroupBySeason(enabled: Boolean) {
+        groupBySeasonChanged = true
+        groupBySeason.value = enabled
+    }
+
+    /** The show turned out to be serial: oldest first, unless the order was already changed. */
+    fun applySerialDefault() {
+        if (isSerial) return
+        val orderUnchanged = orderBy.value == PodcastEpisodesOrderBy.DATE &&
+            order.value == PodcastEpisodesOrder.DESCENDING
+        isSerial = true
+        if (orderUnchanged) order.value = PodcastEpisodesOrder.ASCENDING
+    }
+
+    /** A serial show with seasons: group by season, unless the chip was already used. */
+    fun applySeasonGroupingDefault() {
+        defaultGroupBySeason = true
+        if (!groupBySeasonChanged) groupBySeason.value = true
+    }
+
     @Composable
     fun isDefault(): State<Boolean> {
         return remember {
@@ -64,7 +98,7 @@ class PodcastSearchFilterOrderBarState(
                         && negativeFilter.isEmpty()
                         && orderBy.value == PodcastEpisodesOrderBy.DATE
                         && order.value == defaultOrder
-                        && !groupBySeason.value
+                        && groupBySeason.value == defaultGroupBySeason
             }
         }
     }

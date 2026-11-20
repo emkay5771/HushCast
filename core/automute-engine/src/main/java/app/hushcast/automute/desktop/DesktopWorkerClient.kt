@@ -4,6 +4,7 @@ import app.hushcast.automute.dsp.MuteActionMode
 import app.hushcast.automute.dsp.ReadinessBadge
 import app.hushcast.automute.matcher.WordMatcher
 import app.hushcast.automute.storage.AdSegmentEntity
+import app.hushcast.automute.storage.effectiveRules
 import app.hushcast.automute.storage.AutoMuteDatabase
 import app.hushcast.automute.storage.BlobCodec
 import app.hushcast.automute.storage.EpisodeAnalysisStatusEntity
@@ -426,6 +427,7 @@ object DesktopWorkerClient {
      * WordMatcher locally against the user's mute_rules so MuteSegments are ready immediately.
      */
     suspend fun ingestBundleIntoDb(
+        context: android.content.Context,
         db: AutoMuteDatabase,
         episodeId: String,
         bundle: DesktopAnalysisBundle,
@@ -446,7 +448,7 @@ object DesktopWorkerClient {
             )
         )
 
-        val rules = dao.getEnabledRules().map { it.toDomain() }
+        val rules = dao.effectiveRules(context, episodeId)
         val windows = WordMatcher.matchWords(
             words = bundle.wordIndexBlob.words,
             rules = rules,

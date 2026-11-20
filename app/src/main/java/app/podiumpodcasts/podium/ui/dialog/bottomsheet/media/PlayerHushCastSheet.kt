@@ -19,6 +19,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ExpandLess
@@ -49,6 +51,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
@@ -61,6 +65,7 @@ import app.hushcast.automute.dsp.AdPolicyMode
 import app.hushcast.automute.dsp.MuteActionMode
 import app.hushcast.automute.dsp.ReadinessBadge
 import app.hushcast.automute.storage.AdSegmentEntity
+import app.hushcast.automute.storage.effectiveRules
 import app.hushcast.automute.storage.AutoMuteDatabase
 import app.hushcast.automute.storage.EpisodeAnalysisStatusEntity
 import app.hushcast.automute.storage.MuteSegmentEntity
@@ -115,6 +120,12 @@ fun PlayerHushCastSheet(
         settingsRepository.hushCast.podcastWordMuting(origin)
     }.collectAsStateWithLifecycle(initialValue = null)
     val wordMutingActive = podcastWordMuting ?: globalWordMuting
+    // 1.0.45: a podcast can have its own profanity level (engine preferences, read by the matcher).
+    val globalFilters by remember(context) { app.hushcast.automute.engine.HushCastPrefs.filterSettingsFlow(context) }
+        .collectAsStateWithLifecycle(initialValue = app.hushcast.automute.engine.HushCastPrefs.getFilterSettings(context))
+    val podcastLevel by remember(context, origin) {
+        app.hushcast.automute.engine.HushCastPrefs.podcastProfanityLevelFlow(context, origin)
+    }.collectAsStateWithLifecycle(initialValue = app.hushcast.automute.engine.HushCastPrefs.getPodcastProfanityLevel(context, origin))
 
     val globalAdPolicy by settingsRepository.hushCast.adPolicyMode.collectAsStateWithLifecycle(initialValue = AdPolicyMode.AUTO_SKIP)
     val podcastAdPolicyEntity by remember(origin) {
@@ -145,13 +156,10 @@ fun PlayerHushCastSheet(
     )
     val skipSound by settingsRepository.hushCast.skipSound.collectAsStateWithLifecycle(initialValue = HushCastEngineBridge.skipSound)
     val skipCustomUri by settingsRepository.hushCast.sponsorSkipSoundUri.collectAsStateWithLifecycle(initialValue = null)
-    val allRules by remember { autoMuteDb.dao().observeRules() }
-        .collectAsStateWithLifecycle(initialValue = emptyList())
-    val enabledRulesCount = remember(allRules) { allRules.count { it.enabled } }
 
     var showMoreOptions by remember { mutableStateOf(false) }
 
-    val hasWordMutingOverride = podcastWordMuting != null
+    val hasWordMutingOverride = podcastWordMuting != null || podcastLevel != null
     val hasAdPolicyOverride = podcastAdPolicyEntity != null
     val hushLabels = app.podiumpodcasts.podium.ui.hushcast.HushCastLabels
 
@@ -323,12 +331,33 @@ fun PlayerHushCastSheet(
                 if (hasWordMutingOverride || hasAdPolicyOverride) {
                     TextButton(
                         onClick = {
+                            val hadLevelOverride = podcastLevel != null
                             scope.launch(Dispatchers.IO) {
                                 settingsRepository.hushCast.setPodcastWordMuting(origin, null)
+                                app.hushcast.automute.engine.HushCastPrefs.setPodcastProfanityLevel(context, origin, null)
                                 autoMuteDb.dao().deletePodcastAdPolicy(origin)
                                 if (HushCastEngineBridge.currentEpisodeId == episodeId) {
                                     HushCastEngineBridge.autoMuteProcessor.isEnabled = globalWordMuting
                                     HushCastEngineBridge.adSkipObserver.policyMode = globalAdPolicy
+                                }
+                                if (hadLevelOverride) {
+                                    val sha = autoMuteDb.dao().getStatus(episodeId)?.fileSha256
+                                    if (!sha.isNullOrBlank()) {
+                                        val precision = app.hushcast.automute.engine.HushCastPrefs.getMuteTimingPrecision(context)
+                                        val compiled = app.hushcast.automute.matcher.WordMatcher.compileRules(
+                                            autoMuteDb.dao().effectiveRules(context, episodeId),
+                                            muteActionMode
+                                        )
+                                        app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
+                                            .reevaluateMuteRulesWithCompiled(
+                                                fileSha256 = sha,
+                                                episodeId = episodeId,
+                                                prePadMs = precision.prePadMs,
+                                                postPadMs = precision.postPadMs,
+                                                compiled = compiled
+                                            )
+                                    }
+                                    app.hushcast.automute.worker.RuleReevaluationWorker.enqueue(context, defaultActionMode = muteActionMode)
                                 }
                             }
                         }
@@ -338,40 +367,101 @@ fun PlayerHushCastSheet(
                 }
             }
 
-            // Word muting switch naming word list & count
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .toggleable(
-                        value = wordMutingActive,
-                        role = Role.Switch,
-                        onValueChange = { enabled ->
-                            haptic.performHapticFeedback(
-                                if (enabled) androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOn
-                                else androidx.compose.ui.hapticfeedback.HapticFeedbackType.ToggleOff
+            // Word muting for this podcast: default, off, or its own profanity level (1.0.45).
+            run {
+                val levels = app.podiumpodcasts.podium.ui.route.settings.pane.FilterLabels
+                val offHere = podcastWordMuting == false
+                val currentLabel = when {
+                    offHere -> "Off"
+                    podcastLevel != null -> levels.level(podcastLevel!!)
+                    else -> "Default (${levels.level(globalFilters.profanity).lowercase()})"
+                }
+                var menuOpen by remember { mutableStateOf(false) }
+
+                fun choose(wordMuting: Boolean?, level: app.hushcast.automute.matcher.ProfanityLevel?) {
+                    menuOpen = false
+                    haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.Confirm)
+                    scope.launch(Dispatchers.IO) {
+                        settingsRepository.hushCast.setPodcastWordMuting(origin, wordMuting)
+                        app.hushcast.automute.engine.HushCastPrefs.setPodcastProfanityLevel(context, origin, level)
+                        if (HushCastEngineBridge.currentEpisodeId == episodeId) {
+                            HushCastEngineBridge.autoMuteProcessor.isEnabled = wordMuting ?: globalWordMuting
+                        }
+                        // This episode first, so the change is heard now; the rest in the background.
+                        val sha = autoMuteDb.dao().getStatus(episodeId)?.fileSha256
+                        if (!sha.isNullOrBlank()) {
+                            val precision = app.hushcast.automute.engine.HushCastPrefs.getMuteTimingPrecision(context)
+                            val compiled = app.hushcast.automute.matcher.WordMatcher.compileRules(
+                                autoMuteDb.dao().effectiveRules(context, episodeId),
+                                muteActionMode
                             )
-                            scope.launch {
-                                settingsRepository.hushCast.setPodcastWordMuting(origin, enabled)
-                                if (HushCastEngineBridge.currentEpisodeId == episodeId) {
-                                    HushCastEngineBridge.autoMuteProcessor.isEnabled = enabled
-                                }
+                            app.hushcast.automute.pipeline.AutoMuteAnalyzer(context, autoMuteDb)
+                                .reevaluateMuteRulesWithCompiled(
+                                    fileSha256 = sha,
+                                    episodeId = episodeId,
+                                    prePadMs = precision.prePadMs,
+                                    postPadMs = precision.postPadMs,
+                                    compiled = compiled
+                                )
+                        }
+                        app.hushcast.automute.worker.RuleReevaluationWorker.enqueue(context, defaultActionMode = muteActionMode)
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Word muting", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            text = "${muteSegments.count { it.enabled }} muted in this episode",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    androidx.compose.foundation.layout.Box {
+                        androidx.compose.material3.OutlinedButton(
+                            onClick = { menuOpen = true },
+                            modifier = Modifier.semantics {
+                                contentDescription = "Word muting for this podcast: $currentLabel"
+                            }
+                        ) {
+                            Text(currentLabel, maxLines = 1)
+                            Icon(
+                                androidx.compose.material.icons.Icons.Rounded.ArrowDropDown,
+                                contentDescription = null
+                            )
+                        }
+                        androidx.compose.material3.DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false }
+                        ) {
+                            @Composable
+                            fun item(label: String, selected: Boolean, onClick: () -> Unit) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = onClick,
+                                    leadingIcon = {
+                                        if (selected) Icon(androidx.compose.material.icons.Icons.Rounded.Check, contentDescription = "Selected")
+                                    }
+                                )
+                            }
+                            item(
+                                "Default (${levels.level(globalFilters.profanity).lowercase()})",
+                                selected = !offHere && podcastLevel == null
+                            ) { choose(null, null) }
+                            item("Off for this podcast", selected = offHere) { choose(false, null) }
+                            androidx.compose.material3.HorizontalDivider()
+                            levels.levels.forEach { level ->
+                                item(levels.level(level), selected = !offHere && podcastLevel == level) { choose(true, level) }
                             }
                         }
-                    )
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Word muting", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        text = (if (hasWordMutingOverride) "Set for this podcast" else "Default (${if (globalWordMuting) "on" else "off"})") +
-                            " · $enabledRulesCount active rules · ${muteSegments.count { it.enabled }} muted here",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    }
                 }
-                Switch(checked = wordMutingActive, onCheckedChange = null)
             }
 
             // Sponsor skipping switch naming sponsor count

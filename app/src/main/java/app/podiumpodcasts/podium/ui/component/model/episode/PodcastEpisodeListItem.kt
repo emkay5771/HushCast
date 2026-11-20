@@ -321,9 +321,10 @@ fun PodcastEpisodeListItem(
                         )
                     }
 
+                    val locale = androidx.compose.ui.platform.LocalLocale.current.platformLocale
                     val epTypeLabel = when (bundle.episode.episodeType) {
-                        "trailer" -> "TRAILER"
-                        "bonus" -> "BONUS"
+                        "trailer" -> stringResource(R.string.episode_type_trailer).uppercase(locale)
+                        "bonus" -> stringResource(R.string.episode_type_bonus).uppercase(locale)
                         else -> null
                     }
                     if (epTypeLabel != null) {
@@ -335,15 +336,16 @@ fun PodcastEpisodeListItem(
                         )
                     }
 
+                    val episodeNumberLabel = bundle.episode.episodeNumber?.takeIf { it > 0 }?.let {
+                        stringResource(R.string.episode_number_short, it)
+                    }
                     val formattedOverline = buildString {
-                        bundle.episode.episodeNumber?.takeIf { it > 0 }?.let {
-                            append("EP. $it · ")
-                        }
+                        episodeNumberLabel?.let { append(it).append(" · ") }
                         append(overlineText)
                     }
 
                     Text(
-                        text = formattedOverline.uppercase(androidx.compose.ui.platform.LocalLocale.current.platformLocale),
+                        text = formattedOverline.uppercase(locale),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,

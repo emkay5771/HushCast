@@ -96,17 +96,30 @@ interface PodcastEpisodeDao {
     @Query("SELECT EXISTS(SELECT 1 FROM podcastEpisode WHERE origin = :origin AND season IS NOT NULL)")
     fun hasSeasons(origin: String): Flow<Boolean>
 
+    /**
+     * The feed's current metadata for an episode already stored.  None of these fields can be
+     * edited in the app, so the feed always wins (a corrected season, a guest added later, an
+     * episode no longer marked explicit).  Rows already up to date aren't written at all.
+     */
     @Query(
         """
         UPDATE podcastEpisode
-        SET season = COALESCE(season, :season),
-            episodeNumber = COALESCE(episodeNumber, :episodeNumber),
-            episodeType = CASE WHEN episodeType = '' THEN :episodeType ELSE episodeType END,
-            explicit = CASE WHEN explicit = 0 THEN :explicit ELSE explicit END,
-            commentsUrl = CASE WHEN commentsUrl = '' THEN :commentsUrl ELSE commentsUrl END,
-            personsJson = CASE WHEN personsJson = '' THEN :personsJson ELSE personsJson END,
-            soundbitesJson = CASE WHEN soundbitesJson = '' THEN :soundbitesJson ELSE soundbitesJson END
-        WHERE id = :id
+        SET season = :season,
+            episodeNumber = :episodeNumber,
+            episodeType = :episodeType,
+            explicit = :explicit,
+            commentsUrl = :commentsUrl,
+            personsJson = :personsJson,
+            soundbitesJson = :soundbitesJson
+        WHERE id = :id AND (
+            season IS NOT :season OR
+            episodeNumber IS NOT :episodeNumber OR
+            episodeType != :episodeType OR
+            explicit != :explicit OR
+            commentsUrl != :commentsUrl OR
+            personsJson != :personsJson OR
+            soundbitesJson != :soundbitesJson
+        )
         """
     )
     suspend fun updateMetadataFromFeed(

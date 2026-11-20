@@ -655,6 +655,7 @@ class PodcastEpisodeDownloadWork(
                 app.hushcast.automute.worker.EpisodeAnalysisWorker.cancelEpisode(context, episodeId)
                 val mutePrecision = app.hushcast.automute.engine.HushCastPrefs.getMuteTimingPrecision(context)
                 app.hushcast.automute.desktop.DesktopWorkerClient.ingestBundleIntoDb(
+                    context = context,
                     db = autoMuteDb,
                     episodeId = episodeId,
                     bundle = bundle,

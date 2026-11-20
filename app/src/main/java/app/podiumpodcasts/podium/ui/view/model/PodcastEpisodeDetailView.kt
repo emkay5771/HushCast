@@ -217,6 +217,11 @@ fun PodcastEpisodeDetailView(
                             style = Typography.labelLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+
+                        if (episode.explicit) {
+                            Spacer(Modifier.width(8.dp))
+                            app.podiumpodcasts.podium.ui.component.model.podcast.ExplicitBadge()
+                        }
                     }
                 }
             }
@@ -521,65 +526,8 @@ fun PodcastEpisodeDetailView(
                 )
             }
 
-            // T1 & C6: Transcript & Chapters on Episode Detail page
+            // T1 & C6: Transcript & Chapters on Episode Detail page (shown after the show notes)
             var showDetailTranscriptSheet by remember { mutableStateOf(false) }
-
-            if (detailTranscriptState is app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.TranscriptLoadState.Ready) {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                    androidx.compose.material3.FilledTonalButton(
-                        onClick = { showDetailTranscriptSheet = true },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("View transcript")
-                    }
-                }
-            }
-
-            if (detailChapters.isNotEmpty()) {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        contentColor = MaterialTheme.colorScheme.onSurface
-                    ) {
-                        Column(Modifier.padding(16.dp)) {
-                            Text(
-                                text = "Chapters (${detailChapters.size})",
-                                style = Typography.titleSmall,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(Modifier.height(8.dp))
-                            detailChapters.forEach { ch ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .clickable {
-                                            detailMediaVm.play(context, bundle, startPositionMs = ch.startMs)
-                                        }
-                                        .padding(vertical = 8.dp, horizontal = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = ch.title,
-                                        style = Typography.bodyMedium,
-                                        modifier = Modifier.weight(1f),
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        text = android.text.format.DateUtils.formatElapsedTime(ch.startMs / 1000L),
-                                        style = Typography.labelMedium.copy(fontFeatureSettings = "tnum"),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
 
             if (showDetailTranscriptSheet) {
                 androidx.compose.material3.ModalBottomSheet(
@@ -657,13 +605,20 @@ fun PodcastEpisodeDetailView(
                     app.podiumpodcasts.podium.api.rss.PodcastMetadataJson.decodePersons(episode.personsJson)
                 }
 
+                // By what you need first: a preview and who's on it (one line each, scrolling
+                // sideways), then the show notes, then the transcript and chapters, then details.
                 if (soundbites.isNotEmpty()) {
-                    val soundbiteContext = LocalContext.current
                     app.podiumpodcasts.podium.ui.component.model.podcast.EpisodeSoundbitesRow(
-                        soundbites = soundbites,
-                        onPlaySoundbite = { sb ->
-                            detailMediaVm.playSoundbite(soundbiteContext, bundle, sb)
-                        }
+                        episode = episode,
+                        soundbites = soundbites
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
+
+                if (episodePersons.isNotEmpty()) {
+                    app.podiumpodcasts.podium.ui.component.model.podcast.PodcastPersonsRow(
+                        persons = episodePersons,
+                        onClickUrl = { uriHandler.openUri(it) }
                     )
                     Spacer(Modifier.height(12.dp))
                 }
@@ -687,12 +642,79 @@ fun PodcastEpisodeDetailView(
                     }
                 }
 
-                if (episodePersons.isNotEmpty()) {
+                // Then the ways around the episode (the player has both too): the transcript, and
+                // the chapters, shortened when there are many so they don't bury the details.
+                if (detailTranscriptState is app.podiumpodcasts.podium.ui.dialog.bottomsheet.media.TranscriptLoadState.Ready) {
                     Spacer(Modifier.height(12.dp))
-                    app.podiumpodcasts.podium.ui.component.model.podcast.PodcastPersonsRow(
-                        persons = episodePersons,
-                        onClickUrl = { uriHandler.openUri(it) }
-                    )
+                    androidx.compose.material3.FilledTonalButton(
+                        onClick = { showDetailTranscriptSheet = true },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("View transcript")
+                    }
+                }
+
+                if (detailChapters.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    var showAllChapters by androidx.compose.runtime.saveable.rememberSaveable(episode.id) {
+                        mutableStateOf(false)
+                    }
+                    val collapsible = detailChapters.size > 4
+                    val shownChapters = if (collapsible && !showAllChapters) detailChapters.take(3) else detailChapters
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.onSurface
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Chapters (${detailChapters.size})",
+                                style = Typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            shownChapters.forEach { ch ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .clickable {
+                                            detailMediaVm.play(context, bundle, startPositionMs = ch.startMs)
+                                        }
+                                        .padding(vertical = 8.dp, horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = ch.title,
+                                        style = Typography.bodyMedium,
+                                        modifier = Modifier.weight(1f),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = android.text.format.DateUtils.formatElapsedTime(ch.startMs / 1000L),
+                                        style = Typography.labelMedium.copy(fontFeatureSettings = "tnum"),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            if (collapsible) {
+                                androidx.compose.material3.TextButton(
+                                    onClick = { showAllChapters = !showAllChapters }
+                                ) {
+                                    Text(
+                                        if (showAllChapters) {
+                                            stringResource(R.string.episode_chapters_show_fewer)
+                                        } else {
+                                            stringResource(R.string.episode_chapters_show_all, detailChapters.size)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                             Spacer(Modifier.height(16.dp))

@@ -5,6 +5,13 @@ import android.content.SharedPreferences
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import app.hushcast.automute.matcher.BuiltInFilters
+import app.hushcast.automute.matcher.FilterSettings
+import app.hushcast.automute.matcher.ProfanityLevel
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -28,6 +35,12 @@ object HushCastPrefs {
     private const val KEY_DESKTOP_FINGERPRINT = "desktop_worker_cert_fp"
     private const val KEY_AUTO_DOWNLOAD_METHOD = "auto_download_analysis_method"
     private const val KEY_MUTE_TIMING_PRECISION = "mute_timing_precision"
+
+    private const val KEY_FILTER_PROFANITY = "filter_profanity_level"
+    private const val KEY_FILTER_EXPLICIT = "filter_explicit"
+    private const val KEY_FILTER_RELIGIOUS = "filter_religious"
+    private const val PREFIX_PODCAST_LEVEL = "filter_podcast_level::"
+    private const val KEY_FILTERS_MIGRATED = "filters_migrated_1_0_45"
 
     private const val KEYSTORE_ALIAS = "hushcast_worker_token_aes"
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
@@ -73,6 +86,77 @@ object HushCastPrefs {
 
     fun setRuleModeMigrated(context: Context) {
         prefs(context).edit().putBoolean("rule_mode_default_migrated_v1", true).apply()
+    }
+
+    /** The WordMatcher.MATCHER_VERSION that analyzed episodes were last matched with (0 = before 1.0.45). */
+    fun getMatcherVersion(context: Context): Int =
+        prefs(context).getInt("word_matcher_version", 0)
+
+    fun setMatcherVersion(context: Context, version: Int) {
+        prefs(context).edit().putInt("word_matcher_version", version).apply()
+    }
+
+    // ---- Built-in word filters (1.0.45).  All off on a new install. ----
+
+    fun getFilterSettings(context: Context): FilterSettings {
+        val p = prefs(context)
+        return FilterSettings(
+            profanity = p.getString(KEY_FILTER_PROFANITY, null)
+                ?.let { runCatching { ProfanityLevel.valueOf(it) }.getOrNull() } ?: ProfanityLevel.OFF,
+            explicit = p.getBoolean(KEY_FILTER_EXPLICIT, false),
+            religious = p.getBoolean(KEY_FILTER_RELIGIOUS, false)
+        )
+    }
+
+    fun setFilterSettings(context: Context, settings: FilterSettings) {
+        prefs(context).edit()
+            .putString(KEY_FILTER_PROFANITY, settings.profanity.name)
+            .putBoolean(KEY_FILTER_EXPLICIT, settings.explicit)
+            .putBoolean(KEY_FILTER_RELIGIOUS, settings.religious)
+            .apply()
+    }
+
+    /** A podcast's own profanity level, or null to follow the global one. */
+    fun getPodcastProfanityLevel(context: Context, origin: String): ProfanityLevel? =
+        prefs(context).getString(PREFIX_PODCAST_LEVEL + origin, null)
+            ?.let { runCatching { ProfanityLevel.valueOf(it) }.getOrNull() }
+
+    fun setPodcastProfanityLevel(context: Context, origin: String, level: ProfanityLevel?) {
+        prefs(context).edit().apply {
+            if (level == null) remove(PREFIX_PODCAST_LEVEL + origin) else putString(PREFIX_PODCAST_LEVEL + origin, level.name)
+        }.apply()
+    }
+
+    private fun podcastProfanityLevels(context: Context): Map<String, ProfanityLevel> =
+        prefs(context).all.mapNotNull { (key, value) ->
+            if (!key.startsWith(PREFIX_PODCAST_LEVEL) || value !is String) return@mapNotNull null
+            val level = runCatching { ProfanityLevel.valueOf(value) }.getOrNull() ?: return@mapNotNull null
+            key.removePrefix(PREFIX_PODCAST_LEVEL) to level
+        }.toMap()
+
+    /** What the built-in filters mute for one episode: the global settings, with its podcast's own level. */
+    fun effectiveFilterSettings(context: Context, episodeId: String): FilterSettings =
+        BuiltInFilters.effective(getFilterSettings(context), podcastProfanityLevels(context), episodeId)
+
+    /** The global filter settings, updated as they change. */
+    fun filterSettingsFlow(context: Context): Flow<FilterSettings> = prefsFlow(context) { getFilterSettings(context) }
+
+    fun podcastProfanityLevelFlow(context: Context, origin: String): Flow<ProfanityLevel?> =
+        prefsFlow(context) { getPodcastProfanityLevel(context, origin) }
+
+    private fun <T> prefsFlow(context: Context, read: () -> T): Flow<T> = callbackFlow {
+        val p = prefs(context)
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> trySend(read()) }
+        p.registerOnSharedPreferenceChangeListener(listener)
+        trySend(read())
+        awaitClose { p.unregisterOnSharedPreferenceChangeListener(listener) }
+    }.distinctUntilChanged()
+
+    fun isFilterMigrationDone(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_FILTERS_MIGRATED, false)
+
+    fun setFilterMigrationDone(context: Context) {
+        prefs(context).edit().putBoolean(KEY_FILTERS_MIGRATED, true).apply()
     }
 
     /** One-time removal of checkpoint rows leaked by 1.0.30 and earlier (see AutoMuteAnalyzer). */

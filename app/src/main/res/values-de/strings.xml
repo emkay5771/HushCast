@@ -294,4 +294,18 @@
     <string name="route_up_next">Nächste Titel</string>
     <string name="snackbar_marked_as_unplayed">Als ungespielt markiert</string>
     <string name="common_error">Fehler</string>
+    <string name="common_support">Unterstützen</string>
+    <string name="common_comments">Kommentare</string>
+    <string name="podcast_group_by_season">Nach Staffel gruppieren</string>
+    <string name="podcast_season_number">Staffel %1$d</string>
+    <string name="podcast_other_episodes">Weitere Folgen</string>
+    <string name="episode_number_short">F. %1$d</string>
+    <string name="episode_type_trailer">Trailer</string>
+    <string name="episode_type_bonus">Bonus</string>
+    <string name="content_explicit">Explizit</string>
+    <string name="preview_clip">Hörprobe</string>
+    <string name="preview_playing">Hörprobe läuft</string>
+    <string name="action_trailer">Trailer</string>
+    <string name="episode_chapters_show_all">Alle %1$d anzeigen</string>
+    <string name="episode_chapters_show_fewer">Weniger anzeigen</string>
 </resources>

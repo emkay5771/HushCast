@@ -18,6 +18,7 @@ import app.hushcast.automute.dsp.MuteWindow
 import app.hushcast.automute.dsp.ReadinessBadge
 import app.hushcast.automute.engine.Segment
 import app.hushcast.automute.engine.Word
+import app.hushcast.automute.matcher.BuiltInFilters
 import app.hushcast.automute.matcher.MuteRule
 import app.hushcast.automute.transcript.ApproxSpan
 import kotlinx.coroutines.CoroutineScope
@@ -257,6 +258,13 @@ interface AutoMuteDao {
 
     @Query("DELETE FROM mute_rules WHERE id = :ruleId")
     suspend fun deleteRule(ruleId: Long)
+
+    @Query("UPDATE mute_rules SET category = :category WHERE id = :ruleId")
+    suspend fun setRuleCategory(ruleId: Long, category: String)
+
+    /** Points stored mute segments at another rule (keeps their on/off state through a re-match). */
+    @Query("UPDATE mute_segments SET ruleId = :newRuleId WHERE ruleId = :oldRuleId")
+    suspend fun remapSegmentRule(oldRuleId: Long, newRuleId: Long)
 
     @Query("DELETE FROM mute_rules")
     suspend fun deleteAllRules()
@@ -671,7 +679,9 @@ fun resolveMuteWindows(
     defaultActionMode: MuteActionMode
 ): List<MuteWindow> = segments.map { seg ->
     val rule = rulesById[seg.ruleId]
+    // Built-in filter words always follow the global mode.
     val useDefault = seg.actionMode.equals(DEFAULT_RULE_MODE, ignoreCase = true) ||
+        BuiltInFilters.isBuiltInId(seg.ruleId) ||
         (rule != null && rule.actionMode.equals(DEFAULT_RULE_MODE, ignoreCase = true))
     val resolvedMode = when {
         useDefault -> defaultActionMode
@@ -711,6 +721,55 @@ suspend fun AutoMuteDao.migrateRulesToDefaultModeOnce(context: android.content.C
     if (app.hushcast.automute.engine.HushCastPrefs.isRuleModeMigrated(context)) return
     updateAllRulesActionMode(DEFAULT_RULE_MODE)
     app.hushcast.automute.engine.HushCastPrefs.setRuleModeMigrated(context)
+}
+
+/**
+ * The rules to match one episode with: the user's own words, plus the built-in filter words its
+ * settings turn on (the global ones, or its podcast's own profanity level).
+ */
+suspend fun AutoMuteDao.effectiveRules(context: Context, episodeId: String): List<MuteRule> =
+    getEnabledRules().map { it.toDomain() } +
+        BuiltInFilters.rulesFor(app.hushcast.automute.engine.HushCastPrefs.effectiveFilterSettings(context, episodeId))
+
+/**
+ * One-time move (1.0.45) from presets copied into the word list to the built-in filters.  Nothing
+ * that was muted becomes unmuted: the profanity level is the strictest one whose earlier preset
+ * words were all in the list and on, Explicit content is on if its whole preset was, and preset
+ * words beyond those stay as the user's own words.  Segments are pointed at the built-in ids, so
+ * mutes switched off in a transcript stay off.  Returns whether anything moved.  Safe to call on
+ * every start.
+ */
+suspend fun AutoMuteDao.migratePresetsToBuiltInFiltersOnce(context: Context): Boolean {
+    val prefs = app.hushcast.automute.engine.HushCastPrefs
+    if (prefs.isFilterMigrationDone(context)) return false
+    val rows = getAllRules().filter { !it.isRegex }
+    val enabled = rows.filter { it.enabled }.map { it.pattern.trim().lowercase() }.toSet()
+    val plan = BuiltInFilters.presetMigrationFor(enabled)
+
+    var moved = false
+    for (row in rows) {
+        val pattern = row.pattern.trim().lowercase()
+        val category = when (pattern) {
+            in plan.absorbedProfanity -> BuiltInFilters.CATEGORY_PROFANITY
+            in plan.absorbedExplicit -> BuiltInFilters.CATEGORY_EXPLICIT
+            else -> null
+        }
+        val builtInId = category?.let { BuiltInFilters.idFor(pattern, it) }
+        if (builtInId != null && row.enabled) {
+            remapSegmentRule(row.id, builtInId)
+            deleteRule(row.id)
+            moved = true
+        } else if (row.category == BuiltInFilters.CATEGORY_PROFANITY || row.category == BuiltInFilters.CATEGORY_EXPLICIT) {
+            // A preset word the filters don't cover at this level: it stays the user's own word.
+            setRuleCategory(row.id, "Custom")
+        }
+    }
+    prefs.setFilterSettings(
+        context,
+        prefs.getFilterSettings(context).copy(profanity = plan.level, explicit = plan.explicit)
+    )
+    prefs.setFilterMigrationDone(context)
+    return moved
 }
 
 fun AdSegmentEntity.toDomain() = AdWindow(

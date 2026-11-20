@@ -103,4 +103,36 @@ class AutoMuteAudioProcessorTest {
         assertEquals(0.toShort(), samples[100])
         assertEquals(10000.toShort(), samples[180])
     }
+
+    @Test
+    fun copySettingsFromTakesTheUsersSettingsButNotTheWindows() {
+        val main = AutoMuteAudioProcessor().apply {
+            isEnabled = false
+            defaultActionMode = MuteActionMode.BEEP
+            volumeBoostEnabled = true
+            bleepStyle = BleepStyle.WARM
+            encoderDelayOffsetMs = 12L
+            updateWindows(listOf(MuteWindow(0L, 100L, "word", actionMode = MuteActionMode.HARD_SILENCE)))
+        }
+        val preview = AutoMuteAudioProcessor()
+        preview.copySettingsFrom(main)
+
+        assertEquals(false, preview.isEnabled)
+        assertEquals(MuteActionMode.BEEP, preview.defaultActionMode)
+        assertEquals(true, preview.volumeBoostEnabled)
+        assertEquals(BleepStyle.WARM, preview.bleepStyle)
+        assertEquals(12L, preview.encoderDelayOffsetMs)
+
+        // No windows came along: with muting on (and the copied boost off), audio passes
+        // through untouched.
+        preview.isEnabled = true
+        preview.volumeBoostEnabled = false
+        preview.encoderDelayOffsetMs = 0L
+        preview.configure(AudioProcessor.AudioFormat(1000, 1, C.ENCODING_PCM_16BIT))
+        preview.flush(AudioProcessor.StreamMetadata(0L))
+        preview.queueInput(makePcm16Buffer(200, 1, 10000))
+        val out = preview.output
+        val samples = ShortArray(200) { out.short }
+        assertEquals(10000.toShort(), samples[50])
+    }
 }

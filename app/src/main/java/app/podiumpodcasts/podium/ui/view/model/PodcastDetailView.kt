@@ -656,11 +656,11 @@ fun PodcastDetailView(
                                 Column {
                                     Spacer(Modifier.height(8.dp))
 
-                                    SelectionContainer(
+                                    Column(
                                         Modifier
                                             .padding(start = 16.dp, end = 16.dp)
                                     ) {
-                                        Column {
+                                        SelectionContainer {
                                             ExpandableText(
                                                 text = podcast.fetchTitle(),
                                                 modifier = Modifier.semantics { heading() },
@@ -674,12 +674,38 @@ fun PodcastDetailView(
                                                     lineHeight = TextUnit.Unspecified
                                                 )
                                             )
+                                        }
 
-                                            Spacer(Modifier.height(4.dp))
+                                        Spacer(Modifier.height(4.dp))
 
-                                            Text(
-                                                text = podcast.author,
-                                                style = Typography.labelLarge
+                                        // Author, explicit badge and, when the feed has one, the trailer at the
+                                        // end of the same line: the action row below is already wider than a phone.
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.weight(1f, fill = false),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                SelectionContainer(Modifier.weight(1f, fill = false)) {
+                                                    Text(
+                                                        text = podcast.author,
+                                                        style = Typography.labelLarge,
+                                                        maxLines = 2,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                                if (podcast.explicit) {
+                                                    Spacer(Modifier.width(8.dp))
+                                                    app.podiumpodcasts.podium.ui.component.model.podcast.ExplicitBadge()
+                                                }
+                                            }
+
+                                            app.podiumpodcasts.podium.ui.component.model.podcast.PodcastTrailerButton(
+                                                podcast = podcast,
+                                                modifier = Modifier.padding(start = 8.dp)
                                             )
                                         }
                                     }
@@ -948,6 +974,16 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                     .padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // First when the show has seasons: the 4th chip sat off the right edge.
+                if (hasSeasons) {
+                    val groupBySeason = vm.searchFilterOrderBarState.groupBySeason.value
+                    FilterChip(
+                        selected = groupBySeason,
+                        onClick = { vm.searchFilterOrderBarState.setGroupBySeason(!groupBySeason) },
+                        label = { Text(stringResource(R.string.podcast_group_by_season)) }
+                    )
+                }
+
                 val hidePlayed = PodcastEpisodesFilter.PLAYED in vm.searchFilterOrderBarState.negativeFilter
                 FilterChip(
                     selected = hidePlayed,
@@ -989,17 +1025,6 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                     },
                     label = { Text("In progress") }
                 )
-
-                if (hasSeasons) {
-                    val groupBySeason = vm.searchFilterOrderBarState.groupBySeason.value
-                    FilterChip(
-                        selected = groupBySeason,
-                        onClick = {
-                            vm.searchFilterOrderBarState.groupBySeason.value = !groupBySeason
-                        },
-                        label = { Text("Group by season") }
-                    )
-                }
             }
         }
     }
@@ -1079,8 +1104,12 @@ fun LazyListScope.podcastDetailViewEpisodesDestination(
                 Column {
                     if (isFirstInSeason) {
                         Text(
-                            text = if (currentSeason != null) "Season $currentSeason" else "Other episodes",
-                            style = MaterialTheme.typography.titleSmall,
+                            text = if (currentSeason != null) {
+                                stringResource(R.string.podcast_season_number, currentSeason)
+                            } else {
+                                stringResource(R.string.podcast_other_episodes)
+                            },
+                            style = MaterialTheme.typography.titleSmallEmphasized,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
                                 .padding(
@@ -1258,8 +1287,9 @@ fun LazyListScope.podcastDetailViewInfoDestination(
 
                 if (categories.isNotEmpty()) {
                     Spacer(Modifier.height(12.dp))
-                    app.podiumpodcasts.podium.ui.component.model.podcast.PodcastCategoriesRow(
-                        categories = categories
+                    app.podiumpodcasts.podium.ui.component.model.podcast.PodcastCategoriesText(
+                        categories = categories,
+                        modifier = Modifier.padding(horizontal = 4.dp)
                     )
                 }
 

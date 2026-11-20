@@ -50,28 +50,12 @@ class SingularPodcastUpdateWork(
                     podcast.origin, *candidateEpisodes.toTypedArray()
                 )
 
-            response.rssChannel.items.forEach { item ->
-                val id = item.computeEpisodeId(podcast.origin)
-                if (episodeIds.contains(id)) {
-                    val mapped = item.toPodcastEpisode(podcast = podcast, new = false, extras = response.extras)
-                    if (mapped.season != null || mapped.episodeNumber != null ||
-                        mapped.episodeType.isNotEmpty() || mapped.explicit ||
-                        mapped.commentsUrl.isNotEmpty() || mapped.personsJson.isNotEmpty() ||
-                        mapped.soundbitesJson.isNotEmpty()
-                    ) {
-                        db.podcastEpisodes().updateMetadataFromFeed(
-                            id = id,
-                            season = mapped.season,
-                            episodeNumber = mapped.episodeNumber,
-                            episodeType = mapped.episodeType,
-                            explicit = mapped.explicit,
-                            commentsUrl = mapped.commentsUrl,
-                            personsJson = mapped.personsJson,
-                            soundbitesJson = mapped.soundbitesJson
-                        )
-                    }
-                }
-            }
+            db.updateKnownEpisodeMetadata(
+                podcast = podcast,
+                items = response.rssChannel.items,
+                extras = response.extras,
+                knownEpisodeIds = episodeIds
+            )
 
             // DB writes only; the chapter URLs worth fetching come back for the end.
             val chapterCandidates = runCatching {
@@ -99,6 +83,16 @@ class SingularPodcastUpdateWork(
             }
 
             db.podcastSubscriptions().logUpdate(origin = podcast.origin)
+            // This fetch found a new feed URL: the stored validators belong to the old one, so the
+            // next periodic refresh must read the new feed unconditionally.
+            if (podcast.fetchFeedUrl() != oldPodcast.fetchFeedUrl()) {
+                db.podcastSubscriptions().storeCacheValues(
+                    origin = podcast.origin,
+                    lastModified = "",
+                    eTag = "",
+                    contentLength = ""
+                )
+            }
             // A no-cache fetch: the extras are current, so the periodic refresh can skip its
             // one-off unconditional fetch for this podcast.
             if (subscription != null && subscription.extrasVersion != FEED_EXTRAS_VERSION) {

@@ -42,5 +42,11 @@ data class PodcastSubscriptionModel(
     val extrasVersion: Int = 0
 )
 
-/** Bump to make every podcast re-read its feed extras once (e.g. after a parser change). */
-const val FEED_EXTRAS_VERSION = 1
+/**
+ * Bump to make every podcast re-read its feed extras once (e.g. after a parser change).
+ *
+ * 2 (1.0.45): the 1.0.43 metadata (seasons, people, funding, categories, trailer, explicit,
+ * soundbites, the new feed URL) and the 1.0.45 parser fixes.  Without it, a subscription whose
+ * feed hasn't changed since 1.0.43 keeps answering 304 and never gets any of them.
+ */
+const val FEED_EXTRAS_VERSION = 2

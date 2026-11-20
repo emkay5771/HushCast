@@ -291,4 +291,18 @@
     <string name="snackbar_removed_from_hear_later">Eliminado de » Escuchar más tarde «</string>
     <string name="snackbar_reset_progress">Progreso restablecido</string>
     <string name="common_error">Error</string>
+    <string name="common_support">Apoyar</string>
+    <string name="common_comments">Comentarios</string>
+    <string name="podcast_group_by_season">Agrupar por temporada</string>
+    <string name="podcast_season_number">Temporada %1$d</string>
+    <string name="podcast_other_episodes">Otros episodios</string>
+    <string name="episode_number_short">EP. %1$d</string>
+    <string name="episode_type_trailer">Tráiler</string>
+    <string name="episode_type_bonus">Extra</string>
+    <string name="content_explicit">Explícito</string>
+    <string name="preview_clip">Fragmento</string>
+    <string name="preview_playing">Reproduciendo fragmento</string>
+    <string name="action_trailer">Tráiler</string>
+    <string name="episode_chapters_show_all">Mostrar los %1$d</string>
+    <string name="episode_chapters_show_fewer">Mostrar menos</string>
 </resources>
