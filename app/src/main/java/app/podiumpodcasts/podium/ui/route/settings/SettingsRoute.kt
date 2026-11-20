@@ -366,8 +366,8 @@ fun SettingsRoute(
                                 contentDescription = ""
                             )
                         },
-                        label = "Support upstream podium on Ko-Fi",
-                        description = "HushCast is forked from podium by aimok04 — buy them a coffee :)",
+                        label = "Support HushCast on Ko-fi",
+                        description = "Help keep HushCast free and open source — buy me a coffee :)",
                         index = pos.index,
                         count = pos.count,
                         onClick = {
