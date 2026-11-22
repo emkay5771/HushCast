@@ -37,7 +37,7 @@ def _get_chat_llm(chat_model_path: Path):
         try:
             llm = Llama(
                 model_path=key_path,
-                n_ctx=4096,
+                n_ctx=8192,
                 n_gpu_layers=-1,
                 verbose=False,
             )
@@ -296,8 +296,8 @@ def generate_chapters_and_summary(
             if use_existing_chapters:
                 # Chapters already provided by feed or embedded tags; ask LLM only for summary (R1)
                 non_ad_texts = [segments[i].text.strip() for i in non_ad_indices if segments[i].text.strip()]
-                step_s = max(1, len(non_ad_texts) // 18)
-                excerpt_text = " ".join(non_ad_texts[::step_s][:18])[:3200]
+                step_s = max(1, len(non_ad_texts) // 36)
+                excerpt_text = " ".join(non_ad_texts[::step_s][:36])[:6400]
                 prompt = (
                     "Summarize this podcast episode in 2-3 concise sentences based on the excerpts below.\n"
                     'Return ONLY valid JSON: {"summary": "..."}\n\n'
@@ -308,8 +308,8 @@ def generate_chapters_and_summary(
                 for b_pos, txts in enumerate(chapter_texts_list):
                     non_empty = [t.strip() for t in txts if t.strip()]
                     if non_empty:
-                        step_c = max(1, len(non_empty) // 5)
-                        excerpt = " ".join(non_empty[::step_c][:5])[:420]
+                        step_c = max(1, len(non_empty) // 10)
+                        excerpt = " ".join(non_empty[::step_c][:10])[:800]
                     else:
                         excerpt = ""
                     start_sec = chapter_starts_ms[b_pos] // 1000

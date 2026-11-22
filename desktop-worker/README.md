@@ -45,7 +45,7 @@ pytest
 
 ## Cloud Hosting (Modal Serverless GPU — Free Tier Friendly)
 
-If you want to run the companion worker in the cloud on an NVIDIA T4 GPU (scales to zero when idle, ~$30/month free credit on [Modal](https://modal.com)), while still keeping local on-device Android and local Mac/LAN modes available:
+If you want to run the companion worker in the cloud on an NVIDIA L4 GPU (24 GB VRAM, ~2× faster and ~36–39% cheaper per episode than T4, with automatic T4 fallback via `gpu=["L4", "T4"]`, scales to zero after 60s idle, up to 2 concurrent containers, ~$30/month free credit on [Modal](https://modal.com)), while still keeping local on-device Android and local Mac/LAN modes available:
 
 ### 1. Prerequisites
 - A free [Modal](https://modal.com) account.
@@ -139,7 +139,7 @@ On your phone:
   uv run modal deploy modal_app.py
   ```
   You can also run `uv run modal secret list` to confirm `hushcast-token` is in the active environment.
-- **Cold starts (scale-to-zero):** To save credits, Modal scales the GPU container down after 2 minutes of idle time (`scaledown_window=120`). The first **Test** or episode download after idle may take ~15–25 seconds while the T4 container boots; subsequent requests while warm are instant.
+- **Cold starts (scale-to-zero):** To save credits, Modal scales the GPU container down after 1 minute of idle time (`scaledown_window=60`). The first **Test** or episode download after idle may take ~15–25 seconds (longer if L4 provisioning falls back or queues) while the GPU container boots; subsequent requests while warm are instant.
 - **Auto-deploy via GitHub Actions:** Pushing changes under `desktop-worker/` to `main` automatically deploys to Modal via [`.github/workflows/deploy-modal.yml`](../.github/workflows/deploy-modal.yml) once you add **`MODAL_TOKEN_ID`** and **`MODAL_TOKEN_SECRET`** (from [Modal Settings → API Tokens](https://modal.com/settings/tokens)) to your GitHub repository's **Settings → Secrets and variables → Actions**. After deploying, the workflow runs `hushcast-worker health-check` against the deployed URL. It uses the optional **`MODAL_WORKER_URL`** secret if you set one, otherwise the URL printed by `modal deploy`; if neither is available the check is skipped with a warning.
 - **Updating the worker manually:** After pulling new changes (`git pull origin main`), re-run `uv run modal deploy modal_app.py` inside `desktop-worker/`.
 - **Optional LLM Chat / Summaries:** If you also want an instruct GGUF model on Modal, upload or download it into `/data/models/` inside the `hushcast-data` volume.

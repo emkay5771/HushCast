@@ -2,7 +2,7 @@
 
 Architecture (V1 / B10 / V2):
 - CPU-only `@modal.asgi_app` serves API, long-polling, search, and cached bundle/audio downloads.
-- `@app.cls(gpu="T4")` loads ML models once in `@modal.enter` and runs jobs via `.spawn()`.
+- `@app.cls(gpu=["L4", "T4"])` loads ML models once in `@modal.enter` and runs jobs via `.spawn()`.
 - Job state is shared via `modal.Dict("hushcast-jobs")` so polling never keeps the GPU warm
   and jobs survive client disconnects or web container scale-downs.
 
@@ -378,17 +378,17 @@ def setup_models() -> None:
 
 @app.cls(
     image=gpu_image,
-    gpu="T4",
+    gpu=["L4", "T4"],
     cpu=4.0,
     memory=16384,
     volumes={str(DATA_DIR): volume},
     secrets=[modal.Secret.from_name("hushcast-token")],
-    max_containers=1,
-    scaledown_window=120,
-    timeout=900,
+    max_containers=2,
+    scaledown_window=60,
+    timeout=1800,
 )
 class GpuWorker:
-    """Dedicated T4 GPU worker that warms up once per container and runs spawned jobs."""
+    """Dedicated L4 GPU worker that warms up once per container and runs spawned jobs."""
 
     @modal.enter()
     def enter(self) -> None:
@@ -402,19 +402,29 @@ class GpuWorker:
                 volume.commit()
             except Exception:
                 logging.getLogger("hushcast_worker.modal").warning("Volume commit after model download failed", exc_info=True)
+        os.environ.setdefault("HUSHCAST_FASTER_WHISPER_COMPUTE", "int8_float16")
         _use_local_faster_whisper()
         from hushcast_worker.pipeline import LocalMlBackend
         from hushcast_worker.storage import WorkerCache
 
         max_cache = int(os.environ.get("HUSHCAST_MAX_CACHE_BYTES", str(20 * 1024 * 1024 * 1024)))
-        self.cache = WorkerCache(CACHE_DIR, max_cache_bytes=max_cache)
+        self.cache = WorkerCache(CACHE_DIR, max_cache_bytes=max_cache, backfill_meta=True)
         self.backend = LocalMlBackend(MODELS_DIR)
         self.backend.warmup()
+        gpu_name = "NVIDIA L4/T4"
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                gpu_name = torch.cuda.get_device_name(0)
+        except Exception:
+            pass
         self._gpu_health_base = {
             "modelsReady": self.backend.models_ready(),
             "modelsLoaded": self.backend.models_loaded(),
             "whisperModel": _asr_model_label(),
             "chatModelReady": self.backend.chat_model_ready(),
+            "gpuName": gpu_name,
         }
         self._publish_gpu_health()
 
@@ -475,12 +485,13 @@ class GpuWorker:
         state_lock = threading.Lock()  # guards state_cache; never held across a Dict call
         flush_lock = threading.Lock()  # serializes Dict writes, so snapshots land in order
         now = time.time()
+        gpu_label = str((getattr(self, "_gpu_health_base", None) or {}).get("gpuName") or "cloud GPU")
         state_cache: dict[str, Any] = {
             "jobId": job_id,
             "episodeId": req.episodeId,
             "state": JobState.QUEUED.value,
             "progressPercent": 0,
-            "stageLabel": "Starting on T4 GPU",
+            "stageLabel": f"Starting on {gpu_label}",
             "stage": JobStage.QUEUED.value,
             "stageProgress": 0,
             "rev": 1,
@@ -581,7 +592,10 @@ class GpuWorker:
             if req.reprocessStage:
                 sha = self.cache.lookup_by_episode_id(req.episodeId, req.audioUrl)
                 if sha is None:
-                    volume.reload()
+                    try:
+                        volume.reload()
+                    except Exception:
+                        log.debug("Best-effort volume.reload() skipped during reprocessStage", exc_info=True)
                     self.cache.force_reload_index()
                     sha = self.cache.lookup_by_episode_id(req.episodeId, req.audioUrl)
                 existing = self.cache.get_bundle(sha) if sha else None
@@ -647,6 +661,7 @@ class GpuWorker:
                             stageProgress=pct,
                         )
 
+            t_dl_start = time.monotonic()
             sha256, content_type = asyncio.run(
                 download_audio_streaming_sha256(req.audioUrl, tmp_path, on_bytes=_dl_cb, allow_lan_feeds=False)
             )
@@ -660,6 +675,7 @@ class GpuWorker:
             )
             # V5: Commit staged audio immediately so early Range pulls can succeed before ML finishes
             volume.commit()
+            download_s = time.monotonic() - t_dl_start
             _update_state(force=True, fileSha256=sha256)
 
             existing = None if req.force else self.cache.get_bundle(sha256)
@@ -695,6 +711,7 @@ class GpuWorker:
                 podcast_origin=req.podcastOrigin,
                 fingerprint_store=self.cache.fingerprints,
             )
+            t_save_start = time.monotonic()
             self.cache.save_episode(
                 sha256=sha256,
                 audio_tmp_path=None,
@@ -705,6 +722,18 @@ class GpuWorker:
                 embeddings=emb_2d,
             )
             volume.commit()
+            save_s = time.monotonic() - t_save_start
+            ml_s = t_save_start - ml_start_mono
+            log.info(
+                "Job %s (%s) complete on %s: download+commit=%.2fs ml=%.2fs save+commit=%.2fs total=%.2fs",
+                job_id,
+                req.episodeId,
+                gpu_label,
+                download_s,
+                ml_s,
+                save_s,
+                download_s + ml_s + save_s,
+            )
             _update_state(
                 force=True,
                 state=JobState.READY.value,
@@ -804,6 +833,7 @@ def _gpu_health_view(record: dict[str, Any], stats: Optional[GpuQueueStats], now
         "modelsLoaded": bool(warm and record.get("modelsLoaded")),
         "whisperModel": str(record.get("whisperModel") or _asr_model_label()),
         "chatModelReady": bool(record.get("chatModelReady", False)),
+        "gpuName": str(record.get("gpuName") or "NVIDIA L4/T4"),
         "activeJob": record.get("activeJob") if fresh else None,
         "queueDepth": stats.backlog if stats is not None else 0,
         # Jobs ahead of one submitted now: everything waiting plus everything running.
@@ -887,17 +917,22 @@ def fastapi_app():
             hostname="modal-cloud",
             accelerator="cuda",
             deployment="modal",
-            gpuName="NVIDIA T4",
             cachedEpisodes=cached_episodes,
             cacheBytes=cache_bytes,
             diskFreeBytes=disk_free_bytes,
             **view,
         )
 
+    def _try_volume_reload(context: str) -> None:
+        try:
+            volume.reload()
+        except Exception:
+            log.debug("Best-effort volume.reload() skipped during %s", context, exc_info=True)
+
     def _lookup_reprocess_sha(episode_id: str, audio_url: str) -> Optional[str]:
         sha = cache.lookup_by_episode_id(episode_id, audio_url)
         if sha is None:
-            volume.reload()
+            _try_volume_reload("reprocess_lookup")
             cache.force_reload_index()
             sha = cache.lookup_by_episode_id(episode_id, audio_url)
         return sha
@@ -917,7 +952,7 @@ def fastapi_app():
             "episodeId": req.episodeId,
             "state": JobState.QUEUED.value,
             "progressPercent": 0,
-            "stageLabel": "Queued for T4 GPU",
+            "stageLabel": "Queued for a cloud GPU",
             "stage": JobStage.QUEUED.value,
             "stageProgress": 0,
             "rev": 1,
@@ -990,16 +1025,15 @@ def fastapi_app():
 
     @web.get("/v1/episodes")
     def list_episodes(_: None = Depends(_require_auth)):
-        volume.reload()
-        cache.reload_index_if_changed()
+        _try_volume_reload("list_episodes")
+        cache.force_reload_index()
         return cache.list_ready()
 
     @web.get("/v1/episodes/{key}/bundle")
     def get_bundle(key: str, _: None = Depends(_require_auth)):
+        _try_volume_reload("get_bundle")
+        cache.reload_index_if_changed()
         path = cache.bundle_path(key)
-        if not path.exists():
-            volume.reload()
-            cache.reload_index_if_changed()
         if not path.exists():
             raise HTTPException(status_code=404, detail="Bundle not found")
         etag = f'"{key}-v{PIPELINE_VERSION}-{path.stat().st_mtime_ns}"'
@@ -1009,7 +1043,7 @@ def fastapi_app():
     def get_audio(sha256: str, request: Request, _: None = Depends(_require_auth)):
         path = cache.audio_path(sha256)
         if not path.exists():
-            volume.reload()
+            _try_volume_reload("get_audio")
             cache.reload_index_if_changed()
         if not path.exists():
             raise HTTPException(status_code=404, detail="Audio not cached")
@@ -1043,7 +1077,7 @@ def fastapi_app():
 
     @web.get("/v1/search", response_model=DesktopSearchResponse)
     def search(q: str = Query(min_length=2), limit: int = Query(default=20, ge=1, le=100), _: None = Depends(_require_auth)) -> DesktopSearchResponse:
-        volume.reload()
+        _try_volume_reload("search")
         cache.reload_index_if_changed()
         q_vec = GpuWorker().embed_query.remote(q)
         return DesktopSearchResponse(query=q, hits=cache.semantic_search(q_vec, top_k=limit))

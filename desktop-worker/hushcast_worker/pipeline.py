@@ -1134,6 +1134,14 @@ class LocalMlBackend:
 
         t_dec = time.monotonic()
         pcm_16k, pcm_24k_mid, pcm_24k_side, duration_sec = decode_audio_streams(audio_path)
+        decode_s = time.monotonic() - t_dec
+        asr_s = 0.0
+        align_s = 0.0
+        diarize_s = 0.0
+        embed_s = 0.0
+        ad_s = 0.0
+        fp_s = 0.0
+        llm_s = 0.0
         if cancel_event is not None and cancel_event.is_set():
             raise RuntimeError("Job cancelled")
 
@@ -1283,6 +1291,7 @@ class LocalMlBackend:
                 hb.join(timeout=1.0)
 
             tr_sec = max(0.01, time.monotonic() - t_tr)
+            asr_s = tr_sec
             self._record_rtf(duration_sec, tr_sec)
             rt_speed = duration_sec / tr_sec if duration_sec > 0 else 0.0
             on_progress(
@@ -1293,10 +1302,32 @@ class LocalMlBackend:
 
             if words and segments and len(pcm_16k) > 0 and self._forced_aligner.is_available():
                 on_progress(JobState.TRANSCRIBING, 61, f"Refining word timing ({len(words)} words)")
+                # Overlap CPU-bound 24 kHz frame extraction & 16 kHz fingerprinting with GPU alignment/embedding.
+                frames_future = None
+                fp_future = None
+                cpu_pool = None
+                if len(pcm_24k_mid) > 0 or (fingerprint_store is not None and len(pcm_16k) > 0):
+                    from concurrent.futures import ThreadPoolExecutor
+
+                    cpu_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="hc-cpu")
+                    if len(pcm_24k_mid) > 0:
+                        frames_future = cpu_pool.submit(
+                            extract_audio_frames, pcm_24k_mid, sr=24000, side_pcm=pcm_24k_side
+                        )
+                    if fingerprint_store is not None and len(pcm_16k) > 0:
+                        podcast_key = normalize_podcast_key(podcast_origin, podcast_title)
+                        fp_future = cpu_pool.submit(
+                            compute_fingerprint,
+                            pcm_16k,
+                            file_sha256=file_sha256,
+                            podcast_key=podcast_key,
+                        )
+
                 t_fa = time.monotonic()
                 n_aligned = self._forced_aligner.align_words(
                     pcm_16k, segments, words, cancel_event=cancel_event
                 )
+                align_s = time.monotonic() - t_fa
                 if n_aligned > 0:
                     if sum(s.nWords for s in segments) == len(words):
                         pos = 0
@@ -1311,63 +1342,92 @@ class LocalMlBackend:
                         62,
                         f"Aligned {n_aligned}/{len(words)} words in {time.monotonic() - t_fa:.1f}s",
                     )
+            else:
+                frames_future = None
+                fp_future = None
+                cpu_pool = None
+        else:
+            frames_future = None
+            fp_future = None
+            cpu_pool = None
 
         if cancel_event is not None and cancel_event.is_set():
+            if cpu_pool is not None:
+                cpu_pool.shutdown(wait=False, cancel_futures=True)
             raise RuntimeError("Job cancelled")
 
-        if segments and len(pcm_16k) > 0:
-            on_progress(JobState.TRANSCRIBING, 63, f"Identifying speakers across {len(segments)} segments")
-            assign_speakers(pcm_16k, segments)
-            n_speakers = len({s.speaker for s in segments if s.speaker is not None})
-            on_progress(JobState.TRANSCRIBING, 65, f"Detected {max(1, n_speakers)} speaker(s)")
+        try:
+            if segments and len(pcm_16k) > 0:
+                on_progress(JobState.TRANSCRIBING, 63, f"Identifying speakers across {len(segments)} segments")
+                t_diar = time.monotonic()
+                assign_speakers(pcm_16k, segments)
+                diarize_s = time.monotonic() - t_diar
+                n_speakers = len({s.speaker for s in segments if s.speaker is not None})
+                on_progress(JobState.TRANSCRIBING, 65, f"Detected {max(1, n_speakers)} speaker(s)")
 
-        on_progress(JobState.EMBEDDING, 66, f"Loading embedding model ({self.qwen_model.name})")
-        texts = [s.text for s in segments]
-        ad_segments: list[AdSegmentDto] = []
-        emb_2d = None
-        summary: Optional[str] = None
-        chapters: list[DesktopChapterDto] = []
+            on_progress(JobState.EMBEDDING, 66, f"Loading embedding model ({self.qwen_model.name})")
+            texts = [s.text for s in segments]
+            ad_segments: list[AdSegmentDto] = []
+            emb_2d = None
+            summary: Optional[str] = None
+            chapters: list[DesktopChapterDto] = []
+
+            if texts:
+                t_emb = time.monotonic()
+                emb_2d = self._embed_segments(texts, on_progress=on_progress, cancel_event=cancel_event)
+                embed_s = time.monotonic() - t_emb
+                emb = emb_2d[None, :, :]
+
+                on_progress(
+                    JobState.TAGGING,
+                    86,
+                    f"Embedded {len(texts)} segments in {embed_s:.1f}s • Detecting ads",
+                )
+                t_ad = time.monotonic()
+                if frames_future is not None:
+                    frames = frames_future.result()
+                else:
+                    frames = extract_audio_frames(pcm_24k_mid, sr=24000, side_pcm=pcm_24k_side) if len(pcm_24k_mid) > 0 else None
+                feats = compute_segment_features(frames, segments, duration_sec=duration_sec)[None, :, :]
+
+                sess = self._get_ort_session()
+                probs = sess.run(None, {"emb": emb, "feats": feats})[0][0]
+                ad_segments = decode_ad_segments(probs, segments)
+                ad_s = time.monotonic() - t_ad
+
+                if fingerprint_store is not None and len(pcm_16k) > 0:
+                    t_fp = time.monotonic()
+                    try:
+                        podcast_key = normalize_podcast_key(podcast_origin, podcast_title)
+                        if fp_future is not None:
+                            fp = fp_future.result()
+                        else:
+                            fp = compute_fingerprint(
+                                pcm_16k,
+                                file_sha256=file_sha256,
+                                podcast_key=podcast_key,
+                            )
+                        refs = fingerprint_store.load_references(
+                            exclude_sha256=file_sha256,
+                            podcast_key=podcast_key,
+                        )
+                        fp_segments = find_repeated_segments(fp, refs)
+                        if fp_segments:
+                            logger.info(
+                                "Fingerprinting detected %d recurring segment(s) for %s",
+                                len(fp_segments),
+                                episode_id,
+                            )
+                            ad_segments = merge_fingerprint_segments(ad_segments, fp_segments)
+                        fingerprint_store.save(fp)
+                    except Exception:
+                        logger.warning("Cross-episode fingerprinting failed for %s", episode_id, exc_info=True)
+                    fp_s = time.monotonic() - t_fp
+        finally:
+            if cpu_pool is not None:
+                cpu_pool.shutdown(wait=False, cancel_futures=True)
 
         if texts:
-            t_emb = time.monotonic()
-            emb_2d = self._embed_segments(texts, on_progress=on_progress, cancel_event=cancel_event)
-            emb = emb_2d[None, :, :]
-
-            on_progress(
-                JobState.TAGGING,
-                86,
-                f"Embedded {len(texts)} segments in {time.monotonic() - t_emb:.1f}s • Detecting ads",
-            )
-            frames = extract_audio_frames(pcm_24k_mid, sr=24000, side_pcm=pcm_24k_side) if len(pcm_24k_mid) > 0 else None
-            feats = compute_segment_features(frames, segments, duration_sec=duration_sec)[None, :, :]
-
-            sess = self._get_ort_session()
-            probs = sess.run(None, {"emb": emb, "feats": feats})[0][0]
-            ad_segments = decode_ad_segments(probs, segments)
-
-            if fingerprint_store is not None and len(pcm_16k) > 0:
-                try:
-                    podcast_key = normalize_podcast_key(podcast_origin, podcast_title)
-                    fp = compute_fingerprint(
-                        pcm_16k,
-                        file_sha256=file_sha256,
-                        podcast_key=podcast_key,
-                    )
-                    refs = fingerprint_store.load_references(
-                        exclude_sha256=file_sha256,
-                        podcast_key=podcast_key,
-                    )
-                    fp_segments = find_repeated_segments(fp, refs)
-                    if fp_segments:
-                        logger.info(
-                            "Fingerprinting detected %d recurring segment(s) for %s",
-                            len(fp_segments),
-                            episode_id,
-                        )
-                        ad_segments = merge_fingerprint_segments(ad_segments, fp_segments)
-                    fingerprint_store.save(fp)
-                except Exception:
-                    logger.warning("Cross-episode fingerprinting failed for %s", episode_id, exc_info=True)
 
             chat_path = self.chat_model_path()
             sum_mode = f"LLM ({chat_path.name})" if (chat_path and chat_path.exists()) else "Extractive summary"
@@ -1383,6 +1443,7 @@ class LocalMlBackend:
                     pct = min(97, 92 + tok_count // 120)
                     on_progress(JobState.TAGGING, pct, f"Summarizing ({tok_count} tokens)")
 
+            t_llm = time.monotonic()
             try:
                 summary, chapters = generate_chapters_and_summary(
                     segments=segments,
@@ -1394,6 +1455,7 @@ class LocalMlBackend:
                     on_token=_on_llm_token,
                 )
             finally:
+                llm_s = time.monotonic() - t_llm
                 self._release_chat_model_if_low_mem()
             on_progress(
                 JobState.TAGGING,
@@ -1401,7 +1463,26 @@ class LocalMlBackend:
                 f"Generated {len(chapters)} chapters ({sum_mode})",
             )
 
-        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        total_s = time.monotonic() - t0
+        elapsed_ms = int(total_s * 1000)
+        logger.info(
+            "Stage timings (%s, %.1fs audio, %d segs, %d words, %d ads): "
+            "decode=%.2fs asr=%.2fs align=%.2fs diarize=%.2fs embed=%.2fs ad=%.2fs fp=%.2fs llm=%.2fs total=%.2fs",
+            episode_id,
+            duration_sec,
+            len(segments),
+            len(words),
+            len(ad_segments),
+            decode_s,
+            asr_s,
+            align_s,
+            diarize_s,
+            embed_s,
+            ad_s,
+            fp_s,
+            llm_s,
+            total_s,
+        )
         bundle = DesktopAnalysisBundle(
             fileSha256=file_sha256,
             episodeId=episode_id,

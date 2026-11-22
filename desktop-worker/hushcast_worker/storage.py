@@ -190,9 +190,10 @@ class WorkerCache:
     embeddings) happen outside it, so a short index read never waits on them.
     """
 
-    def __init__(self, root_dir: Path, max_cache_bytes: Optional[int] = None) -> None:
+    def __init__(self, root_dir: Path, max_cache_bytes: Optional[int] = None, *, backfill_meta: bool = False) -> None:
         self.root_dir = root_dir
         self.max_cache_bytes = max_cache_bytes
+        self.backfill_meta = backfill_meta
         self.episodes_dir = root_dir / "episodes"
         self.tmp_dir = root_dir / "tmp"
         self.jobs_dir = root_dir / "jobs"
@@ -202,45 +203,113 @@ class WorkerCache:
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._index_mtime: Optional[float] = None
+        self._episodes_dir_mtime: Optional[float] = None
         self._index: dict[str, dict] = self._load_index()
         # sha -> (embeddings_matrix, episodeId, list[(startSec, endSec, text)])
         self._search_cache: dict[str, tuple] = {}
         self.fingerprints = FingerprintStore(self.root_dir)
 
+    def meta_path(self, sha256: str) -> Path:
+        return self.episodes_dir / f"{sha256}.meta.json"
+
+    def _write_meta_file(self, sha256: str, meta: dict) -> None:
+        p = self.meta_path(sha256)
+        tmp = p.with_name(p.name + ".tmp")
+        tmp.write_text(json.dumps(meta, separators=(",", ":")), encoding="utf-8")
+        os.replace(tmp, p)
+
+    def _merge_meta_files(self, data: dict[str, dict], *, only_newer_than: Optional[float] = None) -> bool:
+        """Merge authoritative per-episode `*.meta.json` records into `data` (multi-writer safe)."""
+        by_sha = data.setdefault("by_sha", {})
+        by_url = data.setdefault("by_url", {})
+        changed = False
+        try:
+            meta_files = list(self.episodes_dir.glob("*.meta.json"))
+        except OSError:
+            return False
+        for mp in meta_files:
+            try:
+                if only_newer_than is not None and mp.stat().st_mtime <= only_newer_than:
+                    sha_guess = mp.name[: -len(".meta.json")]
+                    if sha_guess in by_sha:
+                        continue
+                rec = json.loads(mp.read_text(encoding="utf-8"))
+                sha = rec.get("fileSha256")
+                if not isinstance(sha, str) or not sha:
+                    continue
+                cur = by_sha.get(sha)
+                rec_ts = int(rec.get("updatedAtMs") or rec.get("createdAtMs") or 0)
+                cur_ts = int(cur.get("updatedAtMs") or cur.get("createdAtMs") or 0) if isinstance(cur, dict) else -1
+                if cur is None or rec_ts > cur_ts:
+                    if isinstance(cur, dict):
+                        cur_acc = int(cur.get("lastAccessedAtMs") or 0)
+                        rec_acc = int(rec.get("lastAccessedAtMs") or 0)
+                        if cur_acc > rec_acc:
+                            rec["lastAccessedAtMs"] = cur_acc
+                    by_sha[sha] = rec
+                    url = rec.get("audioUrl")
+                    if isinstance(url, str) and url:
+                        by_url[url] = sha
+                    changed = True
+            except Exception:
+                continue
+        return changed
+
     def _load_index(self) -> dict[str, dict]:
         if not self.index_path.exists():
             self._index_mtime = None
-            return {"by_url": {}, "by_sha": {}}
+            data: dict[str, dict] = {"by_url": {}, "by_sha": {}}
+        else:
+            try:
+                self._index_mtime = self.index_path.stat().st_mtime
+                data = json.loads(self.index_path.read_text(encoding="utf-8"))
+                data.setdefault("by_url", {})
+                data.setdefault("by_sha", {})
+            except Exception:
+                self._index_mtime = None
+                data = {"by_url": {}, "by_sha": {}}
+        self._merge_meta_files(data)
+        # Backfill per-episode .meta.json for legacy index entries (GPU writer only).
+        if self.backfill_meta:
+            for sha, meta in list(data.get("by_sha", {}).items()):
+                if isinstance(meta, dict) and not self.meta_path(sha).exists() and self.bundle_path(sha).exists():
+                    try:
+                        self._write_meta_file(sha, meta)
+                    except OSError:
+                        pass
         try:
-            self._index_mtime = self.index_path.stat().st_mtime
-            data = json.loads(self.index_path.read_text(encoding="utf-8"))
-            data.setdefault("by_url", {})
-            data.setdefault("by_sha", {})
-            return data
-        except Exception:
-            return {"by_url": {}, "by_sha": {}}
+            self._episodes_dir_mtime = self.episodes_dir.stat().st_mtime
+        except OSError:
+            pass
+        return data
 
     def reload_index_if_changed(self) -> None:
         try:
-            mtime = self.index_path.stat().st_mtime
+            idx_mtime = self.index_path.stat().st_mtime if self.index_path.exists() else None
         except OSError:
-            return
-        if mtime != self._index_mtime:
+            idx_mtime = None
+        try:
+            dir_mtime = self.episodes_dir.stat().st_mtime
+        except OSError:
+            dir_mtime = None
+        if idx_mtime != self._index_mtime or dir_mtime != self._episodes_dir_mtime:
             with self._lock:
                 self._index = self._load_index()
 
     def force_reload_index(self) -> None:
-        """Re-reads index.json even if its mtime looks unchanged (e.g. after a Volume reload)."""
+        """Re-reads index.json and per-episode meta files (e.g. after a Volume reload)."""
         with self._lock:
             self._index = self._load_index()
 
     def _save_index(self) -> None:
         with self._lock:
+            self._merge_meta_files(self._index)
             tmp = self.index_path.with_suffix(".tmp")
             tmp.write_text(json.dumps(self._index, separators=(",", ":")), encoding="utf-8")
             os.replace(tmp, self.index_path)
             try:
                 self._index_mtime = self.index_path.stat().st_mtime
+                self._episodes_dir_mtime = self.episodes_dir.stat().st_mtime
             except OSError:
                 pass
 
@@ -355,8 +424,10 @@ class WorkerCache:
                 meta["audioBytes"] = dest_audio.stat().st_size if dest_audio.exists() else 0
                 meta["contentType"] = content_type or meta.get("contentType", "audio/mpeg")
                 meta["lastAccessedAtMs"] = now_ms
+                meta["updatedAtMs"] = now_ms
                 if audio_url:
                     self._index["by_url"][audio_url] = sha256
+                self._write_meta_file(sha256, meta)
                 self._save_index()
         return dest_audio
 
@@ -385,6 +456,8 @@ class WorkerCache:
                 if meta is not None and (meta.get("hasAudio") or meta.get("audioBytes")):
                     meta["hasAudio"] = False
                     meta["audioBytes"] = 0
+                    meta["updatedAtMs"] = int(time.time() * 1000)
+                    self._write_meta_file(sha256, meta)
                     self._save_index()
         return removed
 
@@ -418,6 +491,8 @@ class WorkerCache:
                 if meta is not None:
                     meta["hasAudio"] = False
                     meta["audioBytes"] = 0
+                    meta["updatedAtMs"] = int(time.time() * 1000)
+                    self._write_meta_file(sha, meta)
             if removed:
                 self._save_index()
         return removed
@@ -477,7 +552,7 @@ class WorkerCache:
         with self._lock:
             self._search_cache.pop(sha256, None)
             self._index["by_url"][audio_url] = sha256
-            self._index["by_sha"][sha256] = {
+            meta = {
                 "fileSha256": sha256,
                 "episodeId": bundle.episodeId,
                 "title": title,
@@ -491,7 +566,10 @@ class WorkerCache:
                 "pipelineVersion": bundle.pipelineVersion,
                 "createdAtMs": now_ms,
                 "lastAccessedAtMs": now_ms,
+                "updatedAtMs": now_ms,
             }
+            self._index["by_sha"][sha256] = meta
+            self._write_meta_file(sha256, meta)
             self._save_index()
         self.evict_audio_if_needed(protected_shas={sha256})
 
@@ -512,6 +590,8 @@ class WorkerCache:
                 meta["adCount"] = len(bundle.adSegments)
                 meta["pipelineVersion"] = bundle.pipelineVersion
                 meta["durationSec"] = bundle.durationSec
+                meta["updatedAtMs"] = int(time.time() * 1000)
+                self._write_meta_file(sha256, meta)
                 self._save_index()
 
     def semantic_search(self, query_vec, top_k: int = 15) -> list[DesktopSearchHit]:
@@ -653,9 +733,12 @@ class WorkerCache:
 
         with self._lock:
             if audio_only:
-                for meta in self._index["by_sha"].values():
+                now_ms = int(time.time() * 1000)
+                for sha, meta in self._index["by_sha"].items():
                     meta["hasAudio"] = False
                     meta["audioBytes"] = 0
+                    meta["updatedAtMs"] = now_ms
+                    self._write_meta_file(sha, meta)
                 self._save_index()
             else:
                 self._search_cache.clear()

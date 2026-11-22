@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import threading
+import time
 import unicodedata
 from typing import NamedTuple, Optional
 
@@ -186,6 +187,7 @@ class ForcedAligner:
         if not self._ensure_loaded():
             return 0
 
+        t_fa = time.monotonic()
         total_samples = len(pcm_16k)
         sr = self._sample_rate
         jobs: list[_Window] = []
@@ -254,14 +256,19 @@ class ForcedAligner:
 
         if scores_log:
             arr_s = np.asarray(scores_log, dtype=np.float32)
+            n_alignable = count_alignable_words(words)
+            alignable_pct = (100.0 * refined / n_alignable) if n_alignable > 0 else 0.0
             logger.info(
-                "MMS_FA aligned %d/%d words (score >= %.2f; p10=%.3f p50=%.3f p90=%.3f)",
+                "MMS_FA aligned %d/%d words (%d alignable, %.1f%% alignable; score >= %.2f; p10=%.3f p50=%.3f p90=%.3f) in %.2fs",
                 refined,
                 len(words),
+                n_alignable,
+                alignable_pct,
                 min_score,
                 float(np.percentile(arr_s, 10)),
                 float(np.percentile(arr_s, 50)),
                 float(np.percentile(arr_s, 90)),
+                time.monotonic() - t_fa,
             )
 
         return refined

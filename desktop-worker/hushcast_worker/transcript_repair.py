@@ -12,9 +12,11 @@ Pure Python: no ML imports, so tests can pass a fake decoder.
 
 from __future__ import annotations
 
+import difflib
 import logging
 import re
 import threading
+import time
 from typing import Callable, Optional, Sequence
 
 from .ad_tagger import _ABBREVIATIONS
@@ -189,9 +191,12 @@ def repair_hard_cuts(
 
     Returns (flat word list, number of cuts whose words were replaced). The input is not mutated.
     """
+    t_rep = time.monotonic()
     flat: list[WordDto] = [w.model_copy() for g in segments_words for w in g]
     cuts = find_hard_cuts(segments_words, max_gap_s=max_gap_s)
     n_replaced = 0
+    n_text_changed = 0
+    n_words_changed = 0
     n_periods = 0
     n_failed = 0
     half = 0.5 * window_s
@@ -270,6 +275,14 @@ def repair_hard_cuts(
 
         # Plausibility: a re-decode that dropped words or looped is worse than the original.
         if insert and len(insert) >= len(removed) and len(insert) <= 2 * len(removed) + 4:
+            old_tokens = [_norm(w.text) for w in removed]
+            new_tokens = [_norm(w.text) for w in insert]
+            if old_tokens != new_tokens:
+                n_text_changed += 1
+                sm = difflib.SequenceMatcher(None, old_tokens, new_tokens)
+                for tag, a0, a1, b0, b1 in sm.get_opcodes():
+                    if tag != "equal":
+                        n_words_changed += max(a1 - a0, b1 - b0)
             flat[i0:i1] = insert
             n_replaced += 1
 
@@ -281,10 +294,13 @@ def repair_hard_cuts(
                 n_periods += 1
 
     logger.info(
-        "Hard-cut repair: %d cut(s) found, %d re-decoded, %d boundary period(s) removed, %d decode failure(s)",
+        "Hard-cut repair: %d cut(s) found, %d replaced (%d with text changes, %d word(s) changed), %d boundary period(s) removed, %d decode failure(s) in %.2fs",
         len(cuts),
         n_replaced,
+        n_text_changed,
+        n_words_changed,
         n_periods,
         n_failed,
+        time.monotonic() - t_rep,
     )
     return flat, n_replaced
