@@ -393,32 +393,84 @@ class FingerprintStore:
         self.max_total = max_total
         self._lock = threading.Lock()
         self._index_mtime: Optional[float] = None
+        self._dir_mtime: Optional[float] = None
         self._index: dict[str, dict] = self._load_index()
+
+    def _meta_path(self, file_sha256: str) -> Path:
+        safe = hashlib.sha256(file_sha256.encode("utf-8")).hexdigest()[:32] if len(file_sha256) < 16 else file_sha256[:64]
+        return self.root / f"{safe}.meta.json"
+
+    def _write_meta_file(self, file_sha256: str, meta: dict) -> None:
+        p = self._meta_path(file_sha256)
+        tmp = p.with_name(p.name + ".tmp")
+        rec = dict(meta)
+        rec["fileSha256"] = file_sha256
+        tmp.write_text(json.dumps(rec, separators=(",", ":")), encoding="utf-8")
+        os.replace(tmp, p)
+
+    def _merge_meta_files(self, data: dict[str, dict]) -> None:
+        if not self.root.exists():
+            return
+        try:
+            meta_files = list(self.root.glob("*.meta.json"))
+        except OSError:
+            return
+        for mp in meta_files:
+            try:
+                rec = json.loads(mp.read_text(encoding="utf-8"))
+                sha = rec.get("fileSha256")
+                if not isinstance(sha, str) or not sha:
+                    continue
+                cur = data.get(sha)
+                rec_ts = int(rec.get("updatedAt") or 0)
+                cur_ts = int(cur.get("updatedAt") or 0) if isinstance(cur, dict) else -1
+                if cur is None or rec_ts > cur_ts:
+                    data[sha] = {
+                        "podcastKey": str(rec.get("podcastKey") or ""),
+                        "episodeId": str(rec.get("episodeId") or ""),
+                        "durationMs": int(rec.get("durationMs") or 0),
+                        "updatedAt": rec_ts,
+                        "file": str(rec.get("file") or ""),
+                    }
+            except Exception:
+                continue
 
     def _load_index(self) -> dict[str, dict]:
         try:
             self._index_mtime = self.index_path.stat().st_mtime
-            data = json.loads(self.index_path.read_text(encoding="utf-8"))
-            return data if isinstance(data, dict) else {}
+            raw = json.loads(self.index_path.read_text(encoding="utf-8"))
+            data = raw if isinstance(raw, dict) else {}
         except (OSError, ValueError):
             self._index_mtime = None
-            return {}
+            data = {}
+        self._merge_meta_files(data)
+        try:
+            self._dir_mtime = self.root.stat().st_mtime
+        except OSError:
+            self._dir_mtime = None
+        return data
 
     def _refresh_index_locked(self) -> None:
         try:
-            mtime = self.index_path.stat().st_mtime
+            mtime = self.index_path.stat().st_mtime if self.index_path.exists() else None
         except OSError:
-            return
-        if self._index_mtime is None or mtime != self._index_mtime:
+            mtime = None
+        try:
+            dir_mtime = self.root.stat().st_mtime if self.root.exists() else None
+        except OSError:
+            dir_mtime = None
+        if mtime != self._index_mtime or dir_mtime != self._dir_mtime:
             self._index = self._load_index()
 
     def _save_index(self) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
+        self._merge_meta_files(self._index)
         tmp = self.index_path.with_name(self.index_path.name + ".tmp")
         tmp.write_text(json.dumps(self._index, indent=1, sort_keys=True), encoding="utf-8")
         os.replace(tmp, self.index_path)
         try:
             self._index_mtime = self.index_path.stat().st_mtime
+            self._dir_mtime = self.root.stat().st_mtime
         except OSError:
             pass
 
@@ -436,13 +488,15 @@ class FingerprintStore:
             tmp = path.with_name(path.name + ".tmp")
             tmp.write_bytes(fp.to_bytes())
             os.replace(tmp, path)
-            self._index[fp.file_sha256] = {
+            meta = {
                 "podcastKey": fp.podcast_key,
                 "episodeId": fp.episode_id,
                 "durationMs": fp.duration_ms,
                 "updatedAt": int(time.time()),
                 "file": path.name,
             }
+            self._index[fp.file_sha256] = meta
+            self._write_meta_file(fp.file_sha256, meta)
             self._prune_locked()
             self._save_index()
 
@@ -473,6 +527,7 @@ class FingerprintStore:
         meta = self._index.pop(sha, None)
         if meta and meta.get("file"):
             (self.root / str(meta["file"])).unlink(missing_ok=True)
+        self._meta_path(sha).unlink(missing_ok=True)
 
     def get(self, file_sha256: str) -> Optional[EpisodeFingerprint]:
         if not file_sha256:

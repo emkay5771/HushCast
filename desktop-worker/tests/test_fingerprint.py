@@ -125,3 +125,20 @@ def test_fingerprint_ignores_same_episode_dai_redownload():
     fp_a_legacy = compute_fingerprint(ep_dai_a, file_sha256="1" * 64, podcast_key="show", episode_id="")
     fp_b_other = compute_fingerprint(ep_dai_b, file_sha256="2" * 64, podcast_key="show", episode_id="ep-2552")
     assert find_repeated_segments(fp_b_other, [fp_a_legacy]) == []
+
+
+def test_fingerprint_store_multiwriter_preserves_both(tmp_path):
+    store_a = FingerprintStore(tmp_path)
+    store_b = FingerprintStore(tmp_path)
+    reader = FingerprintStore(tmp_path)
+
+    fp_a = compute_fingerprint(_synth_segment(8.0, seed=901), file_sha256="a" * 64, podcast_key="show", episode_id="ep-a")
+    fp_b = compute_fingerprint(_synth_segment(8.0, seed=902), file_sha256="b" * 64, podcast_key="show", episode_id="ep-b")
+
+    store_a.save(fp_a)
+    store_b.save(fp_b)
+    # Simulate an isolated writer overwriting index.json without fp_a
+    store_b.index_path.write_text("{}", encoding="utf-8")
+
+    refs = reader.load_references(exclude_sha256="c" * 64, podcast_key="show")
+    assert {r.file_sha256 for r in refs} == {"a" * 64, "b" * 64}
