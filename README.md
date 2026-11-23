@@ -21,8 +21,8 @@
 - **Built-in filters & custom rules**: **Profanity** (**Light** / **Standard** / **Strict** levels, with per-podcast overrides), **Explicit Content**, and **Religious Exclamations** filters, plus your own custom words and regex rules. Smart matching catches compounds, words inside longer words, plurals, hyphenated forms, and asterisk-masked words (`f***`, `s**t`) while leaving similar everyday words and names alone.
 
 ### 📑 Auto-Generated Chapters, Transcripts & Summaries
-- **Jump straight to the topics you care about**: When paired with a Desktop or Cloud Worker, HushCast automatically breaks episodes into timestamped **Chapters**—even for podcasts that don't include chapters in their feed.
-- **Speaker-labeled transcripts & summaries**: Follow along with live-highlighted transcripts labeled by speaker (`Speaker 1`, `Speaker 2`, …), read AI-generated episode summaries, and search across analyzed episodes by meaning.
+- **Jump straight to the topics you care about**: HushCast automatically breaks episodes into timestamped **Chapters**—even for podcasts that don't include chapters in their feed—right on your phone (using embedding topic-shift boundaries + TF-IDF titles) or with natural LLM-written titles when paired with a Desktop or Cloud Worker.
+- **Speaker-labeled transcripts & summaries**: Follow along with live-highlighted transcripts, and when paired with a Desktop or Cloud Worker, unlock speaker labels (`Speaker 1`, `Speaker 2`, …), AI-generated episode summaries, and search across analyzed episodes by meaning.
 
 ### ⏭️ Skip Sponsor Reads Automatically—With a Safety Net
 - **Hands-free ad skipping**: HushCast detects host-read ads and sponsor segments and jumps right past them.
@@ -49,7 +49,7 @@ HushCast can analyze episodes in three ways. Switch anytime in **Settings → Hu
 | **Speed** | **Slowest** (~several minutes per hour of audio on phone CPU). | **Fast** (usually under a minute per episode on Apple Silicon or a desktop GPU). | **Fastest** once warm (tens of seconds on a cloud GPU; ~15–25s cold start if idle). |
 | **Phone battery & heat** | **Uses noticeable battery** and warms the phone during analysis (best left for overnight charging). | **Zero battery impact** on your phone—your computer does all the work. | **Zero battery impact** on your phone—the cloud GPU does all the work. |
 | **Word & ad accuracy** | **Good** for everyday English podcasts and sponsor skipping. | **Better / Best** (supports larger speech models and fewer missed words or cutoffs). | **Best** (uses the largest speech model by default). |
-| **Extra AI perks** | Word muting, ad skipping, and searchable transcript. | Adds **speaker labels**, **auto-generated chapters**, **episode summaries**, and **search by meaning**. | Adds **speaker labels**, **auto-generated chapters**, **episode summaries**, and **search by meaning**. |
+| **Extra AI perks** | Word muting, ad skipping, searchable transcript, and **auto-generated chapters** (topic-shift boundaries + TF-IDF titles). | Adds **LLM-titled chapters**, **speaker labels**, **episode summaries**, and **search by meaning**. | Adds **LLM-titled chapters**, **speaker labels**, **episode summaries**, and **search by meaning**. |
 | **Offline & privacy** | **100% private & offline.** Audio never leaves your phone. | **100% private on your home network.** Works over Wi-Fi without external cloud servers. | **Private to your own Modal account**, but requires internet and sends episode URLs to your Modal server. |
 | **Cost** | **Free.** | **Free** (uses your own computer). | **Free tier friendly** (uses Modal's ~$30/month free credit; scales to zero when idle). |
 
@@ -64,8 +64,9 @@ Under the hood, HushCast runs a two-stage pipeline so even mid-range phones stay
    - **On-device fallback**: Otherwise, `whisper.cpp` (with DTW word-level timestamps) and Silero VAD transcribe the audio into exact word start/end milliseconds.
    - **Real-time audio DSP**: During playback, a custom Media3 `AudioProcessor` applies 8ms cosine fade ramps (for Hard Silence / Duck / Bleep) or 12ms cosine crossfades (for Sample-Drop Micro-Skip) directly to the PCM audio stream.
 
-2. **Ad & Sponsor Detection**
+2. **Ad & Sponsor Detection + On-Device Chapters**
    - Once transcription finishes, Whisper is unloaded from RAM before loading `Qwen3-Embedding-0.6B` (`llama.cpp`) + `ad_tagger.onnx` sequentially. This detects host-read sponsor boundaries without spiking peak memory.
+   - Reusing those same sentence embeddings in memory (with zero extra model downloads), HushCast detects topic-shift chapter boundaries on non-ad segments and generates TF-IDF chapter titles in ~65–110 ms.
 
 3. **Desktop / Cloud Companion Worker (`desktop-worker`)**
    - **Zero-Drift DAI Sync**: Dynamic Ad Insertion (DAI) shifts timestamps between downloads. To prevent drift, the worker downloads the episode first, runs `whisper.cpp` (`large-v3-turbo` or `base.en`) + `Qwen3-Embedding-0.6B` + `ad_tagger.onnx`, and serves **both the exact audio bytes and the analysis bundle** keyed by `fileSha256` to your phone.

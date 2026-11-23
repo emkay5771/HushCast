@@ -7,6 +7,7 @@ import app.hushcast.automute.dsp.MuteActionMode
 import app.hushcast.automute.dsp.ReadinessBadge
 import app.hushcast.automute.engine.AnalysisThrottle
 import app.hushcast.automute.engine.AudioDecoder
+import app.hushcast.automute.engine.ChapterGenerator
 import app.hushcast.automute.engine.CpuTopology
 import app.hushcast.automute.engine.Decoder
 import app.hushcast.automute.engine.Embedder
@@ -28,6 +29,7 @@ import app.hushcast.automute.storage.BlobCodec
 import app.hushcast.automute.storage.effectiveRules
 import app.hushcast.automute.storage.EpisodeAnalysisStatusEntity
 import app.hushcast.automute.storage.EpisodeChunkCheckpointEntity
+import app.hushcast.automute.storage.EpisodeInsightsEntity
 import app.hushcast.automute.storage.EpisodeOffsetMapEntity
 import app.hushcast.automute.storage.EpisodeWordIndexEntity
 import app.hushcast.automute.storage.MuteSegmentEntity
@@ -546,9 +548,33 @@ class AutoMuteAnalyzer(
         setStage("Saving ad segments")
         dao.replaceAdSegmentsAndClearOtherHashes(episodeId, sha256, adEntities)
 
+        setStage("Generating chapters")
+        val chapterStartMs = System.currentTimeMillis()
+        val chapters = ChapterGenerator.generateChapters(
+            segments = segments,
+            embeddings = embeddings,
+            dim = Tagger.EMB_DIM,
+            adSegments = adEntities
+        )
+        val chapterGenMs = System.currentTimeMillis() - chapterStartMs
+        if (chapters.isNotEmpty()) {
+            val existingInsights = dao.getInsights(episodeId)
+            dao.upsertInsights(
+                EpisodeInsightsEntity(
+                    episodeId = episodeId,
+                    fileSha256 = sha256,
+                    summary = existingInsights?.summary,
+                    chaptersJson = json.encodeToString(chapters)
+                )
+            )
+        }
+
         val elapsed = System.currentTimeMillis() - startTime
         writeStatus(100, "Ready", ReadinessBadge.READY, force = true, durationMs = elapsed)
-        android.util.Log.i("HushCastPerf", "Analysis READY in ${elapsed}ms (words=${words.size}, mutes=$muteCount, ads=${adEntities.size})")
+        android.util.Log.i(
+            "HushCastPerf",
+            "Analysis READY in ${elapsed}ms (words=${words.size}, mutes=$muteCount, ads=${adEntities.size}, chapters=${chapters.size}, chapterGenMs=$chapterGenMs)"
+        )
 
         return AnalysisResult(sha256, ReadinessBadge.READY, words.size, muteCount, adEntities.size, peakRssMb, elapsed)
     }

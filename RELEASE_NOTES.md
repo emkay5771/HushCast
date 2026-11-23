@@ -1,3 +1,11 @@
+# HushCast v1.0.51-hushcast
+
+## What's New
+- **On-Device Auto-Generated Chapters**: When analyzing episodes on your phone (with ad detection enabled), HushCast now automatically generates timestamped topic-shift chapters with TF-IDF titles—even for podcasts that don't include chapters in their feed.
+- **Zero Extra Storage or RAM**: Reuses the `Qwen3-Embedding-0.6B` sentence embeddings already computed for ad detection, adding ~65–110 ms per 1-hour episode with no additional model downloads.
+
+---
+
 # HushCast v1.0.50-hushcast
 
 ## Fixes
