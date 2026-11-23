@@ -1321,6 +1321,7 @@ class LocalMlBackend:
                             pcm_16k,
                             file_sha256=file_sha256,
                             podcast_key=podcast_key,
+                            episode_id=episode_id,
                         )
 
                 t_fa = time.monotonic()
@@ -1406,6 +1407,7 @@ class LocalMlBackend:
                                 pcm_16k,
                                 file_sha256=file_sha256,
                                 podcast_key=podcast_key,
+                                episode_id=episode_id,
                             )
                         refs = fingerprint_store.load_references(
                             exclude_sha256=file_sha256,

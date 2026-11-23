@@ -109,3 +109,19 @@ def test_fingerprint_store_roundtrip_pruning_and_clear(tmp_path):
     cache = WorkerCache(tmp_path)
     cache.clear(audio_only=False)
     assert store.load_references(exclude_sha256="9" * 64, podcast_key="feed-1") == []
+
+
+def test_fingerprint_ignores_same_episode_dai_redownload():
+    body = _synth_segment(40.0, seed=808)
+    ep_dai_a = np.concatenate([_synth_segment(12.0, seed=801), body])
+    ep_dai_b = np.concatenate([_synth_segment(8.0, seed=802), body])
+
+    # Same episode_id with different file_sha256 (DAI ad shift) must be skipped.
+    fp_a = compute_fingerprint(ep_dai_a, file_sha256="1" * 64, podcast_key="show", episode_id="ep-2552")
+    fp_b = compute_fingerprint(ep_dai_b, file_sha256="2" * 64, podcast_key="show", episode_id="ep-2552")
+    assert find_repeated_segments(fp_b, [fp_a]) == []
+
+    # Even if episode_id is empty/mismatched (legacy cache), >35% full-episode match is rejected.
+    fp_a_legacy = compute_fingerprint(ep_dai_a, file_sha256="1" * 64, podcast_key="show", episode_id="")
+    fp_b_other = compute_fingerprint(ep_dai_b, file_sha256="2" * 64, podcast_key="show", episode_id="ep-2552")
+    assert find_repeated_segments(fp_b_other, [fp_a_legacy]) == []

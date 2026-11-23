@@ -22,9 +22,10 @@ FFT_SIZE = 2048
 NUM_BANDS = 17  # 16 energy-diff bits per frame
 MIN_RMS = 1e-3
 MIN_MATCH_FRAMES = 60  # 6.0 seconds
-MAX_HAMMING_DIST = 3
-MAX_GAP_FRAMES = 4
-MIN_ANCHOR_VOTES = 12
+MAX_HAMMING_DIST = 2
+MAX_GAP_FRAMES = 3
+MIN_MATCH_RATIO = 0.80
+MIN_ANCHOR_VOTES = 16
 
 
 def _build_band_edges(sample_rate: int = SAMPLE_RATE, fft_size: int = FFT_SIZE, n_bands: int = NUM_BANDS) -> np.ndarray:
@@ -50,6 +51,7 @@ class EpisodeFingerprint:
     duration_ms: int
     hashes: np.ndarray  # uint16[n_frames]
     active: np.ndarray  # bool[n_frames]
+    episode_id: str = ""
 
     def to_bytes(self) -> bytes:
         n = len(self.hashes)
@@ -59,7 +61,14 @@ class EpisodeFingerprint:
         return zlib.compress(payload, level=6)
 
     @classmethod
-    def from_bytes(cls, data: bytes, *, file_sha256: str, podcast_key: str) -> "EpisodeFingerprint":
+    def from_bytes(
+        cls,
+        data: bytes,
+        *,
+        file_sha256: str,
+        podcast_key: str,
+        episode_id: str = "",
+    ) -> "EpisodeFingerprint":
         raw = zlib.decompress(data)
         n = int.from_bytes(raw[0:4], "little")
         duration_ms = int.from_bytes(raw[4:12], "little")
@@ -73,6 +82,7 @@ class EpisodeFingerprint:
             duration_ms=duration_ms,
             hashes=hashes,
             active=active,
+            episode_id=episode_id,
         )
 
 
@@ -88,6 +98,7 @@ def compute_fingerprint(
     *,
     file_sha256: str = "",
     podcast_key: str = "",
+    episode_id: str = "",
     sample_rate: int = SAMPLE_RATE,
 ) -> EpisodeFingerprint:
     """Computes a compact 16-bit-per-100ms time-frequency energy-difference fingerprint."""
@@ -145,6 +156,7 @@ def compute_fingerprint(
         duration_ms=duration_ms,
         hashes=hashes,
         active=active,
+        episode_id=episode_id,
     )
 
 
@@ -202,7 +214,7 @@ def _verify_diagonal(
             # Require at least 75% active matched frames in the span
             active_in_span = int(np.sum(both_active[start : last_good + 1]))
             matched_in_span = int(np.sum(matched[start : last_good + 1]))
-            if active_in_span >= MIN_MATCH_FRAMES // 2 and matched_in_span >= 0.70 * length:
+            if active_in_span >= MIN_MATCH_FRAMES // 2 and matched_in_span >= MIN_MATCH_RATIO * length:
                 spans.append((q_lo + start, q_lo + last_good + 1))
         i = j + 1
     return spans
@@ -243,6 +255,8 @@ def find_repeated_segments(
     for ref in references:
         if ref.file_sha256 and ref.file_sha256 == query.file_sha256:
             continue
+        if query.episode_id and ref.episode_id and query.episode_id == ref.episode_id:
+            continue
         if len(ref.hashes) < MIN_MATCH_FRAMES:
             continue
 
@@ -277,6 +291,7 @@ def find_repeated_segments(
             reverse=True,
         )[:12]
 
+        ref_spans: list[tuple[int, int, str, str]] = []
         checked_offsets: set[int] = set()
         for _, bucket in candidates:
             for off in (bucket * 2, bucket * 2 + 1, bucket * 2 - 1):
@@ -295,7 +310,7 @@ def find_repeated_segments(
                     q_outro_margin = min(150_000, int(0.20 * query.duration_ms)) if query.duration_ms > 0 else 0
                     r_outro_margin = min(150_000, int(0.20 * ref.duration_ms)) if ref.duration_ms > 0 else 0
                     if same_show and start_ms <= q_intro_limit and r_start_ms <= r_intro_limit:
-                        raw_spans.append((start_ms, end_ms, "boilerplate", "Intro"))
+                        ref_spans.append((start_ms, end_ms, "boilerplate", "Intro"))
                     elif (
                         same_show
                         and query.duration_ms > 0
@@ -303,9 +318,17 @@ def find_repeated_segments(
                         and ref.duration_ms > 0
                         and r_end_ms >= ref.duration_ms - r_outro_margin
                     ):
-                        raw_spans.append((start_ms, end_ms, "boilerplate", "Outro"))
+                        ref_spans.append((start_ms, end_ms, "boilerplate", "Outro"))
                     else:
-                        raw_spans.append((start_ms, end_ms, "house_promo", "Recurring Promo"))
+                        ref_spans.append((start_ms, end_ms, "house_promo", "Recurring Promo"))
+
+        # Guard against matching a DAI-shifted re-download of the same episode.
+        if ref_spans:
+            matched_ms = sum(e - s for s, e, _, _ in ref_spans)
+            dup_limit_ms = 300_000 if query.duration_ms >= 600_000 else (int(0.35 * query.duration_ms) if query.duration_ms > 0 else 300_000)
+            if matched_ms > dup_limit_ms:
+                continue
+            raw_spans.extend(ref_spans)
 
     if not raw_spans:
         return []
@@ -415,6 +438,7 @@ class FingerprintStore:
             os.replace(tmp, path)
             self._index[fp.file_sha256] = {
                 "podcastKey": fp.podcast_key,
+                "episodeId": fp.episode_id,
                 "durationMs": fp.duration_ms,
                 "updatedAt": int(time.time()),
                 "file": path.name,
@@ -507,6 +531,7 @@ class FingerprintStore:
                         data,
                         file_sha256=sha,
                         podcast_key=str(meta.get("podcastKey") or ""),
+                        episode_id=str(meta.get("episodeId") or ""),
                     )
                 )
             except (OSError, ValueError, zlib.error):
