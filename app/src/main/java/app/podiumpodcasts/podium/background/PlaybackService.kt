@@ -479,17 +479,8 @@ class PlaybackService : MediaLibraryService() {
                         val extras = item.mediaMetadata.extras
                         val epId = extras?.getString(MediaMetadataExtra.EPISODE_ID.name)
                         val isAlreadyDownload = extras?.getBoolean(MediaMetadataExtra.IS_DOWNLOAD.name) ?: false
-                        if (epId == downloadedId && !isAlreadyDownload) {
-                            if (i == currentIdx) {
-                                val posMs = p.currentPosition.coerceAtLeast(0L)
-                                val wasPlaying = p.playWhenReady
-                                p.replaceMediaItem(i, localItem)
-                                p.seekTo(i, posMs)
-                                p.prepare()
-                                p.playWhenReady = wasPlaying
-                            } else {
-                                p.replaceMediaItem(i, localItem)
-                            }
+                        if (epId == downloadedId && !isAlreadyDownload && i != currentIdx) {
+                            p.replaceMediaItem(i, localItem)
                         }
                     }
                 }

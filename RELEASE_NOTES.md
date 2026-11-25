@@ -1,3 +1,10 @@
+# HushCast v1.0.52-hushcast
+
+## Fixes
+- **Keep playback position when episode processing finishes**: When an episode finishes downloading and processing while you are actively streaming it, HushCast no longer replaces the active stream mid-playback or jumps to a different timestamp—keeping the exact same moment while still applying your sponsor-skipping and word-muting settings.
+
+---
+
 # HushCast v1.0.51-hushcast
 
 ## What's New
