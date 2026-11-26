@@ -154,6 +154,8 @@ class PlaybackService : MediaLibraryService() {
 
     private val scheduledMessages = mutableListOf<PlayerMessage>()
     private var lastStartedEpisodeId: String? = null
+    @Volatile private var hasLoadedPlaylist: Boolean = false
+    private var persistQueueJob: Job? = null
     @Volatile private var intelligentPlaybackResumptionEnabled: Boolean = false
     private var lastPausedAtMs: Long = 0L
     private var lastPausedMediaId: String? = null
@@ -938,9 +940,29 @@ class PlaybackService : MediaLibraryService() {
     private fun getEpisodeId() = mediaSession?.player?.currentMediaItem?.getEpisodeId()
     private fun getAudioUrl() = mediaSession?.player?.currentMediaItem?.getAudioUrl()
 
+    private fun persistQueueFromPlayer() {
+        val p = mediaSession?.player ?: return
+        if (p.mediaItemCount > 0) {
+            hasLoadedPlaylist = true
+        }
+        if (!hasLoadedPlaylist) return
+        val currentIdx = p.currentMediaItemIndex
+        val upNext = if (p.mediaItemCount > 0 && currentIdx >= 0) {
+            (currentIdx + 1 until p.mediaItemCount).mapNotNull { p.getMediaItemAt(it).getEpisodeId() }
+        } else {
+            emptyList()
+        }
+        persistQueueJob?.cancel()
+        persistQueueJob = scope.launch(Dispatchers.IO) {
+            db.playbackQueue().replaceQueue(upNext)
+        }
+    }
+
     private fun onEpisodeStarted(mediaItem: MediaItem?) {
         val origin = mediaItem?.getOrigin() ?: return
         val episodeId = mediaItem.getEpisodeId() ?: return
+
+        PlaybackStatePrefs.saveLastPlayingEpisodeId(this, episodeId)
 
         mediaItem.getResumeAt()?.let { resumeAt ->
             mediaSession?.player?.seekTo(resumeAt)
@@ -954,6 +976,11 @@ class PlaybackService : MediaLibraryService() {
 
         val player = mediaSession?.player
         scope.launch(Dispatchers.IO) {
+            val episode = db.podcastEpisodes().getSyncNullable(episodeId)?.episode
+            if (episode != null && episode.new) {
+                db.podcastEpisodes().unnewAndUpdateNewEpisodesCount(origin, episodeId)
+            }
+
             val podcast = db.podcasts().getSync(origin)
             currentSkipEndingValue = podcast?.skipEnding ?: 0
 
@@ -981,6 +1008,9 @@ class PlaybackService : MediaLibraryService() {
     private fun registerPlayStateListener() {
         mediaSession?.player?.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                currentPlayerEpisodeId = mediaItem?.getEpisodeId()
+                PlaybackStatePrefs.saveLastPlayingEpisodeId(this@PlaybackService, currentPlayerEpisodeId)
+                persistQueueFromPlayer()
                 HushCastEngineBridge.clearPendingUndo()
                 speedItemKey.value = SpeedItemKey(mediaItem?.getOrigin(), mediaItem?.getEpisodeId())
                 onEpisodeStarted(mediaItem)
@@ -988,6 +1018,12 @@ class PlaybackService : MediaLibraryService() {
                     onUpdateNotification(session, session.player.playWhenReady)
                 }
                 super.onMediaItemTransition(mediaItem, reason)
+            }
+
+            override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+                currentPlayerEpisodeId = mediaSession?.player?.currentMediaItem?.getEpisodeId()
+                persistQueueFromPlayer()
+                super.onTimelineChanged(timeline, reason)
             }
 
             override fun onPositionDiscontinuity(
@@ -1037,6 +1073,9 @@ class PlaybackService : MediaLibraryService() {
                     if (dur > 1000L && epId != null) {
                         scope.launch(Dispatchers.IO) {
                             db.podcastEpisodes().updateDuration(epId, (dur / 1000L).toInt())
+                        }
+                        if (exoPlayer.playWhenReady) {
+                            updatePlayState()
                         }
                     }
                     checkActiveSkipsNow()
@@ -1089,6 +1128,7 @@ class PlaybackService : MediaLibraryService() {
                         }
                     }
                     lastPausedAtMs = 0L
+                    updatePlayState()
                     enqueueUpdatePlayState()
                     checkActiveSkipsNow()
                 } else {

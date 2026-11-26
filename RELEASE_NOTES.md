@@ -1,3 +1,10 @@
+# HushCast v1.0.53-hushcast
+
+## Fixes
+- **Sync Android Auto playback and queue with the phone app**: Playing, auto-advancing, or modifying the queue from Android Auto now persists the updated Up Next queue, updates the currently playing episode and play state immediately, and keeps the phone app's player and queue in sync even when opened after Android Auto playback ends.
+
+---
+
 # HushCast v1.0.52-hushcast
 
 ## Fixes

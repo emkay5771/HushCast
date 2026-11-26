@@ -152,16 +152,11 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
 
     private fun saveLastPlayingEpisodeId(episodeId: String?) {
         val ctx = appContext ?: return
-        if (episodeId.isNullOrBlank()) return
-        ctx.getSharedPreferences("hushcast_playback_state", Context.MODE_PRIVATE)
-            .edit()
-            .putString("last_playing_episode_id", episodeId)
-            .apply()
+        app.podiumpodcasts.podium.background.PlaybackStatePrefs.saveLastPlayingEpisodeId(ctx, episodeId)
     }
 
     private fun loadLastPlayingEpisodeId(context: Context): String? {
-        return context.getSharedPreferences("hushcast_playback_state", Context.MODE_PRIVATE)
-            .getString("last_playing_episode_id", null)
+        return app.podiumpodcasts.podium.background.PlaybackStatePrefs.loadLastPlayingEpisodeId(context)
     }
 
     val canResumeCurrentEpisode: Boolean
@@ -907,6 +902,32 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
             super.onSeekForwardIncrementChanged(seekForwardIncrementMs)
         }
 
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            val controller = mediaController
+            val meta = mediaItem?.mediaMetadata ?: controller?.mediaMetadata
+            this@MediaPlayerViewModel.mediaMetadata = meta
+            this@MediaPlayerViewModel.metadataOrigin = mediaItem?.getOrigin() ?: meta?.getOrigin()
+            this@MediaPlayerViewModel.metadataEpisodeId = mediaItem?.getEpisodeId() ?: meta?.getEpisodeId()
+            this@MediaPlayerViewModel.metadataImageSeedColor = mediaItem?.getImageSeedColor() ?: meta?.getImageSeedColor()
+            saveLastPlayingEpisodeId(this@MediaPlayerViewModel.metadataEpisodeId)
+
+            this@MediaPlayerViewModel.mediaSourceType = when {
+                mediaItem == null && meta == null -> SourceTypeState.Unknown
+                (mediaItem?.isDownload() ?: meta?.isDownload()) == true -> SourceTypeState.Downloaded
+                else -> SourceTypeState.Streaming
+            }
+            this@MediaPlayerViewModel.isPlayerVisible = (controller?.mediaItemCount ?: 0) > 0 || playbackState != Player.STATE_IDLE
+
+            syncQueue(persist = false)
+            super.onMediaItemTransition(mediaItem, reason)
+        }
+
+        override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+            this@MediaPlayerViewModel.isPlayerVisible = (mediaController?.mediaItemCount ?: 0) > 0 || playbackState != Player.STATE_IDLE
+            syncQueue(persist = false)
+            super.onTimelineChanged(timeline, reason)
+        }
+
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
             this@MediaPlayerViewModel.mediaMetadata = mediaMetadata
             this@MediaPlayerViewModel.metadataOrigin = mediaMetadata.getOrigin()
@@ -920,7 +941,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
                 SourceTypeState.Streaming
             }
 
-            syncQueue()
+            syncQueue(persist = false)
             super.onMediaMetadataChanged(mediaMetadata)
         }
 
@@ -962,7 +983,8 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         this@MediaPlayerViewModel.isLoading = mediaController.isLoading
 
         this@MediaPlayerViewModel.mediaMetadata = mediaController.mediaMetadata
-        mediaController.currentMediaItem?.let { mediaItem ->
+        val mediaItem = mediaController.currentMediaItem
+        if (mediaItem != null) {
             this@MediaPlayerViewModel.metadataOrigin = mediaItem.getOrigin()
             this@MediaPlayerViewModel.metadataEpisodeId = mediaItem.getEpisodeId()
             this@MediaPlayerViewModel.metadataImageSeedColor = mediaItem.getImageSeedColor()
@@ -971,6 +993,12 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
             } else {
                 SourceTypeState.Streaming
             }
+            saveLastPlayingEpisodeId(this@MediaPlayerViewModel.metadataEpisodeId)
+        } else {
+            this@MediaPlayerViewModel.metadataOrigin = null
+            this@MediaPlayerViewModel.metadataEpisodeId = null
+            this@MediaPlayerViewModel.metadataImageSeedColor = null
+            this@MediaPlayerViewModel.mediaSourceType = SourceTypeState.Unknown
         }
 
         applySleepTimerExtras(mediaController.sessionExtras)
@@ -978,7 +1006,7 @@ class MediaPlayerViewModel(application: Application) : AndroidViewModel(applicat
         this@MediaPlayerViewModel.playbackState = mediaController.playbackState
         this@MediaPlayerViewModel.isPlayerVisible = mediaController.mediaItemCount > 0 || mediaController.playbackState != Player.STATE_IDLE
 
-        syncQueue()
+        syncQueue(persist = false)
 
         mediaController.addListener(listener)
 
